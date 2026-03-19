@@ -94,7 +94,8 @@ export default defineConfig({
       { icon: "github", link: "https://github.com/cytostack/openwolf" },
     ],
     footer: {
-      message: "AGPL-3.0 | Copyright 2026 Cytostack Pvt Ltd",
+      message: 'AGPL-3.0 · Made by <a href="https://github.com/cytostack" target="_blank">Cytostack</a>',
+      copyright: 'Copyright 2026 Cytostack Pvt Ltd',
     },
     search: {
       provider: "local",

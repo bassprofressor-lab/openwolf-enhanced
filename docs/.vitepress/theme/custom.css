@@ -89,9 +89,13 @@
   border-bottom-color: var(--ow-border) !important;
 }
 
-/* Hide VitePress default home hero/features */
+/* Hide VitePress default home hero/features/footer */
 .VPHome .VPHero,
 .VPHome .VPFeatures {
+  display: none !important;
+}
+.VPContent.is-home + .VPFooter,
+.is-home ~ .VPFooter {
   display: none !important;
 }
 
@@ -108,7 +112,7 @@
 .VPButton.brand {
   background: var(--ow-accent) !important;
   border-color: var(--ow-accent) !important;
-  color: #0c0e14 !important;
+  color: #0a0c12 !important;
   font-weight: 600 !important;
 }
 .VPButton.brand:hover {

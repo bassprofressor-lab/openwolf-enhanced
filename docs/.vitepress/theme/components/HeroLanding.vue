@@ -134,7 +134,7 @@ const archFiles = [
 
             <div class="ow-hero__actions">
               <a href="/getting-started" class="ow-btn ow-btn--primary">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                 Get Started
               </a>
               <a href="/how-it-works" class="ow-btn ow-btn--ghost">
@@ -306,14 +306,14 @@ const archFiles = [
     <!-- ============================================================ -->
     <!-- CTA                                                          -->
     <!-- ============================================================ -->
-    <section class="ow-section ow-section--alt ow-cta">
+    <section class="ow-section ow-cta">
       <div class="ow-container ow-container--narrow reveal">
         <h2 class="ow-heading" style="text-align: center">Start saving tokens today</h2>
         <p class="ow-subheading" style="text-align: center">One command to install. One command to initialize. Then it's invisible.</p>
 
         <div class="ow-cta__actions">
           <a href="/getting-started" class="ow-btn ow-btn--primary ow-btn--lg">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0a0c12" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             Get Started
           </a>
           <a href="https://github.com/cytostack/openwolf" target="_blank" class="ow-btn ow-btn--ghost ow-btn--lg">
@@ -321,10 +321,55 @@ const archFiles = [
             GitHub
           </a>
         </div>
-
-        <p class="ow-cta__legal">AGPL-3.0 · Copyright 2026 Cytostack Pvt Ltd</p>
       </div>
     </section>
+
+    <!-- ============================================================ -->
+    <!-- FOOTER                                                       -->
+    <!-- ============================================================ -->
+    <footer class="ow-footer">
+      <div class="ow-container">
+        <div class="ow-footer__grid">
+
+          <div class="ow-footer__brand">
+            <div class="ow-footer__logo">
+              <img src="/wolf.svg" alt="OpenWolf" width="24" height="24" />
+              <span class="ow-footer__name">OpenWolf</span>
+            </div>
+            <p class="ow-footer__tagline">Token-conscious AI brain for Claude Code. Built by <a href="https://github.com/cytostack" target="_blank" class="ow-footer__link">Cytostack</a>.</p>
+          </div>
+
+          <div class="ow-footer__col">
+            <h4 class="ow-footer__col-title">Product</h4>
+            <a href="/getting-started" class="ow-footer__link">Getting Started</a>
+            <a href="/how-it-works" class="ow-footer__link">How It Works</a>
+            <a href="/commands" class="ow-footer__link">Commands</a>
+            <a href="/dashboard" class="ow-footer__link">Dashboard</a>
+          </div>
+
+          <div class="ow-footer__col">
+            <h4 class="ow-footer__col-title">Features</h4>
+            <a href="/hooks" class="ow-footer__link">Hooks</a>
+            <a href="/designqc" class="ow-footer__link">Design QC</a>
+            <a href="/reframe" class="ow-footer__link">Reframe</a>
+            <a href="/configuration" class="ow-footer__link">Configuration</a>
+          </div>
+
+          <div class="ow-footer__col">
+            <h4 class="ow-footer__col-title">Community</h4>
+            <a href="https://github.com/cytostack/openwolf" target="_blank" class="ow-footer__link">GitHub</a>
+            <a href="https://github.com/cytostack/openwolf/issues" target="_blank" class="ow-footer__link">Report a Bug</a>
+            <a href="https://www.npmjs.com/package/openwolf" target="_blank" class="ow-footer__link">npm</a>
+          </div>
+
+        </div>
+
+        <div class="ow-footer__bottom">
+          <p>AGPL-3.0 · Copyright 2026 Cytostack Pvt Ltd</p>
+          <p>Node.js 20+ · Windows, macOS, Linux</p>
+        </div>
+      </div>
+    </footer>
 
   </div>
 </template>
@@ -357,7 +402,7 @@ const archFiles = [
 .ow-section--alt { background: var(--ow-bg-surface); }
 
 /* ---- Section header ---- */
-.ow-section__header { text-align: center; margin-bottom: 56px; }
+.ow-section__header { text-align: center !important; margin-bottom: 56px; }
 .ow-label {
   display: inline-block;
   font-size: 11px;
@@ -379,6 +424,7 @@ const archFiles = [
   letter-spacing: -0.03em;
   line-height: 1.15;
   color: var(--ow-text-primary);
+  text-align: center;
 }
 .ow-heading__code {
   font-family: "JetBrains Mono", monospace;
@@ -392,6 +438,7 @@ const archFiles = [
   max-width: 520px;
   margin-left: auto;
   margin-right: auto;
+  text-align: center;
 }
 
 /* ================================================================
@@ -587,7 +634,7 @@ const archFiles = [
 }
 .ow-btn--primary {
   background: var(--ow-accent);
-  color: #0c0e14;
+  color: #0a0c12 !important;
   box-shadow: 0 4px 14px var(--ow-accent-glow);
 }
 .ow-btn--primary:hover {
@@ -933,12 +980,80 @@ const archFiles = [
   justify-content: center;
   gap: 12px;
   margin-top: 36px;
-  margin-bottom: 48px;
 }
-.ow-cta__legal {
-  text-align: center;
+
+/* ================================================================
+   FOOTER
+   ================================================================ */
+.ow-footer {
+  background: var(--ow-bg-surface);
+  border-top: 1px solid var(--ow-border);
+  padding: 56px 0 40px;
+}
+.ow-footer__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 36px;
+}
+@media (min-width: 640px) {
+  .ow-footer__grid {
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 40px;
+  }
+}
+.ow-footer__brand { max-width: 280px; }
+.ow-footer__logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ow-footer__name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ow-text-primary);
+  letter-spacing: -0.02em;
+}
+.ow-footer__tagline {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ow-text-muted);
+}
+.ow-footer__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ow-footer__col-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ow-text-secondary);
+  margin-bottom: 4px;
+}
+.ow-footer__link {
+  font-size: 13px;
+  color: var(--ow-text-muted) !important;
+  text-decoration: none !important;
+  transition: color 0.2s;
+}
+.ow-footer__link:hover {
+  color: var(--ow-accent) !important;
+}
+.ow-footer__bottom {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--ow-border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ow-footer__bottom p {
   font-size: 12px;
   color: var(--ow-text-faint);
+  margin: 0;
 }
 
 /* ================================================================
