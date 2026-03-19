@@ -49,8 +49,8 @@ const features = [
   },
   {
     icon: "bolt",
-    title: "Zero Extra AI Cost",
-    desc: "All hooks are pure Node.js file I/O. No API calls during normal operation. Optional weekly AI tasks use your existing Claude subscription.",
+    title: "No API Calls",
+    desc: "All hooks are pure Node.js file I/O running locally. No network requests, no external services during normal operation. Optional scheduled tasks use your existing Claude subscription.",
     accent: "#fbbf24",
   },
   {
@@ -112,24 +112,13 @@ const archFiles = [
 
           <!-- Left -->
           <div class="ow-hero__copy">
-            <div class="ow-hero__badge">
-              <span class="ow-hero__badge-dot">
-                <span class="ow-hero__badge-ping"></span>
-                <span class="ow-hero__badge-core"></span>
-              </span>
-              v1.0.0 · Open Source
-            </div>
-
             <h1 class="ow-hero__title">
-              Token-Conscious
-              <span class="ow-hero__title-accent">AI Brain</span>
-              <span class="ow-hero__title-sub">for Claude Code</span>
+              Sharper context.
+              <span class="ow-hero__title-accent">Fewer tokens.</span>
             </h1>
 
             <p class="ow-hero__desc">
-              Invisible middleware that makes every Claude&nbsp;Code session smarter.
-              Anatomy tracking, learning memory, design&nbsp;QC.
-              <strong>Zero extra AI cost.</strong>
+              OpenWolf is open-source middleware for Claude&nbsp;Code. It remembers your preferences, catches repeated mistakes, and tracks every token. You change nothing about your workflow.
             </p>
 
             <div class="ow-hero__actions">
@@ -589,14 +578,6 @@ const archFiles = [
 .ow-hero__title-accent {
   display: block;
   color: var(--ow-accent);
-}
-.ow-hero__title-sub {
-  display: block;
-  font-size: 0.42em;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--ow-text-muted);
-  margin-top: 4px;
 }
 
 .ow-hero__desc {
