@@ -76,7 +76,7 @@ export function Sidebar({ activePanel, onNavigate, daemonStatus, projectName, th
             Token-conscious AI project brain for Claude Code.
           </p>
           <div className="flex items-center justify-between">
-            <a href="https://openwolf.com/docs" target="_blank" rel="noopener noreferrer"
+            <a href="https://openwolf.com" target="_blank" rel="noopener noreferrer"
               className="text-xs underline transition-colors"
               style={{ color: "var(--accent)" }}
             >Docs</a>

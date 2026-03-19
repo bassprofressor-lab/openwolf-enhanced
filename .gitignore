@@ -28,8 +28,9 @@ npm-debug.log*
 .claude/
 CLAUDE.md
 
-# Documentation (hosted separately)
-docs/
+# VitePress build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 
 # OpenWolf runtime (project-specific)
 .wolf/
