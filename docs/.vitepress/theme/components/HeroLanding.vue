@@ -172,9 +172,40 @@ const archFiles = [
     </section>
 
     <!-- ============================================================ -->
+    <!-- WHY OPENWOLF                                                 -->
+    <!-- ============================================================ -->
+    <section class="ow-section ow-section--alt ow-why">
+      <div class="ow-container ow-container--narrow">
+        <div class="ow-why__content reveal">
+          <h2 class="ow-why__title">Most Claude Code users hit their limits faster than expected.</h2>
+          <p class="ow-why__text">
+            The reason: Claude re-reads files it already saw, forgets corrections between sessions, and scans entire directories when a summary would do. There is no built-in way to see where your tokens go or why they're being spent.
+          </p>
+          <p class="ow-why__text">
+            OpenWolf fixes the visibility problem. It tracks every token, remembers across sessions, and gives Claude the context it needs without redundant reads.
+          </p>
+          <div class="ow-why__stats">
+            <div class="ow-why__stat">
+              <span class="ow-why__stat-num">65.8%</span>
+              <span class="ow-why__stat-label">average token reduction</span>
+            </div>
+            <div class="ow-why__stat">
+              <span class="ow-why__stat-num">71%</span>
+              <span class="ow-why__stat-label">repeated reads caught</span>
+            </div>
+            <div class="ow-why__stat">
+              <span class="ow-why__stat-num">132+</span>
+              <span class="ow-why__stat-label">sessions tested</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
     <!-- FEATURES                                                     -->
     <!-- ============================================================ -->
-    <section class="ow-section ow-section--alt">
+    <section class="ow-section">
       <div class="ow-container">
         <div class="ow-section__header reveal">
           <span class="ow-label">Features</span>
@@ -755,6 +786,55 @@ const archFiles = [
   0%, 20%, 50%, 80%, 100% { transform: translateX(-50%) translateY(0); }
   40% { transform: translateX(-50%) translateY(-8px); }
   60% { transform: translateX(-50%) translateY(-4px); }
+}
+
+/* ================================================================
+   WHY OPENWOLF
+   ================================================================ */
+.ow-why__content {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.ow-why__title {
+  font-size: clamp(1.5rem, 3.5vw, 2rem) !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: var(--ow-text-primary);
+  margin-bottom: 24px !important;
+  text-align: left !important;
+}
+.ow-why__text {
+  font-size: 1.05rem !important;
+  line-height: 1.7 !important;
+  color: var(--ow-text-secondary) !important;
+  margin-bottom: 16px !important;
+  text-align: left !important;
+}
+.ow-why__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  margin-top: 36px;
+  padding-top: 32px;
+  border-top: 1px solid var(--ow-border);
+}
+.ow-why__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ow-why__stat-num {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ow-accent);
+  line-height: 1;
+}
+.ow-why__stat-label {
+  font-size: 13px;
+  color: var(--ow-text-muted);
+  letter-spacing: 0.01em;
 }
 
 /* ================================================================

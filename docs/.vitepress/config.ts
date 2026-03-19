@@ -4,9 +4,10 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   title: "OpenWolf",
   description:
-    "Token-conscious AI brain for Claude Code. Invisible middleware that saves tokens, learns preferences, and prevents mistakes.",
+    "Open-source middleware for Claude Code that tracks tokens, remembers preferences, and catches repeated mistakes. 65% average token reduction across 132+ sessions.",
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/wolf.svg" }],
+    ["link", { rel: "canonical", href: "https://openwolf.com" }],
     [
       "link",
       {
@@ -29,11 +30,15 @@ export default defineConfig({
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap",
       },
     ],
+    // Open Graph
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:url", content: "https://openwolf.com" }],
+    ["meta", { property: "og:site_name", content: "OpenWolf" }],
     [
       "meta",
       {
         property: "og:title",
-        content: "OpenWolf: Token-Conscious AI Brain for Claude Code",
+        content: "OpenWolf: Sharper Context, Fewer Tokens for Claude Code",
       },
     ],
     [
@@ -41,7 +46,34 @@ export default defineConfig({
       {
         property: "og:description",
         content:
-          "Invisible middleware that makes Claude Code smarter. No API calls required.",
+          "Open-source middleware that tracks every token, remembers your preferences across sessions, and catches repeated mistakes. 65% average token reduction.",
+      },
+    ],
+    // Twitter Card
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    [
+      "meta",
+      {
+        name: "twitter:title",
+        content: "OpenWolf: Sharper Context, Fewer Tokens for Claude Code",
+      },
+    ],
+    [
+      "meta",
+      {
+        name: "twitter:description",
+        content:
+          "Open-source middleware that tracks every token, remembers your preferences across sessions, and catches repeated mistakes. 65% average token reduction.",
+      },
+    ],
+    // Additional SEO
+    ["meta", { name: "author", content: "Dr. Farhan Palathinkal, Cytostack" }],
+    [
+      "meta",
+      {
+        name: "keywords",
+        content:
+          "claude code, token tracking, context management, ai middleware, claude code hooks, token optimization, open source, developer tools",
       },
     ],
   ],

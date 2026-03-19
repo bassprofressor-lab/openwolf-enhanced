@@ -6,9 +6,13 @@
 **Persistent memory, token tracking, and context management for Claude Code.**
 _Your Claude subscription shouldn't empty itself in a week._
 
-## The Problem
+## Why OpenWolf Exists
 
-Claude Code reads the same file three times in one session and doesn't notice. It forgets the correction you gave it yesterday. It loads your entire codebase to find one function. When the session ends, everything it learned - your naming conventions, the bug it just fixed, the architecture decision you explained - vanishes. Next session, it starts from zero. And you have no idea where your tokens went.
+Most Claude Code users hit their subscription limits faster than expected. The reason: Claude re-reads files it already saw, forgets corrections between sessions, and scans entire directories when a summary would do. There is no built-in way to see where tokens go or why they're being spent.
+
+Claude Code reads the same file three times in one session and doesn't notice. It forgets the correction you gave it yesterday. It loads your entire codebase to find one function. When the session ends, everything it learned, your naming conventions, the bug it just fixed, the architecture decision you explained, vanishes. Next session, it starts from zero. And you have no idea where your tokens went.
+
+OpenWolf fixes the visibility problem. It tracks every token, remembers across sessions, and gives Claude the context it needs without redundant reads.
 
 ## What OpenWolf Does
 
