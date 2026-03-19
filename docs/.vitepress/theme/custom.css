@@ -124,6 +124,12 @@
   border-radius: 12px;
 }
 
+/* Tint wolf logo to match accent green */
+.VPNavBarTitle .logo,
+.ow-footer__logo img {
+  filter: sepia(1) saturate(5) hue-rotate(110deg) brightness(0.9);
+}
+
 html {
   scroll-behavior: smooth;
 }
