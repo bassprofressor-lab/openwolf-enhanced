@@ -336,7 +336,7 @@ const archFiles = [
               <img src="/wolf.svg" alt="OpenWolf" width="24" height="24" />
               <span class="ow-footer__name">OpenWolf</span>
             </div>
-            <p class="ow-footer__tagline">Token-conscious AI brain for Claude Code. Built by <a href="https://github.com/cytostack" target="_blank" class="ow-footer__link">Cytostack</a>.</p>
+            <p class="ow-footer__tagline">Token-conscious AI brain for Claude Code.<br />Created by Dr. Farhan at <a href="https://github.com/cytostack" target="_blank" class="ow-footer__link">Cytostack</a>.</p>
           </div>
 
           <div class="ow-footer__col">
@@ -403,6 +403,8 @@ const archFiles = [
 
 /* ---- Section header ---- */
 .ow-section__header { text-align: center !important; margin-bottom: 56px; }
+.ow-section__header * { text-align: center !important; }
+.ow-section__header p { text-align: center !important; }
 .ow-label {
   display: inline-block;
   font-size: 11px;
@@ -431,14 +433,14 @@ const archFiles = [
   color: var(--ow-accent);
 }
 .ow-subheading {
-  margin-top: 16px;
-  font-size: 1.05rem;
-  line-height: 1.65;
-  color: var(--ow-text-secondary);
-  max-width: 520px;
-  margin-left: auto;
-  margin-right: auto;
-  text-align: center;
+  margin-top: 16px !important;
+  font-size: 1.05rem !important;
+  line-height: 1.65 !important;
+  color: var(--ow-text-secondary) !important;
+  max-width: 520px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
 }
 
 /* ================================================================
