@@ -37,7 +37,7 @@ You'll see:
   ✓ Anatomy scan: 47 files indexed
   ✓ Daemon: start manually with: openwolf daemon start
 
-  You're ready. Just use 'claude' as normal — OpenWolf is watching.
+  You're ready. Just use 'claude' as normal. OpenWolf is watching.
 ```
 
 That's it. No configuration needed. Just use `claude` as you normally would.

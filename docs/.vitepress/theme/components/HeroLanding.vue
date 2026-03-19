@@ -38,7 +38,7 @@ const features = [
   {
     icon: "lightbulb",
     title: "Invisible Enforcement",
-    desc: "You type claude and work normally. Hooks fire automatically — tracking tokens, updating project maps, enforcing learned preferences.",
+    desc: "You type claude and work normally. Hooks fire automatically, tracking tokens, updating project maps, enforcing learned preferences.",
     accent: "var(--ow-accent)",
   },
   {
@@ -62,13 +62,13 @@ const features = [
   {
     icon: "eye",
     title: "Design QC",
-    desc: "Capture full-page sectioned screenshots with one command. Claude evaluates the design inline — no external services, no extra cost.",
+    desc: "Capture full-page sectioned screenshots with one command. Claude evaluates the design inline. No external services, no extra cost.",
     accent: "#fb923c",
   },
   {
     icon: "grid",
     title: "Reframe",
-    desc: "Ask Claude to help pick a UI framework. Built-in knowledge base covers 12 component libraries — from shadcn/ui to Aceternity UI to DaisyUI.",
+    desc: "Ask Claude to help pick a UI framework. Built-in knowledge base covers 12 component libraries, from shadcn/ui to Aceternity UI to DaisyUI.",
     accent: "#38bdf8",
   },
 ];
@@ -158,7 +158,7 @@ const archFiles = [
                 <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Claude Code hooks registered (6 hooks)</div>
                 <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> CLAUDE.md updated</div>
                 <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Anatomy scan: 47 files indexed</div>
-                <div class="ow-terminal__line ow-terminal__line--hint">You're ready. Just use <span class="ow-terminal__hl">'claude'</span> as normal — OpenWolf is watching.</div>
+                <div class="ow-terminal__line ow-terminal__line--hint">You're ready. Just use <span class="ow-terminal__hl">'claude'</span> as normal. OpenWolf is watching.</div>
               </div>
             </div>
           </div>
@@ -231,7 +231,7 @@ const archFiles = [
             <div class="ow-step__num">02</div>
             <div class="ow-step__content">
               <h3 class="ow-step__title">Work Normally</h3>
-              <p class="ow-step__desc">Just use <code>claude</code> as you always do. Hooks fire invisibly — tracking, learning, enforcing. You don't interact with any of it.</p>
+              <p class="ow-step__desc">Just use <code>claude</code> as you always do. Hooks fire invisibly, tracking, learning, enforcing. You don't interact with any of it.</p>
               <div class="ow-step__cmd"><span class="ow-step__ps">$</span> claude</div>
             </div>
           </div>
@@ -278,7 +278,7 @@ const archFiles = [
         <div class="ow-section__header reveal">
           <span class="ow-label ow-label--warn">Hooks</span>
           <h2 class="ow-heading">The enforcement layer</h2>
-          <p class="ow-subheading">Six hooks fire on every Claude action. They warn but never block. Pure Node.js — no network, no AI, no extra cost.</p>
+          <p class="ow-subheading">Six hooks fire on every Claude action. They warn but never block. Pure Node.js. No network, no AI, no extra cost.</p>
         </div>
 
         <div class="ow-hooks reveal">
@@ -365,7 +365,7 @@ const archFiles = [
 
 <style>
 /* ================================================================
-   OPENWOLF LANDING — CUSTOM CSS (no DaisyUI dependency)
+   OPENWOLF LANDING: CUSTOM CSS (no DaisyUI dependency)
    Works with VitePress light/dark via CSS custom properties
    ================================================================ */
 

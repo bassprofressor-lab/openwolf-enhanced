@@ -1,4 +1,4 @@
-/* ===== OpenWolf — Precision Dark Interface ===== */
+/* ===== OpenWolf: Precision Dark Interface ===== */
 
 /* ---- Light mode ---- */
 :root {
@@ -19,7 +19,7 @@
   --vp-font-family-base: "Inter", system-ui, -apple-system, sans-serif;
   --vp-font-family-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
 
-  /* OpenWolf tokens — light */
+  /* OpenWolf tokens: light */
   --ow-bg-deep: #f6f7f9;
   --ow-bg-surface: #ffffff;
   --ow-bg-elevated: #ffffff;

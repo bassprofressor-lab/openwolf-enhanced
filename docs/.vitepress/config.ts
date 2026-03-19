@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   title: "OpenWolf",
   description:
-    "Token-conscious AI brain for Claude Code — invisible middleware that saves tokens, learns preferences, and prevents mistakes",
+    "Token-conscious AI brain for Claude Code. Invisible middleware that saves tokens, learns preferences, and prevents mistakes.",
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/wolf.svg" }],
     [
@@ -33,7 +33,7 @@ export default defineConfig({
       "meta",
       {
         property: "og:title",
-        content: "OpenWolf — Token-Conscious AI Brain for Claude Code",
+        content: "OpenWolf: Token-Conscious AI Brain for Claude Code",
       },
     ],
     [
@@ -41,7 +41,7 @@ export default defineConfig({
       {
         property: "og:description",
         content:
-          "Invisible middleware that makes Claude Code smarter. Zero extra AI cost.",
+          "Invisible middleware that makes Claude Code smarter. No API calls required.",
       },
     ],
   ],

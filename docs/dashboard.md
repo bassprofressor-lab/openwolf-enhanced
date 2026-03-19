@@ -21,10 +21,10 @@ The dashboard has 10 panels, accessible from the sidebar.
 ### Overview
 
 The home screen. Shows:
-- **Project name and description** — detected from `package.json`, `Cargo.toml`, README, or `cerebrum.md`
-- **Daemon status** — green pulsing indicator when healthy
-- **Stat cards** — files tracked, total sessions, estimated tokens saved
-- **Recent activity** — last 5 entries from `memory.md`
+- **Project name and description**: detected from `package.json`, `Cargo.toml`, README, or `cerebrum.md`
+- **Daemon status**: green pulsing indicator when healthy
+- **Stat cards**: files tracked, total sessions, estimated tokens saved
+- **Recent activity**: last 5 entries from `memory.md`
 
 ### Activity Timeline
 
@@ -36,28 +36,28 @@ Chronological log of everything Claude has done. Each action is a card with time
 
 Two charts and waste alerts:
 
-- **Usage Over Time** — area chart showing input (reads) and output (writes) tokens per session
-- **Token Comparison** — horizontal bar chart comparing:
-  - **Without OpenWolf** (estimated overhead — uses more tokens)
-  - **With OpenWolf** (actual — the savings)
-- **Waste Alerts** — flagged patterns like repeated reads, unnecessary full-file reads, memory bloat
+- **Usage Over Time**: area chart showing input (reads) and output (writes) tokens per session
+- **Token Comparison**: horizontal bar chart comparing:
+  - **Without OpenWolf** (estimated overhead, uses more tokens)
+  - **With OpenWolf** (actual, the savings)
+- **Waste Alerts**: flagged patterns like repeated reads, unnecessary full-file reads, memory bloat
 
 ### Cron Control Center
 
 Table of all scheduled tasks showing status, schedule (human-readable), last run, and next run. Each row has a **Run Now** button.
 
 Below the table:
-- **Dead Letter Queue** — failed tasks with error details and **Retry** buttons
-- **Execution History** — last 30 runs with duration and status
+- **Dead Letter Queue**: failed tasks with error details and **Retry** buttons
+- **Execution History**: last 30 runs with duration and status
 
 ### Cerebrum Viewer
 
 Structured view of `cerebrum.md`:
 
-- **Do-Not-Repeat** — prominent red-tinted cards with date badges (most important section)
-- **User Preferences** — bullet list
-- **Key Learnings** — card per learning
-- **Decision Log** — collapsible cards with rationale
+- **Do-Not-Repeat**: prominent red-tinted cards with date badges (most important section)
+- **User Preferences**: bullet list
+- **Key Learnings**: card per learning
+- **Decision Log**: collapsible cards with rationale
 
 Includes a search bar that filters across all sections.
 
@@ -70,9 +70,9 @@ Most recent session is expanded by default.
 ### Anatomy Browser
 
 Interactive file tree built from `anatomy.md`. Directories are expandable nodes. Files show their description and a color-coded token badge:
-- **Green** — under 200 tokens
-- **Amber** — 200–1000 tokens
-- **Red** — over 1000 tokens
+- **Green**: under 200 tokens
+- **Amber**: 200-1000 tokens
+- **Red**: over 1000 tokens
 
 Search filters by filename or description. Stats bar shows total files, average tokens per file, and the largest file.
 
@@ -92,28 +92,28 @@ Quick-filter by clicking common tags.
 Shows the status of the design QC capture system for visual regression and design review.
 
 **Status indicators:**
-- **Capture status** — whether the capture service is active or idle
-- **Last capture time** — timestamp of the most recent screenshot
-- **Screenshot count** — total captures taken in the current session
-- **Total size** — disk space used by captured screenshots
+- **Capture status**: whether the capture service is active or idle
+- **Last capture time**: timestamp of the most recent screenshot
+- **Screenshot count**: total captures taken in the current session
+- **Total size**: disk space used by captured screenshots
 
 **How it works:**
 
 Design QC follows a three-step workflow:
 
-1. **Capture** — OpenWolf takes viewport-height sectioned screenshots of your running dev server, scrolling through the full page.
-2. **Evaluate** — Claude reviews the screenshots against your design specs or general UI/UX best practices.
-3. **Fix** — Claude suggests or applies code changes based on the evaluation.
+1. **Capture**: OpenWolf takes viewport-height sectioned screenshots of your running dev server, scrolling through the full page.
+2. **Evaluate**: Claude reviews the screenshots against your design specs or general UI/UX best practices.
+3. **Fix**: Claude suggests or applies code changes based on the evaluation.
 
 The panel includes instructions for invoking Design QC with Claude. Use `openwolf designqc` from the CLI or trigger captures from this panel.
 
 ### AI Insights
 
 AI-generated suggestions displayed in four cards:
-- **Achievements** (emerald) — what was accomplished
-- **Improvements** (blue) — code quality suggestions
-- **Next Tasks** (amber) — recommended next steps
-- **Risks** (red) — technical debt and risk items
+- **Achievements** (emerald): what was accomplished
+- **Improvements** (blue): code quality suggestions
+- **Next Tasks** (amber): recommended next steps
+- **Risks** (red): technical debt and risk items
 
 Includes a **Regenerate** button that triggers the `project-suggestions` cron task.
 
@@ -126,7 +126,7 @@ openwolf cron run project-suggestions
 ## Design
 
 - **Dark/light theme** with toggle in the sidebar (preference saved in localStorage)
-- **Responsive** — sidebar collapses to bottom tab bar on mobile
-- **Live updates** — WebSocket connection pushes `.wolf/` file changes in real time
+- **Responsive**: sidebar collapses to bottom tab bar on mobile
+- **Live updates**: WebSocket connection pushes `.wolf/` file changes in real time
 - **Lazy-loaded panels** with skeleton fallbacks
-- **Sidebar footer** — links to [OpenWolf on GitHub](https://github.com/cytostack/openwolf) and shows version
+- **Sidebar footer**: links to [OpenWolf on GitHub](https://github.com/cytostack/openwolf) and shows version

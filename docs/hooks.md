@@ -1,6 +1,6 @@
 # Hooks
 
-OpenWolf registers 6 hooks with Claude Code. They fire automatically on every action — no user interaction required.
+OpenWolf registers 6 hooks with Claude Code. They fire automatically on every action. No user interaction required.
 
 All hooks are **pure Node.js file I/O**. No network calls, no AI, no external dependencies. They read JSON on stdin from Claude Code and communicate via exit codes and stderr.
 
@@ -59,8 +59,8 @@ All hooks are **pure Node.js file I/O**. No network calls, no AI, no external de
 
 **What it does:**
 1. Checks if this file was already read this session
-2. If repeated: writes a warning to stderr — _"⚡ OpenWolf: file.ts was already read this session (~380 tokens)"_
-3. Looks up the file in `anatomy.md` and prints the description — _"📋 OpenWolf anatomy: file.ts — Main entry point (~380 tok)"_
+2. If repeated: writes a warning to stderr. _"⚡ OpenWolf: file.ts was already read this session (~380 tokens)"_
+3. Looks up the file in `anatomy.md` and prints the description. _"📋 OpenWolf anatomy: file.ts, Main entry point (~380 tok)"_
 4. Records anatomy hit or miss in the session tracker
 
 **Behavior:** Always exits 0 (allows the read). Warnings only, never blocks.
@@ -78,7 +78,7 @@ All hooks are **pure Node.js file I/O**. No network calls, no AI, no external de
 **What it does:**
 1. Reads `cerebrum.md` and extracts entries from the `## Do-Not-Repeat` section
 2. For each entry, checks if the content being written contains flagged patterns
-3. If matched: writes a warning to stderr — _"⚠️ OpenWolf cerebrum warning: 'never use var' — check your code"_
+3. If matched: writes a warning to stderr. _"⚠️ OpenWolf cerebrum warning: 'never use var', check your code"_
 
 **Pattern matching:** Simple regex on quoted strings and "never use X" / "avoid X" phrases. No LLM involved.
 
@@ -109,9 +109,9 @@ All hooks are **pure Node.js file I/O**. No network calls, no AI, no external de
 **Stdin:** `{ "tool_name": "Write", "tool_input": { "file_path": "...", "content": "..." } }`
 
 **What it does:**
-1. **Updates `anatomy.md`** — reads the written file, extracts a description, estimates tokens, upserts the entry in the correct directory section. Writes atomically (temp + rename).
-2. **Appends to `memory.md`** — logs the action with timestamp, file path, and token estimate.
-3. **Records in `_session.json`** — file, action type, tokens, timestamp.
+1. **Updates `anatomy.md`**: reads the written file, extracts a description, estimates tokens, upserts the entry in the correct directory section. Writes atomically (temp + rename).
+2. **Appends to `memory.md`**: logs the action with timestamp, file path, and token estimate.
+3. **Records in `_session.json`**: file, action type, tokens, timestamp.
 
 **Timeout:** 10 seconds (longer because anatomy update involves file parsing)
 

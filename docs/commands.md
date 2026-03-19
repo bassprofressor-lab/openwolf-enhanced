@@ -84,7 +84,7 @@ openwolf scan --check
 Useful in CI pipelines to verify that `anatomy.md` has been kept in sync:
 
 ```bash
-openwolf scan --check || echo "anatomy.md is out of date — run openwolf scan"
+openwolf scan --check || echo "anatomy.md is out of date. Run openwolf scan"
 ```
 
 ---
