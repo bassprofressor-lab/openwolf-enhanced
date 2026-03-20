@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="demo.gif" alt="OpenWolf demo" width="820" />
+  <img src="demo.gif" alt="OpenWolf demo" width="640" />
 </p>
 
 <h1 align="center">OpenWolf</h1>
@@ -23,7 +23,7 @@ Claude Code is powerful but it works blind. It doesn't know what a file contains
 
 OpenWolf gives Claude a second brain: a file index so it knows what files contain before reading them, a learning memory that accumulates your preferences and past mistakes, and a token ledger that tracks everything. All through 6 invisible hook scripts that fire on every Claude action.
 
-## Real Numbers
+## Token Comparison
 
 Tested on a large active project. Same codebase, same prompts, different setups:
 
