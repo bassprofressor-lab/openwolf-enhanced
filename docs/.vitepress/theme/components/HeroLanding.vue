@@ -44,19 +44,19 @@ const features = [
   {
     icon: "chart",
     title: "Token Intelligence",
-    desc: "Every token is estimated, tracked, and justified. Anatomy descriptions prevent unnecessary file reads. Repeated reads are caught and flagged.",
+    desc: "Claude reads blind. OpenWolf gives it a file index with descriptions and token estimates before every read. If the description is enough, Claude skips the full file. Repeated reads are caught and flagged.",
     accent: "#818cf8",
   },
   {
     icon: "bolt",
-    title: "No API Calls",
-    desc: "All hooks are pure Node.js file I/O running locally. No network requests, no external services during normal operation. Optional scheduled tasks use your existing Claude subscription.",
+    title: "Zero Overhead",
+    desc: "All hooks are pure Node.js file I/O. No network requests, no external APIs, no extra cost. OpenWolf runs entirely on your machine.",
     accent: "#fbbf24",
   },
   {
     icon: "loop",
     title: "Self-Learning",
-    desc: "Cerebrum tracks your preferences, mistakes, and decisions. Bug memory prevents the same fix twice. The system gets smarter every session.",
+    desc: "Every correction you make gets logged. Every bug fix gets remembered. Every preference gets enforced. Claude gets smarter with every session -- without you repeating yourself.",
     accent: "#f472b6",
   },
   {
@@ -113,12 +113,12 @@ const archFiles = [
           <!-- Left -->
           <div class="ow-hero__copy">
             <h1 class="ow-hero__title">
-              Sharper context.
-              <span class="ow-hero__title-accent">Fewer tokens.</span>
+              A second brain
+              <span class="ow-hero__title-accent">for Claude Code.</span>
             </h1>
 
             <p class="ow-hero__desc">
-              OpenWolf is open-source middleware for Claude&nbsp;Code. It remembers your preferences, catches repeated mistakes, and tracks every token. You change nothing about your workflow.
+              Claude re-reads files it already saw. It scans entire directories to find one function. It doesn't know your conventions until you tell it again. OpenWolf gives it persistent project intelligence through invisible hooks. No workflow changes.
             </p>
 
             <div class="ow-hero__actions">
@@ -153,12 +153,14 @@ const archFiles = [
               </div>
               <div class="ow-terminal__body">
                 <div class="ow-terminal__line"><span class="ow-terminal__ps">$</span> <span class="ow-terminal__cmd">openwolf init</span></div>
-                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> OpenWolf initialized</div>
-                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> .wolf/ created with 11 files</div>
+                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> OpenWolf v1.0.4 initialized</div>
+                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> .wolf/ created with 13 files</div>
                 <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Claude Code hooks registered (6 hooks)</div>
                 <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> CLAUDE.md updated</div>
-                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Anatomy scan: 47 files indexed</div>
-                <div class="ow-terminal__line ow-terminal__line--hint">You're ready. Just use <span class="ow-terminal__hl">'claude'</span> as normal. OpenWolf is watching.</div>
+                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> .claude/rules/openwolf.md created</div>
+                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Anatomy scan: 24 files indexed</div>
+                <div class="ow-terminal__line ow-terminal__line--out"><span class="ow-terminal__ok">✓</span> Daemon: running via pm2</div>
+                <div class="ow-terminal__line ow-terminal__line--hint">You're ready. Just use <span class="ow-terminal__hl">'claude'</span> as normal -- OpenWolf is watching.</div>
               </div>
             </div>
           </div>
@@ -177,26 +179,55 @@ const archFiles = [
     <section class="ow-section ow-section--alt ow-why">
       <div class="ow-container ow-container--narrow">
         <div class="ow-why__content reveal">
-          <h2 class="ow-why__title">Most Claude Code users hit their limits faster than expected.</h2>
+          <h2 class="ow-why__title">Claude is powerful. But it works blind.</h2>
           <p class="ow-why__text">
-            The reason: Claude re-reads files it already saw, forgets corrections between sessions, and scans entire directories when a summary would do. There is no built-in way to see where your tokens go or why they're being spent.
+            Claude doesn't know what a file contains until it opens it. It can't tell a 50-token config from a 2,000-token module. It reads the same file three times in one session without noticing. It has no map of your project, no memory of past corrections, no awareness of what it already tried.
           </p>
           <p class="ow-why__text">
-            OpenWolf fixes the visibility problem. It tracks every token, remembers across sessions, and gives Claude the context it needs without redundant reads.
+            OpenWolf gives Claude a project index, a learning memory, and a token-aware read layer. It makes every session sharper from the first prompt.
           </p>
           <div class="ow-why__stats">
             <div class="ow-why__stat">
-              <span class="ow-why__stat-num">65.8%</span>
-              <span class="ow-why__stat-label">average token reduction</span>
+              <span class="ow-why__stat-num">~80%</span>
+              <span class="ow-why__stat-label">token reduction on real projects</span>
             </div>
             <div class="ow-why__stat">
               <span class="ow-why__stat-num">71%</span>
               <span class="ow-why__stat-label">repeated reads caught</span>
             </div>
             <div class="ow-why__stat">
-              <span class="ow-why__stat-num">132+</span>
-              <span class="ow-why__stat-label">sessions tested</span>
+              <span class="ow-why__stat-num">2M+</span>
+              <span class="ow-why__stat-label">tokens saved</span>
             </div>
+          </div>
+
+          <!-- Token comparison -->
+          <div class="ow-why__comparison">
+            <h3 class="ow-why__comparison-title">Same project. Same prompts. Different setups.</h3>
+            <div class="ow-why__bar-group">
+              <div class="ow-why__bar-row">
+                <span class="ow-why__bar-label">OpenClaw + Claude</span>
+                <div class="ow-why__bar-track">
+                  <div class="ow-why__bar ow-why__bar--red" style="width: 100%"></div>
+                </div>
+                <span class="ow-why__bar-val">~3.4M</span>
+              </div>
+              <div class="ow-why__bar-row">
+                <span class="ow-why__bar-label">Claude CLI (no OpenWolf)</span>
+                <div class="ow-why__bar-track">
+                  <div class="ow-why__bar ow-why__bar--yellow" style="width: 73%"></div>
+                </div>
+                <span class="ow-why__bar-val">~2.5M</span>
+              </div>
+              <div class="ow-why__bar-row">
+                <span class="ow-why__bar-label">OpenWolf + Claude CLI</span>
+                <div class="ow-why__bar-track">
+                  <div class="ow-why__bar ow-why__bar--green" style="width: 12.5%"></div>
+                </div>
+                <span class="ow-why__bar-val">~425K</span>
+              </div>
+            </div>
+            <p class="ow-why__bar-note">Estimates based on project size and average session patterns.</p>
           </div>
         </div>
       </div>
@@ -328,8 +359,8 @@ const archFiles = [
     <!-- ============================================================ -->
     <section class="ow-section ow-cta">
       <div class="ow-container ow-container--narrow reveal">
-        <h2 class="ow-heading" style="text-align: center">Start saving tokens today</h2>
-        <p class="ow-subheading" style="text-align: center">One command to install. One command to initialize. Then it's invisible.</p>
+        <h2 class="ow-heading" style="text-align: center">Make Claude Code smarter</h2>
+        <p class="ow-subheading" style="text-align: center">One install. One init. Then it's invisible.</p>
 
         <div class="ow-cta__actions">
           <a href="/getting-started" class="ow-btn ow-btn--primary ow-btn--lg">
@@ -356,7 +387,7 @@ const archFiles = [
               <img src="/wolf.svg" alt="OpenWolf" width="24" height="24" />
               <span class="ow-footer__name">OpenWolf</span>
             </div>
-            <p class="ow-footer__tagline">Token-conscious AI brain for Claude Code.<br />Created by Dr. Farhan Palathinkal at <a href="https://github.com/cytostack" target="_blank" class="ow-footer__link">Cytostack</a>.</p>
+            <p class="ow-footer__tagline">A second brain for Claude Code.<br />Created by Dr. Farhan Palathinkal at <a href="https://github.com/cytostack" target="_blank" class="ow-footer__link">Cytostack</a>.</p>
           </div>
 
           <div class="ow-footer__col">
@@ -835,6 +866,68 @@ const archFiles = [
   font-size: 13px;
   color: var(--ow-text-muted);
   letter-spacing: 0.01em;
+}
+
+/* Comparison bars */
+.ow-why__comparison {
+  margin-top: 40px;
+  padding-top: 32px;
+  border-top: 1px solid var(--ow-border);
+}
+.ow-why__comparison-title {
+  font-size: 14px !important;
+  font-weight: 600;
+  color: var(--ow-text-secondary);
+  margin-bottom: 20px !important;
+  text-align: left !important;
+}
+.ow-why__bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ow-why__bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ow-why__bar-label {
+  font-size: 12px;
+  color: var(--ow-text-muted);
+  min-width: 160px;
+  flex-shrink: 0;
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .ow-why__bar-label { min-width: 100px; font-size: 11px; }
+}
+.ow-why__bar-track {
+  flex: 1;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  overflow: hidden;
+}
+.ow-why__bar {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 1s ease;
+}
+.ow-why__bar--red { background: #f472b6; }
+.ow-why__bar--yellow { background: #fbbf24; }
+.ow-why__bar--green { background: var(--ow-accent); }
+.ow-why__bar-val {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ow-text-secondary);
+  min-width: 48px;
+}
+.ow-why__bar-note {
+  margin-top: 12px !important;
+  font-size: 11px !important;
+  color: var(--ow-text-faint) !important;
+  text-align: left !important;
 }
 
 /* ================================================================

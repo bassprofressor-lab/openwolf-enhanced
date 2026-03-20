@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   title: "OpenWolf",
   description:
-    "Open-source middleware for Claude Code that tracks tokens, remembers preferences, and catches repeated mistakes. 65% average token reduction across 132+ sessions.",
+    "Open-source middleware for Claude Code. Project intelligence, persistent memory, and token tracking through invisible hooks. 65% average token reduction.",
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/wolf.svg" }],
     ["link", { rel: "canonical", href: "https://openwolf.com" }],
@@ -38,7 +38,7 @@ export default defineConfig({
       "meta",
       {
         property: "og:title",
-        content: "OpenWolf: Sharper Context, Fewer Tokens for Claude Code",
+        content: "OpenWolf -- A Second Brain for Claude Code",
       },
     ],
     [
@@ -46,7 +46,7 @@ export default defineConfig({
       {
         property: "og:description",
         content:
-          "Open-source middleware that tracks every token, remembers your preferences across sessions, and catches repeated mistakes. 65% average token reduction.",
+          "Open-source hooks that give Claude Code project intelligence, token tracking, and mistake prevention. 2M+ tokens saved across real projects.",
       },
     ],
     // Twitter Card
@@ -55,7 +55,7 @@ export default defineConfig({
       "meta",
       {
         name: "twitter:title",
-        content: "OpenWolf: Sharper Context, Fewer Tokens for Claude Code",
+        content: "OpenWolf -- A Second Brain for Claude Code",
       },
     ],
     [
@@ -63,7 +63,7 @@ export default defineConfig({
       {
         name: "twitter:description",
         content:
-          "Open-source middleware that tracks every token, remembers your preferences across sessions, and catches repeated mistakes. 65% average token reduction.",
+          "Open-source hooks that give Claude Code project intelligence, token tracking, and mistake prevention. 2M+ tokens saved across real projects.",
       },
     ],
     // Additional SEO
