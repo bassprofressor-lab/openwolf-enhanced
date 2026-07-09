@@ -37,7 +37,8 @@ Everything from upstream still works. On top of that:
 
 | Area | Enhancement |
 |------|-------------|
-| 🩺 **Self-maintenance** | New `openwolf doctor` — a daemon-independent command that reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp). `--dry-run` to preview. |
+| 🩺 **Self-maintenance** | New `openwolf doctor` — a daemon-independent command that reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), and flags cross-project registry issues (dead entries, dashboard-port collisions). `--dry-run` to preview. |
+| 📊 **Dashboard upgrades** | A daemon-down banner (no more empty panels that look like an empty project), a Design QC thumbnail grid + lightbox (was filenames only), and theme-aware chart tooltips. |
 | 📦 **Bounded storage** | `token-ledger.json`, `buglog.json`, cron dead-letter queue and waste flags are all capped. No more runaway multi-MB files. |
 | 🎯 **`.wolfignore`** | gitignore-style scoping for anatomy scanning **and** hook tracking. Stop indexing `vendor/`, generated code, or `*.log`. |
 | ⚙️ **Tunable retention** | New `openwolf.retention` config block — every limit is user-adjustable. |
@@ -81,6 +82,17 @@ Useful upstream pull requests that were never merged, adapted to this fork:
 - 🏷 **Cleaner hook management** — `.claude/settings.json` entries are tagged `_managedBy:
   "openwolf"`, so `init`/`update` can replace/remove only their own hooks. *(upstream #32)*
 - 🎯 **Dart support** — `.dart` files are recognized for token estimation. *(upstream #10)*
+
+### Reliability, dependencies & dashboard (1.6–1.9)
+
+Ongoing hardening and modernization beyond the upstream backlog:
+
+- 🔒 **Zero known vulnerabilities** — a self-audit fixed 11 transitive advisories; `pnpm audit --prod` is clean, kept current with a dependency pass (all dev **and** runtime majors upgraded: TypeScript 7, Vite 8, recharts 3, chokidar 5, commander 15, node-cron 4…). *(1.6.1, 1.8.0)*
+- 🔐 **Safe concurrent sessions** — the token-ledger read-modify-write is wrapped in a best-effort file lock, so two sessions ending at once (or a session plus the cron report) can't clobber each other. It never blocks a hook for long. *(1.7.0)*
+- 🧪 **Test suite** — `pnpm test` covers the core logic (retention/ledger caps, buglog migration, ignore matcher, secret detection, CRLF parsing). *(1.7.0)*
+- 🔒 **`/api/switch` is allow-listed** — the daemon only switches to projects in the registry, not arbitrary directories. *(1.7.0)*
+- 🐛 **File-watcher exclusions actually fire** — a latent bug (glob strings silently stopped matching under chokidar 4+) meant the daemon was re-reading and broadcasting `token-ledger.json`/`buglog.json` on every write; fixed with a predicate matcher. *(1.8.0)*
+- 📊 **Dashboard quick wins** — daemon-down banner with retry, Design QC thumbnails + lightbox (new path-safe token-gated image route), theme-aware tooltips. *(1.9.0)*
 
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
