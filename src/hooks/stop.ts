@@ -88,6 +88,7 @@ async function main(): Promise<void> {
     { key: "buglog", msg: checkForMissingBugLogs(wolfDir, session) },
     { key: "cerebrum", msg: checkCerebrumFreshness(wolfDir, session) },
     { key: "summary", msg: checkSemanticSummaries(wolfDir, writeCount) },
+    { key: "status", msg: checkStatusFreshness(wolfDir, session) },
   ].filter((c): c is { key: string; msg: string } => c.msg !== null);
   const alreadyShown = new Set(session.reminders_shown ?? []);
   const fresh = candidates.filter((c) => !alreadyShown.has(c.key));
@@ -250,6 +251,29 @@ function checkCerebrumFreshness(wolfDir: string, session: SessionData): string |
     }
   } catch {
     // cerebrum.md doesn't exist, that's ok
+  }
+  return null;
+}
+
+/**
+ * If STATUS.md is older than the session start (or missing) and there was meaningful code
+ * activity, nudge Claude to update the handoff doc so the next /clear resumes cheaply. (upstream #40)
+ */
+function checkStatusFreshness(wolfDir: string, session: SessionData): string | null {
+  const statusPath = path.join(wolfDir, "STATUS.md");
+  const codeWrites = session.files_written.filter(
+    (w) => !w.file.includes("/.wolf/") && !w.file.endsWith(".tmp")
+  );
+  if (codeWrites.length < 3) return null;
+
+  try {
+    const stat = fs.statSync(statusPath);
+    const sessionStartMs = session.started ? Date.parse(session.started) : 0;
+    if (sessionStartMs && stat.mtimeMs < sessionStartMs) {
+      return `STATUS.md wasn't updated this session despite ${codeWrites.length} code writes. Update .wolf/STATUS.md (✅ done / 🚀 next quest) before /clear so the next session resumes in one read.`;
+    }
+  } catch {
+    return `.wolf/STATUS.md is missing. Create it with the current quest summary + next steps so /clear stays cheap.`;
   }
   return null;
 }

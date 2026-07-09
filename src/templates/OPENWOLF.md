@@ -2,6 +2,18 @@
 
 You are working in an OpenWolf-managed project. These rules apply every turn.
 
+## STATUS.md — Single Source of Truth (READ FIRST)
+
+`.wolf/STATUS.md` is the **first file** you read when resuming a session. It captures, in one
+place: what's already done (✅), the current/next quest with acceptance criteria (🚀), the active
+architecture (📁), open pendencies (⚠️), and useful commands (🔧).
+
+1. **On session start / after `/clear`:** read `.wolf/STATUS.md` before anything else — it restores
+   context in ~1 read instead of stitching it together from memory.md, cerebrum.md and code.
+2. **When a quest finishes (or before you suggest `/clear`):** move completed items to ✅ and write
+   the next quest under 🚀, so the next session resumes cheaply.
+3. Keep it short and current — it is a handoff note, not a log (that's `memory.md`).
+
 ## File Navigation
 
 1. Check `.wolf/anatomy.md` BEFORE reading any file. It has a 2-3 line description and token estimate for every file in the project.

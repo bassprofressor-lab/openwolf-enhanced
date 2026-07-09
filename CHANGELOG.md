@@ -6,6 +6,17 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.4.0] — 2026-07-09
+
+### Added
+- **`STATUS.md` — a session handoff document (#40 by @meketreve).** `openwolf init` now creates
+  `.wolf/STATUS.md` with sections for what's done (✅), the next quest (🚀), active architecture
+  (📁), pending items (⚠️) and useful commands (🔧). Reading it first when resuming a session
+  restores context in a single read instead of stitching it together from several files. The
+  protocol and rules instruct reading it first and updating it when a quest ends; the stop hook
+  nudges (once per session, via `additionalContext`) if it's missing or stale after real code
+  changes. `STATUS.md` is treated as user data — never overwritten by `update`, included in backups.
+
 ## [1.3.1] — 2026-07-09
 
 ### Changed

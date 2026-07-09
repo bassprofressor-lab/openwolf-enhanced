@@ -54,7 +54,7 @@ function deepMergeDefaults(
 
 // Files that contain user data — NEVER overwrite, only create if missing
 const USER_DATA_FILES = [
-  "identity.md", "cerebrum.md", "memory.md", "anatomy.md",
+  "identity.md", "cerebrum.md", "memory.md", "anatomy.md", "STATUS.md",
   "token-ledger.json", "buglog.json", "cron-manifest.json", "cron-state.json",
   "suggestions.json", "designqc-report.json",
 ];
