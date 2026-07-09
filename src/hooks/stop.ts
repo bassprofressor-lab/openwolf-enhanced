@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge } from "./shared.js";
 
 interface FileRead {
   count: number;
@@ -147,16 +147,18 @@ async function main(): Promise<void> {
 
   // Keep token-ledger.json bounded: cap per-session arrays and total session count.
   // Without this, sessions[] (each embedding full reads[]/writes[]) grows without limit
-  // and writeJSON's full-file rewrite becomes quadratic over time.
-  if (Array.isArray(sessionEntry.reads) && sessionEntry.reads.length > 100) {
-    sessionEntry.reads = sessionEntry.reads.slice(-100);
+  // and writeJSON's full-file rewrite becomes quadratic over time. Limits are tunable
+  // via config.json openwolf.retention.
+  const ret = getRetention(wolfDir);
+  if (Array.isArray(sessionEntry.reads) && sessionEntry.reads.length > ret.session_io_max) {
+    sessionEntry.reads = sessionEntry.reads.slice(-ret.session_io_max);
   }
-  if (Array.isArray(sessionEntry.writes) && sessionEntry.writes.length > 100) {
-    sessionEntry.writes = sessionEntry.writes.slice(-100);
+  if (Array.isArray(sessionEntry.writes) && sessionEntry.writes.length > ret.session_io_max) {
+    sessionEntry.writes = sessionEntry.writes.slice(-ret.session_io_max);
   }
   ledger.sessions.push(sessionEntry);
-  if (ledger.sessions.length > 200) {
-    ledger.sessions = ledger.sessions.slice(-200);
+  if (ledger.sessions.length > ret.token_ledger_max_sessions) {
+    ledger.sessions = ledger.sessions.slice(-ret.token_ledger_max_sessions);
   }
   ledger.lifetime.total_reads += readCount;
   ledger.lifetime.total_writes += writeCount;
@@ -183,6 +185,10 @@ async function main(): Promise<void> {
       appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${writeCount} writes across ${uniqueFiles.size} files (${fileList}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
     } catch {}
   }
+
+  // Opportunistic self-maintenance: keep memory.md bounded even when the daemon
+  // (which normally runs the consolidation cron) isn't running. Stat-gated → cheap.
+  try { compactMemoryIfLarge(wolfDir, ret.memory_max_bytes); } catch {}
 
   writeJSON(sessionFile, session);
 

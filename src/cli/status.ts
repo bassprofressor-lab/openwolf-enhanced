@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON, readText } from "../utils/fs-safe.js";
+import { getRetention, footprint, humanBytes } from "../utils/maintenance.js";
 
 export async function statusCommand(): Promise<void> {
   const projectRoot = findProjectRoot();
@@ -98,6 +99,18 @@ export async function statusCommand(): Promise<void> {
     const elapsed = Date.now() - new Date(cronState.last_heartbeat).getTime();
     const mins = Math.floor(elapsed / 60000);
     console.log(`  Last heartbeat: ${mins} minutes ago`);
+  }
+
+  // Footprint & health
+  const ret = getRetention(wolfDir);
+  const fp = footprint(wolfDir, ret);
+  console.log(`\n.wolf/ footprint: ${humanBytes(fp.total)}`);
+  for (const it of fp.items.slice(0, 5)) {
+    console.log(`  ${humanBytes(it.bytes).padStart(9)}  ${it.name}`);
+  }
+  if (fp.warnings.length) {
+    for (const w of fp.warnings) console.log(`  ⚠ ${w}`);
+    console.log(`  → run 'openwolf doctor' to compact`);
   }
 
   console.log("");

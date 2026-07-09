@@ -1,0 +1,82 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { findProjectRoot } from "../scanner/project-root.js";
+import {
+  getRetention,
+  footprint,
+  humanBytes,
+  compactLedger,
+  consolidateMemory,
+  dedupeAndCapBuglog,
+  pruneBackups,
+  cleanTmp,
+  rotateDaemonLog,
+  dirSize,
+  type CompactResult,
+} from "../utils/maintenance.js";
+
+interface DoctorOpts {
+  dryRun?: boolean;
+}
+
+// `openwolf doctor` — daemon-independent .wolf/ health report + compaction.
+export async function doctorCommand(opts: DoctorOpts): Promise<void> {
+  const projectRoot = findProjectRoot();
+  const wolfDir = path.join(projectRoot, ".wolf");
+
+  if (!fs.existsSync(wolfDir)) {
+    console.log("OpenWolf not initialized. Run: openwolf init");
+    return;
+  }
+
+  const ret = getRetention(wolfDir);
+  const dry = !!opts.dryRun;
+
+  console.log("OpenWolf Doctor");
+  console.log("===============\n");
+
+  // --- Footprint report ---
+  const before = footprint(wolfDir, ret);
+  console.log(`.wolf/ footprint: ${humanBytes(before.total)}`);
+  for (const it of before.items.slice(0, 8)) {
+    console.log(`  ${humanBytes(it.bytes).padStart(9)}  ${it.name}`);
+  }
+  if (before.warnings.length) {
+    console.log("\nWarnings:");
+    for (const w of before.warnings) console.log(`  ⚠ ${w}`);
+  }
+
+  if (dry) {
+    console.log("\n(dry run — no changes written. Run without --dry-run to compact.)");
+    return;
+  }
+
+  // --- Compaction pass ---
+  console.log("\nCompacting…");
+  const totalBefore = before.total;
+  const results: CompactResult[] = [
+    compactLedger(wolfDir, ret),
+    consolidateMemory(wolfDir, ret.memory_consolidate_after_days),
+    dedupeAndCapBuglog(wolfDir, ret.buglog_max_entries),
+    pruneBackups(wolfDir, ret.backups_keep),
+    rotateDaemonLog(wolfDir, ret.daemon_log_max_bytes),
+    cleanTmp(wolfDir),
+  ];
+
+  let anyChange = false;
+  for (const r of results) {
+    console.log(`  ${r.changed ? "✓" : "·"} ${r.detail}`);
+    if (r.changed) anyChange = true;
+  }
+
+  const totalAfter = dirSize(wolfDir);
+  const freed = totalBefore - totalAfter;
+  console.log("");
+  if (anyChange && freed > 0) {
+    console.log(`Done. .wolf/ ${humanBytes(totalBefore)} → ${humanBytes(totalAfter)} (freed ${humanBytes(freed)}).`);
+  } else if (anyChange) {
+    console.log(`Done. .wolf/ now ${humanBytes(totalAfter)}.`);
+  } else {
+    console.log("Everything already within limits — nothing to compact.");
+  }
+}

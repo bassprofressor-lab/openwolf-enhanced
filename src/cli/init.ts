@@ -344,6 +344,7 @@ function generateTemplate(destPath: string, file: string): void {
         token_audit: { enabled: true, report_frequency: "weekly", waste_threshold_percent: 15, chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
         cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null },
         memory: { consolidation_after_days: 7, max_entries_before_consolidation: 200 },
+        retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288 },
         cerebrum: { max_tokens: 2000, reflection_frequency: "weekly" },
         daemon: { port: 18790, log_level: "info" },
         dashboard: { enabled: true, port: 18791 },

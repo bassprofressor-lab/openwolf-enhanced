@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadWolfignore } from "./shared.js";
 
 interface SessionData {
   files_read: Record<string, { count: number; tokens: number; first_read: string }>;
@@ -36,6 +36,9 @@ async function main(): Promise<void> {
     process.exit(0);
     return;
   }
+
+  // Skip anything matched by .wolfignore — don't track ignored reads in the ledger.
+  if (relToProject && loadWolfignore(projectDir)(relToProject)) { process.exit(0); return; }
 
   const ext = path.extname(filePath).toLowerCase();
   const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".css", ".json", ".yaml", ".yml"]);

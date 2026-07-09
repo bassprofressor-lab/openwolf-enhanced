@@ -152,6 +152,16 @@ export function createProgram(): Command {
       await designqcCommand(target, opts);
     });
 
+  // --- Doctor command ---
+  program
+    .command("doctor")
+    .description("Report .wolf/ health & footprint, then compact (daemon-independent)")
+    .option("--dry-run", "Only report sizes/warnings; write nothing")
+    .action(async (opts: { dryRun?: boolean }) => {
+      const { doctorCommand } = await import("./doctor-cmd.js");
+      await doctorCommand(opts);
+    });
+
   // --- Bug command ---
   const bug = program
     .command("bug")

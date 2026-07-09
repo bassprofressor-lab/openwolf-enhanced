@@ -4,6 +4,7 @@ import { extractDescription, capDescription } from "./description-extractor.js";
 import { readJSON } from "../utils/fs-safe.js";
 import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
+import { loadWolfignore } from "../utils/maintenance.js";
 
 interface AnatomyEntry {
   file: string;
@@ -86,7 +87,8 @@ function walkDir(
   rootDir: string,
   excludePatterns: string[],
   maxFiles: number,
-  entries: Map<string, AnatomyEntry[]>
+  entries: Map<string, AnatomyEntry[]>,
+  ignore: (relPath: string) => boolean
 ): void {
   let totalFiles = 0;
   for (const [, list] of entries) totalFiles += list.length;
@@ -106,9 +108,10 @@ function walkDir(
     const relPath = normalizePath(path.relative(rootDir, fullPath));
 
     if (shouldExclude(relPath, excludePatterns)) continue;
+    if (ignore(relPath)) continue; // .wolfignore
 
     if (item.isDirectory()) {
-      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries);
+      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore);
     } else if (item.isFile()) {
       const ext = path.extname(item.name).toLowerCase();
       if (BINARY_EXTENSIONS.has(ext)) continue;
@@ -226,12 +229,14 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
   });
 
   const entries = new Map<string, AnatomyEntry[]>();
+  const ignore = loadWolfignore(projectRoot);
   walkDir(
     projectRoot,
     projectRoot,
     config.openwolf.anatomy.exclude_patterns,
     config.openwolf.anatomy.max_files,
-    entries
+    entries,
+    ignore
   );
 
   let fileCount = 0;

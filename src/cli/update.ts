@@ -27,8 +27,30 @@ function getVersion(): string {
   }
 }
 
-// Files that are safe to overwrite (protocol/config)
-const ALWAYS_OVERWRITE = ["OPENWOLF.md", "config.json", "reframe-frameworks.md"];
+// Files that are safe to overwrite (protocol docs only — NOT config.json, which is
+// deep-merged below so user edits and tuned retention limits survive updates).
+const ALWAYS_OVERWRITE = ["OPENWOLF.md", "reframe-frameworks.md"];
+
+// Deep-merge template defaults UNDER existing user config: user values win, and any
+// new keys introduced by a newer OpenWolf version (e.g. openwolf.retention) are added.
+function deepMergeDefaults(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(override)) {
+    const bv = out[k];
+    if (
+      v && typeof v === "object" && !Array.isArray(v) &&
+      bv && typeof bv === "object" && !Array.isArray(bv)
+    ) {
+      out[k] = deepMergeDefaults(bv as Record<string, unknown>, v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 // Files that contain user data — NEVER overwrite, only create if missing
 const USER_DATA_FILES = [
@@ -174,6 +196,21 @@ async function updateProject(
       }
     }
     console.log(`    ✓ Templates updated (${ALWAYS_OVERWRITE.join(", ")})`);
+
+    // 2b. Deep-merge config.json: keep user values, add any new default keys.
+    const cfgTemplate = path.join(templatesDir, "config.json");
+    const cfgDest = path.join(wolfDir, "config.json");
+    if (fs.existsSync(cfgTemplate)) {
+      const defaults = readJSON<Record<string, unknown>>(cfgTemplate, {});
+      if (fs.existsSync(cfgDest)) {
+        const userCfg = readJSON<Record<string, unknown>>(cfgDest, {});
+        writeJSON(cfgDest, deepMergeDefaults(defaults, userCfg));
+        console.log(`    ✓ config.json merged (user values preserved)`);
+      } else {
+        fs.copyFileSync(cfgTemplate, cfgDest);
+        console.log(`    ✓ config.json created`);
+      }
+    }
 
     // 3. Update hook scripts
     copyHookScripts(wolfDir);

@@ -3,7 +3,8 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, serializeAnatomy,
-  extractDescription, estimateTokens, appendMarkdown, timeShort, readStdin, normalizePath
+  extractDescription, estimateTokens, appendMarkdown, timeShort, readStdin, normalizePath,
+  getRetention, loadWolfignore
 } from "./shared.js";
 
 interface SessionData {
@@ -55,6 +56,9 @@ async function main(): Promise<void> {
   // Skip processing for .wolf/ internal files to avoid slow self-referential updates
   const relPath = normalizePath(path.relative(projectRoot, absolutePath));
   if (relPath.startsWith(".wolf/")) { process.exit(0); return; }
+
+  // Skip anything matched by .wolfignore — scopes both anatomy and session tracking.
+  if (loadWolfignore(projectRoot)(relPath)) { process.exit(0); return; }
 
   // Never track .env files in anatomy — they contain secrets
   const baseName = path.basename(absolutePath);
@@ -344,8 +348,9 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
   });
 
   // Keep buglog.json bounded — auto-detection can otherwise append on nearly every edit.
-  if (bugLog.bugs.length > 200) {
-    bugLog.bugs = bugLog.bugs.slice(-200);
+  const maxBugs = getRetention(wolfDir).buglog_max_entries;
+  if (bugLog.bugs.length > maxBugs) {
+    bugLog.bugs = bugLog.bugs.slice(-maxBugs);
   }
 
   writeJSON(bugLogPath, bugLog);
