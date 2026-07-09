@@ -6,6 +6,27 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.6.1] — 2026-07-09
+
+Security patch — resolves all advisories reported by `pnpm audit` (found in a self-audit).
+
+### Security
+- **`ws` → 8.21.0** — fixes a high-severity memory-exhaustion DoS and a moderate uninitialized
+  memory disclosure in the WebSocket server (a direct, network-facing dependency).
+- **`express` → 5.2.1** plus pinned overrides forcing patched transitive deps — `path-to-regexp`
+  (≥8.4.0, DoS/ReDoS on the HTTP router), `qs` (≥6.15.2, DoS in query parsing), and, for
+  cleanliness, `basic-ftp`/`ip-address` (via the optional `puppeteer-core` chain) and `uuid`
+  (via `node-cron`). `pnpm audit --prod` now reports **0 vulnerabilities**.
+
+### Fixed
+- **AI API calls can no longer hang forever.** `runViaApi` now aborts after 120s (the old
+  `claude` subprocess path had a 120s timeout; `fetch` had none), so a stuck request can't
+  wedge a cron task.
+
+### Changed
+- `pnpm build` runs end-to-end again (`allowBuilds: esbuild: true` in `pnpm-workspace.yaml`),
+  so the dashboard builds without a manual `pnpm rebuild esbuild`.
+
 ## [1.6.0] — 2026-07-09
 
 Completes upstream PR #4 — the larger dashboard sub-features, adapted to this fork's

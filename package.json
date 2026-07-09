@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
   "type": "module",
   "bin": {
@@ -21,10 +21,10 @@
     "chalk": "^5.3.0",
     "chokidar": "^4.0.0",
     "commander": "^12.0.0",
-    "express": "^5.0.0",
+    "express": "^5.2.1",
     "node-cron": "^3.0.3",
     "open": "^10.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.21.0"
   },
   "optionalDependencies": {
     "puppeteer-core": "^24.39.1"

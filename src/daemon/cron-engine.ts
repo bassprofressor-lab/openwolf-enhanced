@@ -355,19 +355,32 @@ export class CronEngine {
   }
 
   private async runViaApi(prompt: string, apiKey: string): Promise<string> {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    // Abort after 120s so a hung request can't leave the cron task stuck forever
+    // (the previous spawnSync path had a 120s timeout; fetch has none by default).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    let response: Response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }],
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if ((err as Error).name === "AbortError") throw new Error("Anthropic API request timed out after 120s");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!response.ok) {
       const body = await response.text();
       throw new Error(`Anthropic API error ${response.status}: ${body.slice(0, 200)}`);
