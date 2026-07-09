@@ -78,6 +78,17 @@ export function loadWolfignore(projectRoot: string): (relPath: string) => boolea
   }
 }
 
+// Combined ignore matcher: honors .gitignore AND .wolfignore (upstream #15).
+export function loadIgnore(projectRoot: string): (relPath: string) => boolean {
+  const lines: string[] = [];
+  for (const f of [".gitignore", ".wolfignore"]) {
+    try {
+      lines.push(...fs.readFileSync(path.join(projectRoot, f), "utf-8").split("\n"));
+    } catch { /* absent */ }
+  }
+  return makeIgnoreMatcher(lines);
+}
+
 // ---------------------------------------------------------------------------
 // Size helpers
 // ---------------------------------------------------------------------------

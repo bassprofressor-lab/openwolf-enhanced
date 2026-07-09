@@ -6,6 +6,24 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.2.1] — 2026-07-09
+
+More adopted upstream bug fixes.
+
+### Fixed
+- **`.gitignore` is now respected (#15 by @VimCommando).** Anatomy scanning and hook tracking
+  honor `.gitignore` in addition to `.wolfignore`, so build output / generated / ignored files
+  don't get indexed.
+- **`init` no longer scaffolds `$HOME` (#20 by @shikyo13).** `findProjectRoot` stops at the home
+  directory, so a stray marker (`.git` / `package.json`) in `$HOME` can't make `openwolf init`
+  treat the whole home directory as a project.
+- **Dashboard/daemon port collisions across projects (#20).** `init` bumps this project's ports
+  if another registered project already uses them.
+
+_Note: #45 (buglog available for de-dup before fixing) is already covered — the OPENWOLF.md
+protocol instructs reading `.wolf/buglog.json` before fixing, and the pre-write hook surfaces
+similar past bugs._
+
 ## [1.2.0] — 2026-07-09
 
 Adopts a batch of security and correctness fixes that were reported/proposed upstream but

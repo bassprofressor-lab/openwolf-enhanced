@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadWolfignore, isSecretFile } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile } from "./shared.js";
 
 interface SessionData {
   files_read: Record<string, { count: number; tokens: number; first_read: string }>;
@@ -42,8 +42,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Skip anything matched by .wolfignore — don't track ignored reads in the ledger.
-  if (loadWolfignore(projectDir)(relToProject)) { process.exit(0); return; }
+  // Skip anything matched by .gitignore / .wolfignore — don't track ignored reads.
+  if (loadIgnore(projectDir)(relToProject)) { process.exit(0); return; }
 
   // Never track secret-bearing files in the ledger (#54).
   if (isSecretFile(normalizedFile)) { process.exit(0); return; }

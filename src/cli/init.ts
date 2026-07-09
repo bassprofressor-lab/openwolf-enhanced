@@ -7,7 +7,7 @@ import { scanProject } from "../scanner/anatomy-scanner.js";
 import { readJSON, writeJSON, readText, writeText } from "../utils/fs-safe.js";
 import { ensureDir } from "../utils/paths.js";
 import { isWindows } from "../utils/platform.js";
-import { registerProject } from "./registry.js";
+import { registerProject, getRegisteredProjects } from "./registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -232,6 +232,11 @@ export async function initCommand(): Promise<void> {
     }
   }
 
+  // --- Avoid dashboard/daemon port collisions with other projects (upstream #20) ---
+  if (!isUpgrade) {
+    try { resolvePortCollisions(wolfDir, projectRoot); } catch { /* non-fatal */ }
+  }
+
   // --- Daemon ---
   let daemonStatus = "start manually with: openwolf daemon start";
   try {
@@ -328,6 +333,45 @@ function getEmbeddedTemplate(filename: string): string {
     "claude-rules-openwolf.md": `---\ndescription: OpenWolf protocol enforcement — active on all files\nglobs: **/*\n---\n\n- Check .wolf/anatomy.md before reading any project file\n- Check .wolf/cerebrum.md Do-Not-Repeat list before generating code\n- After writing or editing files, update .wolf/anatomy.md and append to .wolf/memory.md\n- After receiving a user correction, update .wolf/cerebrum.md immediately (Preferences, Learnings, or Do-Not-Repeat)\n- LEARN from every interaction: if you discover a convention, user preference, or project pattern, add it to .wolf/cerebrum.md. Low threshold — when in doubt, log it.\n- BEFORE fixing any bug or error: read .wolf/buglog.json for known fixes\n- AFTER fixing any bug, error, failed test, failed build, or user-reported problem: ALWAYS log to .wolf/buglog.json with error_message, root_cause, fix, and tags\n- If you edit a file more than twice in a session, that likely indicates a bug — log it to .wolf/buglog.json\n- When the user asks to check/evaluate UI design: run \`openwolf designqc\` to capture screenshots, then read them from .wolf/designqc-captures/\n- When the user asks to change/pick/migrate UI framework: read .wolf/reframe-frameworks.md, ask decision questions, recommend a framework, then execute with the framework's prompt`,
   };
   return templates[filename] ?? "";
+}
+
+// Bump this project's daemon/dashboard ports if another registered project already uses them.
+function resolvePortCollisions(wolfDir: string, projectRoot: string): void {
+  const configPath = path.join(wolfDir, "config.json");
+  let cfg: { openwolf?: { daemon?: { port?: number }; dashboard?: { port?: number } } };
+  try {
+    cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    return;
+  }
+  const daemonPort = cfg.openwolf?.daemon?.port ?? 18790;
+  const dashPort = cfg.openwolf?.dashboard?.port ?? 18791;
+
+  const here = path.resolve(projectRoot).toLowerCase();
+  const used = new Set<number>();
+  for (const p of getRegisteredProjects()) {
+    if (path.resolve(p.root).toLowerCase() === here) continue;
+    try {
+      const other = JSON.parse(fs.readFileSync(path.join(p.root, ".wolf", "config.json"), "utf-8"));
+      const d = other?.openwolf?.daemon?.port;
+      const w = other?.openwolf?.dashboard?.port;
+      if (typeof d === "number") used.add(d);
+      if (typeof w === "number") used.add(w);
+    } catch { /* skip unreadable project config */ }
+  }
+
+  let offset = 0;
+  while (used.has(daemonPort + offset) || used.has(dashPort + offset)) offset += 2;
+  if (offset === 0) return;
+
+  cfg.openwolf = cfg.openwolf ?? {};
+  cfg.openwolf.daemon = cfg.openwolf.daemon ?? {};
+  cfg.openwolf.dashboard = cfg.openwolf.dashboard ?? {};
+  cfg.openwolf.daemon.port = daemonPort + offset;
+  cfg.openwolf.dashboard.port = dashPort + offset;
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), "utf-8");
+  } catch { /* non-fatal */ }
 }
 
 function generateTemplate(destPath: string, file: string): void {

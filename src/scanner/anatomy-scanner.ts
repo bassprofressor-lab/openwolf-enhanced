@@ -4,7 +4,7 @@ import { extractDescription, capDescription } from "./description-extractor.js";
 import { readJSON } from "../utils/fs-safe.js";
 import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
-import { loadWolfignore } from "../utils/maintenance.js";
+import { loadIgnore } from "../utils/maintenance.js";
 
 interface AnatomyEntry {
   file: string;
@@ -241,7 +241,7 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
   });
 
   const entries = new Map<string, AnatomyEntry[]>();
-  const ignore = loadWolfignore(projectRoot);
+  const ignore = loadIgnore(projectRoot);
   walkDir(
     projectRoot,
     projectRoot,
