@@ -96,7 +96,17 @@ export function addSessionToLedger(
   session: SessionEntry
 ): void {
   const ledger = readLedger(wolfDir);
+  // Keep token-ledger.json bounded (mirrors the cap in hooks/stop.ts).
+  if (Array.isArray(session.reads) && session.reads.length > 100) {
+    session.reads = session.reads.slice(-100);
+  }
+  if (Array.isArray(session.writes) && session.writes.length > 100) {
+    session.writes = session.writes.slice(-100);
+  }
   ledger.sessions.push(session);
+  if (ledger.sessions.length > 200) {
+    ledger.sessions = ledger.sessions.slice(-200);
+  }
   ledger.lifetime.total_reads += session.totals.reads_count;
   ledger.lifetime.total_writes += session.totals.writes_count;
   ledger.lifetime.total_tokens_estimated +=

@@ -145,7 +145,19 @@ async function main(): Promise<void> {
     [key: string]: unknown;
   };
 
+  // Keep token-ledger.json bounded: cap per-session arrays and total session count.
+  // Without this, sessions[] (each embedding full reads[]/writes[]) grows without limit
+  // and writeJSON's full-file rewrite becomes quadratic over time.
+  if (Array.isArray(sessionEntry.reads) && sessionEntry.reads.length > 100) {
+    sessionEntry.reads = sessionEntry.reads.slice(-100);
+  }
+  if (Array.isArray(sessionEntry.writes) && sessionEntry.writes.length > 100) {
+    sessionEntry.writes = sessionEntry.writes.slice(-100);
+  }
   ledger.sessions.push(sessionEntry);
+  if (ledger.sessions.length > 200) {
+    ledger.sessions = ledger.sessions.slice(-200);
+  }
   ledger.lifetime.total_reads += readCount;
   ledger.lifetime.total_writes += writeCount;
   ledger.lifetime.total_tokens_estimated += inputTokens + outputTokens;

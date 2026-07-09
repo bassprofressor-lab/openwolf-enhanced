@@ -40,6 +40,40 @@ const logger = new Logger(
 const startTime = Date.now();
 const wsClients = new Set<WebSocket>();
 
+// Files served to the dashboard on demand (via /api/files and full_state broadcasts).
+const WOLF_BROADCAST_FILES = [
+  "OPENWOLF.md", "identity.md", "cerebrum.md", "memory.md", "anatomy.md",
+  "config.json", "token-ledger.json", "buglog.json",
+  "cron-manifest.json", "cron-state.json",
+  "designqc-report.json",
+];
+
+// Read a .wolf file for delivery to the dashboard, trimming the largest ones so a
+// multi-MB token-ledger.json isn't shipped in full over HTTP/WS on every connect.
+// The dashboard only needs lifetime aggregates + recent sessions, so we keep the
+// last 50 sessions when the file is large.
+function readWolfFileForDashboard(file: string): string {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(wolfDir, file), "utf-8");
+  } catch {
+    return "";
+  }
+  if (file === "token-ledger.json" && raw.length > 256 * 1024) {
+    try {
+      const led = JSON.parse(raw) as { sessions?: unknown[]; [k: string]: unknown };
+      if (Array.isArray(led.sessions) && led.sessions.length > 50) {
+        led.sessions = led.sessions.slice(-50);
+        led._trimmed_for_dashboard = true;
+      }
+      return JSON.stringify(led);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 // Express server
 const app = express();
 app.use(express.json());
@@ -134,18 +168,8 @@ app.get("/api/project", (_req, res) => {
 
 app.get("/api/files", (_req, res) => {
   const files: Record<string, string> = {};
-  const wolfFiles = [
-    "OPENWOLF.md", "identity.md", "cerebrum.md", "memory.md", "anatomy.md",
-    "config.json", "token-ledger.json", "buglog.json",
-    "cron-manifest.json", "cron-state.json",
-    "designqc-report.json",
-  ];
-  for (const file of wolfFiles) {
-    try {
-      files[file] = fs.readFileSync(path.join(wolfDir, file), "utf-8");
-    } catch {
-      files[file] = "";
-    }
+  for (const file of WOLF_BROADCAST_FILES) {
+    files[file] = readWolfFileForDashboard(file);
   }
   // Also try suggestions.json
   try {
@@ -256,18 +280,8 @@ function handleDashboardCommand(msg: { type: string; task_id?: string }): void {
       // Send all files
       try {
         const files: Record<string, string> = {};
-        const wolfFiles = [
-          "OPENWOLF.md", "identity.md", "cerebrum.md", "memory.md", "anatomy.md",
-          "config.json", "token-ledger.json", "buglog.json",
-          "cron-manifest.json", "cron-state.json",
-          "designqc-report.json",
-        ];
-        for (const file of wolfFiles) {
-          try {
-            files[file] = fs.readFileSync(path.join(wolfDir, file), "utf-8");
-          } catch {
-            files[file] = "";
-          }
+        for (const file of WOLF_BROADCAST_FILES) {
+          files[file] = readWolfFileForDashboard(file);
         }
         broadcast({ type: "full_state", files, timestamp: new Date().toISOString() });
       } catch (err) {

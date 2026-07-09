@@ -110,7 +110,7 @@ export function serializeAnatomy(
   return lines.join("\n");
 }
 
-export function extractDescription(filePath: string): string {
+export function extractDescription(filePath: string, preloadedContent?: string): string {
   const MAX_DESC = 150;
   const basename = path.basename(filePath);
   const ext = path.extname(basename).toLowerCase();
@@ -132,14 +132,19 @@ export function extractDescription(filePath: string): string {
   if (known[basename]) return known[basename];
 
   let content: string;
-  try {
-    const fd = fs.openSync(filePath, "r");
-    const buf = Buffer.alloc(12288); // 12KB
-    const n = fs.readSync(fd, buf, 0, 12288, 0);
-    fs.closeSync(fd);
-    content = buf.subarray(0, n).toString("utf-8");
-  } catch {
-    return "";
+  if (preloadedContent !== undefined) {
+    // Caller already read the file (e.g. post-write hook) — avoid a second open.
+    content = preloadedContent.slice(0, 12288);
+  } else {
+    try {
+      const fd = fs.openSync(filePath, "r");
+      const buf = Buffer.alloc(12288); // 12KB
+      const n = fs.readSync(fd, buf, 0, 12288, 0);
+      fs.closeSync(fd);
+      content = buf.subarray(0, n).toString("utf-8");
+    } catch {
+      return "";
+    }
   }
   if (!content.trim()) return "";
 

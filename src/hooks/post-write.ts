@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       fileContent = input.tool_input?.content ?? "";
     }
 
-    const desc = extractDescription(absolutePath).slice(0, 100);
+    const desc = extractDescription(absolutePath, fileContent).slice(0, 100);
     const ext = path.extname(absolutePath).toLowerCase();
     const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css"]);
     const proseExts = new Set([".md", ".txt", ".rst"]);
@@ -96,29 +96,36 @@ async function main(): Promise<void> {
     if (!sections.has(sectionKey)) sections.set(sectionKey, []);
     const entries = sections.get(sectionKey)!;
     const idx = entries.findIndex((e) => e.file === fileName);
-    if (idx !== -1) {
-      entries[idx] = { file: fileName, description: desc, tokens };
-    } else {
-      entries.push({ file: fileName, description: desc, tokens });
-    }
+    const existing = idx !== -1 ? entries[idx] : undefined;
 
-    let fileCount = 0;
-    for (const [, list] of sections) fileCount += list.length;
+    // Skip the full anatomy.md rewrite when nothing changed for this file.
+    // Repeated edits to the same file (same description + token estimate) are the common
+    // case; rewriting the entire anatomy.md on every one of them is pure overhead.
+    if (!existing || existing.description !== desc || existing.tokens !== tokens) {
+      if (idx !== -1) {
+        entries[idx] = { file: fileName, description: desc, tokens };
+      } else {
+        entries.push({ file: fileName, description: desc, tokens });
+      }
 
-    const serialized = serializeAnatomy(sections, {
-      lastScanned: new Date().toISOString(),
-      fileCount,
-      hits: 0,
-      misses: 0,
-    });
+      let fileCount = 0;
+      for (const [, list] of sections) fileCount += list.length;
 
-    const tmp = anatomyPath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-    try {
-      fs.writeFileSync(tmp, serialized, "utf-8");
-      fs.renameSync(tmp, anatomyPath);
-    } catch {
-      try { fs.writeFileSync(anatomyPath, serialized, "utf-8"); } catch {}
-      try { fs.unlinkSync(tmp); } catch {}
+      const serialized = serializeAnatomy(sections, {
+        lastScanned: new Date().toISOString(),
+        fileCount,
+        hits: 0,
+        misses: 0,
+      });
+
+      const tmp = anatomyPath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
+      try {
+        fs.writeFileSync(tmp, serialized, "utf-8");
+        fs.renameSync(tmp, anatomyPath);
+      } catch {
+        try { fs.writeFileSync(anatomyPath, serialized, "utf-8"); } catch {}
+        try { fs.unlinkSync(tmp); } catch {}
+      }
     }
   } catch {}
 
@@ -294,13 +301,14 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
   const detection = detectFixPattern(oldStr, newStr, ext);
   if (!detection) return;
 
-  // Check for recent duplicate (same file + same category within 5 min)
+  // Check for recent duplicate (same file + same category within 30 min).
+  // Widened from 5 min to cut down on repeated auto-detected entries for the same file.
   const recentDupe = bugLog.bugs.find(b => {
     if (path.basename(b.file) !== basename) return false;
     if (!b.tags.includes("auto-detected")) return false;
     if (!b.tags.includes(detection.category)) return false;
     const bugTime = new Date(b.last_seen).getTime();
-    return (Date.now() - bugTime) < 5 * 60 * 1000;
+    return (Date.now() - bugTime) < 30 * 60 * 1000;
   });
 
   if (recentDupe) {
@@ -314,7 +322,13 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
     return;
   }
 
-  const nextId = `bug-${String(bugLog.bugs.length + 1).padStart(3, "0")}`;
+  // Derive id from the max existing numeric id so it stays unique even after the
+  // bugs[] array is trimmed below (bugs.length + 1 would collide after a trim).
+  const maxId = bugLog.bugs.reduce((m, b) => {
+    const n = parseInt(String(b.id).replace(/\D/g, ""), 10);
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  const nextId = `bug-${String(maxId + 1).padStart(3, "0")}`;
 
   bugLog.bugs.push({
     id: nextId,
@@ -328,6 +342,11 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
     occurrences: 1,
     last_seen: new Date().toISOString(),
   });
+
+  // Keep buglog.json bounded — auto-detection can otherwise append on nearly every edit.
+  if (bugLog.bugs.length > 200) {
+    bugLog.bugs = bugLog.bugs.slice(-200);
+  }
 
   writeJSON(bugLogPath, bugLog);
 }
@@ -518,21 +537,10 @@ function detectFixPattern(oldStr: string, newStr: string, ext: string): FixDetec
     }
   }
 
-  // --- Significant diff (catch-all for substantial edits) ---
-  const diffRatio = Math.abs(newStr.length - oldStr.length) / Math.max(oldStr.length, 1);
-  if (diffRatio > 0.3 && oldLines.length >= 3 && newLines.length >= 3) {
-    // Only log if there's meaningful structural change, not just additions
-    const removedLines = oldLines.filter(l => l.trim() && !newLines.some(nl => nl.trim() === l.trim()));
-    if (removedLines.length >= 2) {
-      return {
-        category: "refactor",
-        summary: `Significant refactor of ${path.basename("")}`,
-        rootCause: `${removedLines.length} lines replaced/restructured`,
-        fix: `Rewrote ${oldLines.length}→${newLines.length} lines (${removedLines.length} removed)`,
-        context: removedLines.slice(0, 2).map(l => l.trim().slice(0, 50)).join("; "),
-      };
-    }
-  }
+  // NOTE: the old "significant diff" catch-all (category: "refactor") was removed —
+  // it fired on nearly every legitimate multi-line edit (diffRatio > 0.3 with >=2 removed
+  // lines), flooding buglog.json with non-bugs. Auto-detection now only reports edits that
+  // match a specific fix pattern above.
 
   return null;
 }

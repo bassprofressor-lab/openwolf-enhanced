@@ -180,6 +180,10 @@ export class CronEngine {
             timestamp: new Date().toISOString(),
             attempts: failures,
           });
+          // Keep the dead-letter queue bounded (execution_log is already capped elsewhere).
+          if (state.dead_letter_queue.length > 100) {
+            state.dead_letter_queue = state.dead_letter_queue.slice(-100);
+          }
         }
 
         this.writeState(state);
@@ -287,7 +291,9 @@ export class CronEngine {
     const flags = detectWaste(this.wolfDir);
     const ledgerPath = path.join(this.wolfDir, "token-ledger.json");
     const ledger = readJSON<Record<string, unknown>>(ledgerPath, {});
-    (ledger as { waste_flags: unknown[] }).waste_flags = flags;
+    // Keep waste_flags bounded (defensive — detectWaste could in principle return many).
+    (ledger as { waste_flags: unknown[] }).waste_flags =
+      flags.length > 200 ? flags.slice(-200) : flags;
     (ledger as { optimization_report: { last_generated: string; patterns: unknown[] } }).optimization_report = {
       last_generated: new Date().toISOString(),
       patterns: flags.map((f) => f.pattern),

@@ -15,6 +15,10 @@ export function startFileWatcher(
       "**/hooks/_session.json",
       "**/*.tmp",
       "**/daemon.log",
+      // Large, high-churn files: re-read + broadcast of the full content on every write
+      // is the daemon's worst waste. The dashboard fetches them via full_state on demand.
+      "**/token-ledger.json",
+      "**/buglog.json",
     ],
     persistent: true,
     awaitWriteFinish: {
