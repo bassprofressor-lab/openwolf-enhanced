@@ -6,6 +6,33 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.5.0] — 2026-07-09
+
+Adopts the core of upstream PR #4 (dashboard fixes by @MyEditHub), adapted to this fork's
+authenticated dashboard.
+
+### Fixed
+- **"Run Now" now works and gives feedback (#4).** The button posts to `/api/cron/run/:id`
+  (via the authenticated fetch — a plain fetch would 401 under this fork's dashboard auth); the
+  endpoint returns `202` and runs the task in the background, and a permanent failure is broadcast
+  as `task_error` so the UI shows the real error instead of resetting silently.
+- **AI tasks no longer try to launch the desktop app (#4).** A background daemon can't drive the
+  interactive `claude` CLI; AI cron tasks now call the Anthropic API directly when
+  `ANTHROPIC_API_KEY` is set, and fail with a clear, actionable message when it isn't. Context
+  files are capped at 20 KB.
+- **Cron execution log is written again (#4).** A partial `cron-state.json` (missing
+  `execution_log`) used to make every successful run look like a failure via an uncaught
+  `TypeError`; `readState` now merges stored state over complete defaults.
+- **Token graph shows date *and* time (#4);** the token-comparison chart uses only real tracked
+  numbers (no fabricated "OpenClaw" bar), with honest labels, a transparent bar background and
+  readable tooltips.
+- **`openwolf` binary keeps its execute bit (#4)** — `build` and a `postinstall` hook `chmod +x`
+  the CLI, which `tsc` otherwise strips on every build.
+
+_Deferred to a follow-up: the larger sub-features of #4 — Design QC on deployed URLs, the
+"Live"/health badge cleanup, and the in-place project switcher — which touch this fork's auth and
+multi-project handling and warrant their own pass._
+
 ## [1.4.0] — 2026-07-09
 
 ### Added

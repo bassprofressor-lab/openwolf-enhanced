@@ -207,10 +207,12 @@ app.post("/api/cron/run/:taskId", (req, res) => {
     res.status(503).json({ error: "Cron engine not running" });
     return;
   }
-  cronEngine.runTask(taskId).then(() => {
-    res.json({ status: "ok", task_id: taskId });
-  }).catch((err) => {
-    res.status(500).json({ error: String(err) });
+  // Return 202 immediately — the task runs in the background; results arrive via the
+  // WebSocket / file-watcher. A failure is broadcast as task_error (upstream #4, bug 1).
+  res.status(202).json({ status: "accepted", task_id: taskId });
+  cronEngine.runTask(taskId).catch((err) => {
+    logger.error(`Manual task trigger failed for ${taskId}: ${err}`);
+    broadcast({ type: "task_error", task_id: taskId, error: String(err) });
   });
 });
 

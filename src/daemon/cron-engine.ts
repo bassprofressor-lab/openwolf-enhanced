@@ -1,8 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync, spawnSync } from "node:child_process";
 import cron from "node-cron";
-import { readJSON, writeJSON, readText, writeText, appendText } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, readText, writeText } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
 import type { Logger } from "../utils/logger.js";
@@ -107,10 +106,11 @@ export class CronEngine {
   }
 
   private readState(): CronState {
-    return readJSON<CronState>(
-      path.join(this.wolfDir, "cron-state.json"),
-      { last_heartbeat: null, engine_status: "running", execution_log: [], dead_letter_queue: [], upcoming: [] }
-    );
+    // Merge stored state over complete defaults so array fields (execution_log, dead_letter_queue)
+    // are always present — a partial cron-state.json used to crash task logging (upstream #4, bug 8).
+    const defaults: CronState = { last_heartbeat: null, engine_status: "running", execution_log: [], dead_letter_queue: [], upcoming: [] };
+    const stored = readJSON<Partial<CronState>>(path.join(this.wolfDir, "cron-state.json"), {});
+    return { ...defaults, ...stored };
   }
 
   private writeState(state: CronState): void {
@@ -188,6 +188,8 @@ export class CronEngine {
 
         this.writeState(state);
         this.failureCounts.set(task.id, 0);
+        // Notify the dashboard that this task permanently failed (upstream #4, bug 1).
+        this.broadcast({ type: "task_error", task_id: task.id, error: errorMsg });
       }
 
       this.broadcast({
@@ -301,21 +303,9 @@ export class CronEngine {
     writeJSON(ledgerPath, ledger);
   }
 
-  private hasClaude(): boolean {
-    try {
-      const cmd = process.platform === "win32" ? "where claude" : "which claude";
-      execSync(cmd, { stdio: "ignore" });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   private async runAiTask(params: { prompt: string; context_files: string[] }): Promise<void> {
-    if (!this.hasClaude()) {
-      throw new Error("Claude CLI not found. Install it from https://claude.ai/download or add it to PATH.");
-    }
-
+    // Cap each context file so one large file can't blow up the prompt.
+    const MAX_CONTEXT_BYTES = 20 * 1024;
     const contextParts: string[] = [];
     const rootPrefix = path.resolve(this.projectRoot) + path.sep;
     for (const file of params.context_files) {
@@ -327,7 +317,11 @@ export class CronEngine {
         continue;
       }
       try {
-        contextParts.push(`--- ${file} ---\n${fs.readFileSync(filePath, "utf-8")}`);
+        let content = fs.readFileSync(filePath, "utf-8");
+        if (Buffer.byteLength(content, "utf-8") > MAX_CONTEXT_BYTES) {
+          content = "...[truncated — showing most recent]\n" + content.slice(-MAX_CONTEXT_BYTES);
+        }
+        contextParts.push(`--- ${file} ---\n${content}`);
       } catch {
         contextParts.push(`--- ${file} --- (not found)`);
       }
@@ -335,60 +329,50 @@ export class CronEngine {
 
     const fullPrompt = `${params.prompt}\n\n---\nContext:\n${contextParts.join("\n\n")}`;
 
-    try {
-      // Use spawnSync to pipe prompt via stdin — avoids command-line length limits on Windows
-      // claude -p (no argument) reads prompt from stdin
-      // Strip ANTHROPIC_API_KEY so claude uses OAuth subscription credentials
-      // instead of a potentially depleted API key
-      const env = { ...process.env };
-      delete env.ANTHROPIC_API_KEY;
-
-      const proc = spawnSync("claude -p --output-format text", {
-        input: fullPrompt,
-        timeout: 120000,
-        encoding: "utf-8",
-        cwd: this.projectRoot,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-        // shell: true needed on Windows so that claude.cmd is resolved
-        shell: true,
-        windowsHide: true,
-      });
-
-      if (proc.error) {
-        throw proc.error;
-      }
-
-      if (proc.status !== 0) {
-        const stderr = proc.stderr?.trim();
-        const stdout = proc.stdout?.trim();
-        const errMsg = stderr || stdout || "Unknown error";
-        throw new Error(`Exit code ${proc.status}: ${errMsg}`);
-      }
-
-      let result = (proc.stdout || "").replace(/\r\n/g, "\n").trim();
-
-      // Strip markdown code fences if present (```markdown ... ``` or ```json ... ```)
-      const fenceMatch = result.match(/```[\w]*\n([\s\S]*?)\n```/);
-      if (fenceMatch) {
-        result = fenceMatch[1].trim();
-      }
-
-      // Write result to suggestions.json if it looks like JSON
-      try {
-        const parsed = JSON.parse(result);
-        writeJSON(path.join(this.wolfDir, "suggestions.json"), {
-          generated_at: new Date().toISOString(),
-          ...parsed,
-        });
-      } catch {
-        // Not JSON, might be a cerebrum update
-        if (result.includes("## User Preferences") || result.includes("## Key Learnings") || result.includes("# Cerebrum")) {
-          writeText(path.join(this.wolfDir, "cerebrum.md"), result);
-        }
-      }
-    } catch (err) {
-      throw new Error(`claude -p failed: ${err instanceof Error ? err.message : String(err)}`);
+    // A background daemon can't drive the interactive `claude` CLI (it delegates auth to the
+    // desktop app and fails headless). Use a direct API key instead, with a clear error if it's
+    // missing — the dashboard then shows a copy-able prompt to run inside a session (upstream #4, bug 2).
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error(
+        "ANTHROPIC_API_KEY is not set. AI tasks require a direct API key when running as a background daemon. " +
+        "Set it in your shell profile: export ANTHROPIC_API_KEY=sk-ant-api03-…"
+      );
     }
+    let result = await this.runViaApi(fullPrompt, process.env.ANTHROPIC_API_KEY);
+
+    const fenceMatch = result.match(/```[\w]*\n([\s\S]*?)\n```/);
+    if (fenceMatch) result = fenceMatch[1].trim();
+
+    // Write result to suggestions.json if it's JSON, otherwise treat as a cerebrum update.
+    try {
+      const parsed = JSON.parse(result);
+      writeJSON(path.join(this.wolfDir, "suggestions.json"), { generated_at: new Date().toISOString(), ...parsed });
+    } catch {
+      if (result.includes("## User Preferences") || result.includes("## Key Learnings") || result.includes("# Cerebrum")) {
+        writeText(path.join(this.wolfDir, "cerebrum.md"), result);
+      }
+    }
+  }
+
+  private async runViaApi(prompt: string, apiKey: string): Promise<string> {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Anthropic API error ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
+    return data.content.find((b) => b.type === "text")?.text?.trim() ?? "";
   }
 }
