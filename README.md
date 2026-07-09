@@ -64,6 +64,22 @@ merged (the upstream repo has been inactive since March 2026):
   re-read without a "already read" warning. *(upstream #41)*
 - 🐛 **No off-project tracking** — files outside the project root never enter anatomy/memory. *(upstream #56)*
 - 🐛 **Saner auto bug-detection** — the noisy "any big diff is a bug" heuristic was removed. *(upstream #28)*
+- 🐛 **`.gitignore` is respected** — anatomy scanning and hook tracking honor `.gitignore` (not just `.wolfignore`), so ignored/build files aren't indexed. *(upstream #15)*
+- 🐛 **`init` won't scaffold `$HOME`** — `findProjectRoot` stops at the home directory, and multi-project port collisions are avoided. *(upstream #20)*
+
+### Adopted upstream PRs (1.3.x)
+
+Useful upstream pull requests that were never merged, adapted to this fork:
+
+- 💬 **End-of-turn reminders actually reach Claude** — the stop hook's reminders (unlogged bug
+  fixes, stale `cerebrum.md`, missing session summary) were written to stderr, which the model
+  never sees; they now use the `additionalContext` stdout channel, and each fires **at most
+  once per session** instead of nagging every turn. *(upstream #55)*
+- 🖥 **Works on WSL2 / EFS** — file copies use a read+write shim, fixing `EPERM` on WSL2 mounts
+  under EFS-encrypted directories. *(upstream #33)*
+- 🏷 **Cleaner hook management** — `.claude/settings.json` entries are tagged `_managedBy:
+  "openwolf"`, so `init`/`update` can replace/remove only their own hooks. *(upstream #32)*
+- 🎯 **Dart support** — `.dart` files are recognized for token estimation. *(upstream #10)*
 
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
