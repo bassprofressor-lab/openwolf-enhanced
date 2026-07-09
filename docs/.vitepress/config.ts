@@ -123,7 +123,7 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: "github", link: "https://github.com/cytostack/openwolf" },
+      { icon: "github", link: "https://github.com/bassprofressor-lab/openwolf-enhanced" },
     ],
     footer: {
       message: 'AGPL-3.0 · Made by <a href="https://github.com/cytostack" target="_blank">Cytostack</a>',

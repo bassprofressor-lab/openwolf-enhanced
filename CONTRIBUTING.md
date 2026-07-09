@@ -1,14 +1,14 @@
-# Contributing to OpenWolf
+# Contributing to OpenWolf Enhanced
 
-Thanks for your interest in contributing to OpenWolf. This guide covers how to get involved.
+Thanks for your interest in contributing to OpenWolf Enhanced. This guide covers how to get involved.
 
 ## Getting Started
 
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/your-username/openwolf.git
-   cd openwolf
+   git clone https://github.com/your-username/openwolf-enhanced.git
+   cd openwolf-enhanced
    ```
 3. Install dependencies:
    ```bash
@@ -51,7 +51,7 @@ pnpm docs:dev        # Local docs site
 
 ### Key Files
 
-- `src/cli/program/register.subclis.ts` — where CLI subcommands are registered
+- `src/cli/index.ts` — `createProgram()`, where CLI commands are registered
 - `src/hooks/` — the 6 Claude Code lifecycle hook scripts
 - `src/templates/` — files copied into `.wolf/` on `openwolf init`
 - `src/utils/platform.ts` — platform detection (Windows/macOS/Linux)
@@ -74,7 +74,7 @@ pnpm docs:dev        # Local docs site
 
 ## Reporting Bugs
 
-Open an issue at [github.com/cytostack/openwolf/issues](https://github.com/cytostack/openwolf/issues) with:
+Open an issue at [github.com/bassprofressor-lab/openwolf-enhanced/issues](https://github.com/bassprofressor-lab/openwolf-enhanced/issues) with:
 
 - Your OS and Node.js version
 - Claude Code version

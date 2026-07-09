@@ -129,4 +129,4 @@ openwolf cron run project-suggestions
 - **Responsive**: sidebar collapses to bottom tab bar on mobile
 - **Live updates**: WebSocket connection pushes `.wolf/` file changes in real time
 - **Lazy-loaded panels** with skeleton fallbacks
-- **Sidebar footer**: links to [OpenWolf on GitHub](https://github.com/cytostack/openwolf) and shows version
+- **Sidebar footer**: links to [OpenWolf Enhanced on GitHub](https://github.com/bassprofressor-lab/openwolf-enhanced) and shows version
