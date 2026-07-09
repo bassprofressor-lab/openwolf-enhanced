@@ -1,7 +1,7 @@
 {
-  "name": "openwolf",
-  "version": "1.0.4-krynex.4",
-  "description": "Token-conscious AI brain for Claude Code projects",
+  "name": "openwolf-enhanced",
+  "version": "1.1.0",
+  "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
   "type": "module",
   "bin": {
     "openwolf": "./dist/bin/openwolf.js"
@@ -49,14 +49,17 @@
     "node": ">=20.0.0"
   },
   "license": "AGPL-3.0-only",
-  "author": "Cytostack Pvt Ltd",
+  "author": "Krynex Labs",
+  "contributors": [
+    "Cytostack Pvt Ltd (original OpenWolf)"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/cytostack/openwolf.git"
+    "url": "git+https://github.com/bassprofressor-lab/openwolf-enhanced.git"
   },
-  "homepage": "https://github.com/cytostack/openwolf",
+  "homepage": "https://github.com/bassprofressor-lab/openwolf-enhanced#readme",
   "bugs": {
-    "url": "https://github.com/cytostack/openwolf/issues"
+    "url": "https://github.com/bassprofressor-lab/openwolf-enhanced/issues"
   },
   "keywords": [
     "claude",
@@ -71,6 +74,8 @@
     "dist/",
     "src/templates/",
     "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
     "README.md"
   ]
 }

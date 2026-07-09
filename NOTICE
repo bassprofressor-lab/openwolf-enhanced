@@ -1,0 +1,48 @@
+OpenWolf Enhanced
+=================
+
+This project is a fork of OpenWolf, a token-conscious context manager for
+Claude Code projects.
+
+Original work:
+  OpenWolf
+  Copyright (c) 2026 Cytostack Pvt Ltd
+  https://github.com/cytostack/openwolf
+  Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+
+This fork:
+  OpenWolf Enhanced
+  Copyright (c) 2026 Krynex Labs
+  https://github.com/bassprofressor-lab/openwolf-enhanced
+  Also licensed under the GNU Affero General Public License v3.0 (AGPL-3.0),
+  as required by the license of the original work.
+
+The full license text is in the LICENSE file. Per the AGPL, the copyright and
+license of the original work are preserved, and this NOTICE documents the
+modifications made in this fork.
+
+Summary of modifications relative to the upstream 1.0.4 baseline
+----------------------------------------------------------------
+- Bounded storage growth: token-ledger.json (sessions and per-session I/O),
+  buglog.json, cron dead-letter queue, and waste_flags are all capped.
+- Tamed auto bug-detection: removed the noisy "significant diff" catch-all,
+  widened the de-duplication window, and made buglog IDs collision-free.
+- anatomy.md is no longer rewritten when a file's entry is unchanged, and the
+  edited file is read only once per write.
+- Daemon no longer re-reads/broadcasts large files on every change; large
+  files are trimmed for dashboard delivery.
+- New `openwolf doctor` command: daemon-independent .wolf/ health report and
+  compaction (ledger, memory consolidation, buglog de-dup, backup pruning,
+  log rotation, tmp cleanup).
+- New `.wolfignore` support: gitignore-style scoping for anatomy scanning and
+  hook tracking.
+- New `openwolf.retention` config block: all limits are user-tunable.
+- `openwolf update` now deep-merges config.json instead of overwriting it, so
+  user settings survive updates.
+- `openwolf status` now reports the .wolf/ footprint and size warnings.
+- Stop hook opportunistically consolidates memory.md when it grows too large,
+  so maintenance works even when the daemon is not running.
+- Legacy bare-array buglog.json files are read tolerantly and migrated to the
+  { version, bugs } schema without data loss.
+
+See CHANGELOG.md for details.
