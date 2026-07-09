@@ -68,6 +68,7 @@ export interface WolfData {
   loading: boolean;
   connected: boolean;
   client: WolfClient | null;
+  retry: () => void;
 }
 
 export function useWolfData(): WolfData {
@@ -121,8 +122,8 @@ export function useWolfData(): WolfData {
     }
   }, []);
 
-  useEffect(() => {
-    // Initial fetch
+  // REST snapshot fetch — also the "retry" action for the daemon-down banner.
+  const refresh = useCallback(() => {
     authedFetch("/api/files")
       .then(r => r.json())
       .then(files => {
@@ -140,6 +141,17 @@ export function useWolfData(): WolfData {
       .then(r => r.json())
       .then(p => setProject(p))
       .catch(() => {});
+  }, [processFiles]);
+
+  const retry = useCallback(() => {
+    setLoading(true);
+    refresh();
+    client?.connect();
+  }, [refresh, client]);
+
+  useEffect(() => {
+    // Initial fetch
+    refresh();
 
     // WebSocket
     const wsClient = new WolfClient();
@@ -164,7 +176,7 @@ export function useWolfData(): WolfData {
     });
 
     return () => wsClient.disconnect();
-  }, [processFiles]);
+  }, [refresh]);
 
-  return { anatomy, cerebrum, memory, tokenLedger, cronState, cronManifest, buglog, suggestions, designqcReport, health, identity, project, loading, connected, client };
+  return { anatomy, cerebrum, memory, tokenLedger, cronState, cronManifest, buglog, suggestions, designqcReport, health, identity, project, loading, connected, client, retry };
 }

@@ -1,11 +1,16 @@
 import React, { useState } from "react";
-import { authedFetch } from "../../lib/auth.js";
+import { authedFetch, withToken } from "../../lib/auth.js";
 import type { WolfData } from "../../hooks/useWolfData.js";
+
+// Authed image URL for a capture — the daemon's /api/designqc/capture route is
+// token-gated, and <img> can only pass the token via query string.
+const captureUrl = (file: string) => withToken(`/api/designqc/capture/${encodeURIComponent(file)}`);
 
 export function DesignQC({ data }: { data: WolfData }) {
   const { designqcReport, project } = data;
   const [captureState, setCaptureState] = useState<"idle" | "running" | "error">("idle");
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const hasCaptures = designqcReport && designqcReport.captures && designqcReport.captures.length > 0;
 
@@ -85,8 +90,8 @@ export function DesignQC({ data }: { data: WolfData }) {
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex gap-4 text-sm mb-3">
+          <div>
+            <div className="flex gap-4 text-sm mb-4">
               <span style={{ color: "var(--text-faint)" }}>
                 Captured: {designqcReport.captured_at || "—"}
               </span>
@@ -97,15 +102,53 @@ export function DesignQC({ data }: { data: WolfData }) {
                 Est. tokens: ~{designqcReport.estimated_tokens || 0}
               </span>
             </div>
-            {designqcReport.captures.map((cap: any, i: number) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "var(--bg-base)" }}>
-                <span className="text-sm" style={{ color: "var(--text-primary)" }}>{cap.file}</span>
-                <span className="text-xs" style={{ color: "var(--text-faint)" }}>{cap.viewport} &middot; {cap.route}</span>
-              </div>
-            ))}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {designqcReport.captures.map((cap: any, i: number) => (
+                <button
+                  key={i}
+                  onClick={() => setLightbox(cap.file)}
+                  className="text-left rounded-lg overflow-hidden transition-transform hover:-translate-y-0.5"
+                  style={{ background: "var(--bg-base)", border: "1px solid var(--border)" }}
+                  title="Klicken zum Vergrößern"
+                >
+                  <img
+                    src={captureUrl(cap.file)}
+                    alt={`${cap.viewport} · ${cap.route}`}
+                    loading="lazy"
+                    className="w-full block"
+                    style={{ maxHeight: 200, objectFit: "cover", objectPosition: "top", background: "var(--bg-surface)" }}
+                  />
+                  <div className="px-3 py-2">
+                    <div className="text-sm truncate" style={{ color: "var(--text-primary)" }}>{cap.file}</div>
+                    <div className="text-xs" style={{ color: "var(--text-faint)" }}>{cap.viewport} &middot; {cap.route}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-6"
+          style={{ background: "rgba(0,0,0,0.8)" }}
+        >
+          <div className="relative max-w-6xl max-h-[90vh] overflow-auto rounded-lg" onClick={(e) => e.stopPropagation()}>
+            <img src={captureUrl(lightbox)} alt={lightbox} className="block" style={{ maxWidth: "100%" }} />
+          </div>
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center text-lg"
+            style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            aria-label="Schließen"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

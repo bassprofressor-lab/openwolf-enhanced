@@ -236,6 +236,26 @@ app.get("/api/designqc-report", (_req, res) => {
   res.json(report);
 });
 
+// Serve a Design QC capture image so the dashboard can show thumbnails/lightbox
+// instead of bare filenames. Under /api → already behind the dashboard-token gate
+// (which also accepts ?token=, so an <img src> can authenticate). Path-safe.
+app.get("/api/designqc/capture/:file", (req, res) => {
+  const capturesDir = path.join(wolfDir, "designqc-captures");
+  const safe = path.basename(req.params.file); // strip any traversal
+  const filePath = path.join(capturesDir, safe);
+  if (!filePath.startsWith(capturesDir + path.sep) || !fs.existsSync(filePath)) {
+    res.status(404).json({ error: "capture not found" });
+    return;
+  }
+  const ext = path.extname(safe).toLowerCase();
+  const type = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+  res.setHeader("Content-Type", type);
+  res.setHeader("Cache-Control", "no-cache");
+  // The capture lives under .wolf/ (a dotdir); Express 5's sendFile defaults to
+  // dotfiles:"ignore" and would 404 the whole path. Allow it explicitly.
+  res.sendFile(filePath, { dotfiles: "allow" });
+});
+
 // Manually trigger a Design QC capture (works on a deployed URL, not just localhost — #4, bug 4).
 app.post("/api/designqc/run", (req, res) => {
   const dc = (config.openwolf as unknown as { designqc?: { viewports?: unknown[]; max_screenshots?: number; chrome_path?: string | null } }).designqc ?? {};

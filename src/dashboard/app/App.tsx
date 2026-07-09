@@ -70,6 +70,25 @@ export default function App() {
       />
       <Layout>
         <Header title={panelTitles[activePanel] || "OpenWolf"} theme={theme} onToggleTheme={toggleTheme} currentProject={data.project.root} connected={data.connected} />
+        {!data.connected && !data.loading && (
+          <div
+            className="rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3"
+            style={{ background: "var(--danger-subtle)", border: "1px solid rgba(220,38,38,0.3)" }}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <span style={{ color: "var(--danger)" }}>⚠</span>
+              <span style={{ color: "var(--danger)" }} className="font-medium">Daemon nicht erreichbar</span>
+              <span style={{ color: "var(--text-muted)" }}>— angezeigte Daten können veraltet sein. Läuft der Daemon? <code className="px-1 rounded text-xs" style={{ background: "var(--bg-base)" }}>openwolf daemon start</code></span>
+            </div>
+            <button
+              onClick={data.retry}
+              className="px-3 py-1 text-sm rounded-lg whitespace-nowrap transition-colors"
+              style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+            >
+              Erneut versuchen
+            </button>
+          </div>
+        )}
         <Suspense fallback={<Skeleton />}>
           {activePanel === "overview" && <ProjectOverview data={data} />}
           {activePanel === "activity" && <ActivityTimeline data={data} />}

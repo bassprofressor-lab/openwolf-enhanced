@@ -6,6 +6,35 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.9.0] — 2026-07-09
+
+Dashboard & CLI quick wins — usability and self-diagnosis, verified headless (Chromium).
+
+### Added
+- **Daemon-down banner (dashboard).** When the daemon is unreachable, panels used to render empty —
+  indistinguishable from a genuinely empty project. The dashboard now shows a dismissable warning
+  banner (with a "retry" button that re-fetches + reconnects) whenever the WebSocket is disconnected
+  after load. `useWolfData` exposes a `retry()` action for this.
+- **Design QC image thumbnails + lightbox.** The Design QC panel showed only capture *filenames*.
+  It now renders each capture as a thumbnail grid; clicking one opens a full-size lightbox. Served by
+  a new path-safe, token-gated daemon route `GET /api/designqc/capture/:file` (with
+  `dotfiles: "allow"` — captures live under the `.wolf/` dotdir, which Express 5's `sendFile` ignores
+  by default).
+- **`openwolf doctor` cross-project checks.** Doctor now reports registry health: **dead entries**
+  (registered project whose path no longer exists) and **dashboard-port collisions** (multiple
+  projects sharing a `dashboard.port`, whose daemons would collide). Exactly the failure modes that
+  bit a multi-project setup — now surfaced with the fix hint.
+
+### Fixed
+- **Chart tooltips are theme-aware.** `TokenUsage` tooltips hard-coded dark colors (`#1a1a1a`), making
+  them unreadable in light mode. They now use the theme's CSS variables.
+
+### Notes
+- Verified with a headless Chromium harness: Design QC thumbnails render and load, the lightbox opens,
+  and the daemon-down banner appears when the daemon is killed — with zero page/console errors. The
+  capture route returns `200 image/png`; path traversal (`../config.json`) is rejected. Doctor
+  correctly reports both a healthy 5-project registry and an injected port collision.
+
 ## [1.8.0] — 2026-07-09
 
 Dependency currency pass (dev + runtime majors) plus a latent file-watcher fix surfaced by the chokidar bump.

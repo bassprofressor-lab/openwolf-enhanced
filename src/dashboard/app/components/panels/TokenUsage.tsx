@@ -39,7 +39,8 @@ export function TokenUsage({ data }: { data: WolfData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
               <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 12 }} />
               <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={(v) => formatTokens(v)} />
-              <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, color: "#e5e5e5" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)" }}
+                itemStyle={{ color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} />
               <Area type="monotone" dataKey="input" name="Input (reads)" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
               <Area type="monotone" dataKey="output" name="Output (writes)" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3} />
             </AreaChart>
@@ -67,7 +68,8 @@ export function TokenUsage({ data }: { data: WolfData }) {
               <BarChart data={comparisonData} layout="vertical">
                 <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={(v) => formatTokens(v)} />
                 <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 12 }} width={220} />
-                <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, color: "#e5e5e5" }} cursor={{ fill: "transparent" }} formatter={(v: number) => [formatTokens(v) + " tokens", ""]} />
+                <Tooltip contentStyle={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)" }}
+                itemStyle={{ color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} cursor={{ fill: "transparent" }} formatter={(v: number) => [formatTokens(v) + " tokens", ""]} />
                 <Bar dataKey="tokens" radius={[0, 4, 4, 0]} background={{ fill: "transparent" }}>
                   {comparisonData.map((entry, i) => (
                     <Cell key={i} fill={entry.fill} />
