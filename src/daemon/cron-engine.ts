@@ -317,8 +317,15 @@ export class CronEngine {
     }
 
     const contextParts: string[] = [];
+    const rootPrefix = path.resolve(this.projectRoot) + path.sep;
     for (const file of params.context_files) {
-      const filePath = path.join(this.projectRoot, file);
+      const filePath = path.resolve(this.projectRoot, file);
+      // Reject paths that escape the project root (e.g. "../../etc/passwd") — the file
+      // contents are fed to the model, so traversal would exfiltrate arbitrary files (#34).
+      if (filePath !== path.resolve(this.projectRoot) && !filePath.startsWith(rootPrefix)) {
+        contextParts.push(`--- ${file} --- (rejected: outside project root)`);
+        continue;
+      }
       try {
         contextParts.push(`--- ${file} ---\n${fs.readFileSync(filePath, "utf-8")}`);
       } catch {

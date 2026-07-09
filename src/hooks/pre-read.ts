@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy,
@@ -6,7 +7,7 @@ import {
 
 interface SessionData {
   session_id: string;
-  files_read: Record<string, { count: number; tokens: number; first_read: string }>;
+  files_read: Record<string, { count: number; tokens: number; first_read: string; mtime?: number }>;
   anatomy_hits: number;
   anatomy_misses: number;
   repeated_reads_warned: number;
@@ -33,12 +34,18 @@ async function main(): Promise<void> {
 
   const normalizedFile = normalizePath(filePath);
 
+  // Current on-disk mtime (used to allow a legitimate re-read after the file changed).
+  let fileMtime: number | undefined;
+  try { fileMtime = fs.statSync(filePath).mtimeMs; } catch { /* not statable */ }
+
   // Skip tracking for .wolf/ internal files — they're infrastructure, not project files.
   // Counting them inflates anatomy miss rates since .wolf/ is excluded from anatomy scanning.
   const projectDir = normalizePath(process.env.CLAUDE_PROJECT_DIR || process.cwd());
   const relToProject = normalizedFile.startsWith(projectDir)
     ? normalizedFile.slice(projectDir.length).replace(/^\//, "")
     : "";
+  // Don't track files outside the project root (upstream #56).
+  if (!relToProject) { process.exit(0); return; }
   if (relToProject.startsWith(".wolf/") || relToProject.startsWith(".wolf\\")) {
     process.exit(0);
     return;
@@ -52,10 +59,20 @@ async function main(): Promise<void> {
   // Check if already read this session
   if (session.files_read[normalizedFile]) {
     const prev = session.files_read[normalizedFile];
+    // If the file changed since we last read it (e.g. it was edited during the session),
+    // a re-read is legitimate — refresh state and don't warn about a repeated read (upstream #41).
+    if (fileMtime !== undefined && prev.mtime !== undefined && fileMtime !== prev.mtime) {
+      prev.count++;
+      prev.mtime = fileMtime;
+      writeJSON(sessionFile, session);
+      process.exit(0);
+      return;
+    }
     process.stderr.write(
       `⚡ OpenWolf: ${path.basename(normalizedFile)} was already read this session (~${prev.tokens} tokens). Consider using your existing knowledge of this file.\n`
     );
-    session.files_read[normalizedFile].count++;
+    prev.count++;
+    prev.mtime = fileMtime ?? prev.mtime;
     session.repeated_reads_warned++;
     writeJSON(sessionFile, session);
     process.exit(0);
@@ -93,6 +110,7 @@ async function main(): Promise<void> {
     count: 1,
     tokens: 0,
     first_read: new Date().toISOString(),
+    mtime: fileMtime,
   };
 
   writeJSON(sessionFile, session);

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { fork } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON } from "../utils/fs-safe.js";
+import { ensureDashboardToken } from "../utils/dashboard-auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,7 +50,10 @@ export async function dashboardCommand(): Promise<void> {
   });
 
   const port = config.openwolf.dashboard.port;
-  const url = `http://localhost:${port}`;
+  // The dashboard requires a token; pass it via the URL so the SPA can pick it up.
+  const token = ensureDashboardToken(wolfDir);
+  const baseUrl = `http://localhost:${port}`;
+  const url = `${baseUrl}/?token=${token}`;
 
   // Check if daemon is already running on that port
   const running = await isPortOpen(port);
@@ -92,7 +96,7 @@ export async function dashboardCommand(): Promise<void> {
     console.log(`  ✓ Dashboard server running on port ${port}`);
   }
 
-  console.log(`  Opening ${url}...`);
+  console.log(`  Opening ${baseUrl}...`);
 
   try {
     const { default: open } = await import("open");

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON, writeJSON } from "../utils/fs-safe.js";
+import { readDashboardToken } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "../daemon/cron-engine.js";
 
@@ -89,7 +90,7 @@ export async function cronRun(id: string): Promise<void> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/cron/run/${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-OpenWolf-Token": readDashboardToken(wolfDir) },
     });
     const body = await res.json() as { status?: string; error?: string };
     if (res.ok) {

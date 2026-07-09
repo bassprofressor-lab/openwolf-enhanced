@@ -21,13 +21,16 @@ export function bugSearch(term: string): void {
 
   console.log(`Found ${results.length} matching bug(s):\n`);
 
-  for (const bug of results) {
-    console.log(`  [${bug.id}] ${bug.error_message.slice(0, 80)}`);
-    console.log(`    File: ${bug.file}${bug.line ? `:${bug.line}` : ""}`);
-    console.log(`    Root cause: ${bug.root_cause}`);
-    console.log(`    Fix: ${bug.fix}`);
-    console.log(`    Tags: ${bug.tags.join(", ")}`);
-    console.log(`    Occurrences: ${bug.occurrences} | Last seen: ${bug.last_seen}`);
+  for (const b of results) {
+    // Null-safe display: entries can be missing fields or use files[] (schema drift, #44).
+    const bug = b as typeof b & { files?: string[] };
+    const files = Array.isArray(bug.files) ? bug.files.join(", ") : (bug.file ?? "—");
+    console.log(`  [${bug.id ?? "?"}] ${(bug.error_message ?? "(no message)").slice(0, 80)}`);
+    console.log(`    File: ${files}${bug.line ? `:${bug.line}` : ""}`);
+    console.log(`    Root cause: ${bug.root_cause ?? "—"}`);
+    console.log(`    Fix: ${bug.fix ?? "—"}`);
+    console.log(`    Tags: ${Array.isArray(bug.tags) ? bug.tags.filter(Boolean).join(", ") : "—"}`);
+    console.log(`    Occurrences: ${bug.occurrences ?? 1} | Last seen: ${bug.last_seen ?? "—"}`);
     console.log("");
   }
 }

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { readJSON, writeJSON, readText, writeText } from "../utils/fs-safe.js";
@@ -235,17 +235,18 @@ export async function initCommand(): Promise<void> {
   // --- Daemon ---
   let daemonStatus = "start manually with: openwolf daemon start";
   try {
-    const pm2Cmd = isWindows() ? "where pm2" : "which pm2";
-    execSync(pm2Cmd, { stdio: "ignore" });
-    const name = `openwolf-${path.basename(projectRoot)}`;
+    const pm2Bin = isWindows() ? "pm2.cmd" : "pm2";
+    execFileSync(isWindows() ? "where" : "which", ["pm2"], { stdio: "ignore" });
+    // Sanitize the project name so it can't inject pm2/shell args.
+    const name = `openwolf-${path.basename(projectRoot).replace(/[^A-Za-z0-9_.-]/g, "-")}`;
     // Resolve daemon script relative to openwolf's install dir, not the target project
     const daemonScript = path.resolve(__dirname, "..", "daemon", "wolf-daemon.js");
     try {
-      execSync(`pm2 start "${daemonScript}" --name ${name} --cwd "${projectRoot}"`, {
+      execFileSync(pm2Bin, ["start", daemonScript, "--name", name, "--cwd", projectRoot], {
         stdio: "ignore",
         env: { ...process.env, OPENWOLF_PROJECT_ROOT: projectRoot },
       });
-      execSync("pm2 save", { stdio: "ignore" });
+      execFileSync(pm2Bin, ["save"], { stdio: "ignore" });
       daemonStatus = "running via pm2";
     } catch {
       daemonStatus = "pm2 found but daemon start failed. Try: openwolf daemon start";
@@ -347,7 +348,7 @@ function generateTemplate(destPath: string, file: string): void {
         retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288 },
         cerebrum: { max_tokens: 2000, reflection_frequency: "weekly" },
         daemon: { port: 18790, log_level: "info" },
-        dashboard: { enabled: true, port: 18791 },
+        dashboard: { enabled: true, port: 18791, host: "127.0.0.1" },
         designqc: { enabled: true, viewports: [{ name: "desktop", width: 1440, height: 900 }, { name: "mobile", width: 375, height: 812 }], max_screenshots: 6, chrome_path: null },
       },
     }, null, 2),

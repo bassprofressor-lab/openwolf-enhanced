@@ -6,6 +6,43 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.2.0] — 2026-07-09
+
+Adopts a batch of security and correctness fixes that were reported/proposed upstream but
+never merged (the upstream repo has been inactive since March 2026). Credit to the original
+reporters and PR authors — issue/PR numbers refer to `cytostack/openwolf`.
+
+### Security
+- **Dashboard is no longer network-exposed.** The daemon now binds to `127.0.0.1` by default
+  (was `0.0.0.0`) and requires a per-project token (`.wolf/dashboard-token`, `0600`) on every
+  `/api/*` request and WebSocket connection — WS is rejected pre-upgrade. This closes an
+  unauthenticated path to trigger arbitrary cron tasks. Token is threaded through
+  `openwolf dashboard` and `openwolf cron run`. Configurable via `openwolf.dashboard.host`.
+  (upstream #30 by @svanack404, #34 by @riverwolf67)
+- **Command-injection surface removed.** All `execSync` string commands (PM2 start/stop/
+  restart/logs, port/pid lookups) are now `execFileSync` with argument arrays, and the PM2
+  process name derived from the project folder is sanitized. (upstream #34)
+- **Path traversal blocked** in cron AI tasks: `context_files` that escape the project root
+  (e.g. `../../etc/passwd`) are rejected before being read into the model prompt. (upstream #34)
+
+### Fixed
+- **CRLF data loss (#50 by @albertomenache; PRs #24 @fsener, #51).** `parseAnatomy` split on
+  `\n`, leaving a trailing `\r` that broke the end-anchored entry regex — on Windows/autocrlf
+  this dropped every entry and truncated `anatomy.md` to an empty skeleton. Now splits on
+  `\r?\n` in both copies.
+- **Secret files captured into the brain (#54 by @bryandent).** Only `.env*` was excluded;
+  private keys, certs and keystores (`.pem`, `.key`, `.p8`, `.p12`, `.keystore`, `id_rsa`,
+  `credentials`, …) leaked their first ~100 chars into `anatomy.md`. Now excluded everywhere
+  (anatomy scan + post-write + post-read).
+- **`bug search` crash on schema drift (#44 by @GordongWang).** `searchBugs` and the result
+  display are null-safe and handle entries that use a `files: string[]` array instead of a
+  singular `file`.
+- **Repeated-read warning after edits (#41 by @1re2turn1).** `pre-read` now tracks file mtime
+  and doesn't warn "already read" when the file changed during the session — a re-read after
+  an edit is legitimate.
+- **Files outside the project root (#56 by @goashem).** `post-write`/`post-read`/`pre-read` no
+  longer track absolute paths outside the project (`../` escapes) in anatomy/memory/ledger.
+
 ## [1.1.0] — 2026-07-09
 
 Based on upstream OpenWolf `1.0.4`. This release focuses on **bounded storage**,

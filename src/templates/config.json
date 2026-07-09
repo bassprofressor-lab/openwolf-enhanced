@@ -67,7 +67,8 @@
     },
     "dashboard": {
       "enabled": true,
-      "port": 18791
+      "port": 18791,
+      "host": "127.0.0.1"
     },
     "designqc": {
       "enabled": true,

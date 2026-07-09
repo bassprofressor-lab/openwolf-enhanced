@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { WolfClient } from "../lib/wolf-client.js";
+import { authedFetch } from "../lib/auth.js";
 import { parseAnatomy, parseMemory, parseCerebrum } from "../lib/file-parsers.js";
 import type { AnatomyEntry, MemorySession, CerebrumData } from "../lib/file-parsers.js";
 
@@ -120,7 +121,7 @@ export function useWolfData(): WolfData {
 
   useEffect(() => {
     // Initial fetch
-    fetch("/api/files")
+    authedFetch("/api/files")
       .then(r => r.json())
       .then(files => {
         processFiles(files);
@@ -128,12 +129,12 @@ export function useWolfData(): WolfData {
       })
       .catch(() => setLoading(false));
 
-    fetch("/api/health")
+    authedFetch("/api/health")
       .then(r => r.json())
       .then(h => setHealth(h))
       .catch(() => {});
 
-    fetch("/api/project")
+    authedFetch("/api/project")
       .then(r => r.json())
       .then(p => setProject(p))
       .catch(() => {});

@@ -72,8 +72,9 @@ export function logBug(
   writeJSON(getBugLogPath(wolfDir), bugLog);
 }
 
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/\d+/g, "N").replace(/[^\w\s]/g, " ").trim();
+function normalize(text: string | undefined | null): string {
+  // Tolerate entries missing fields (legacy / auto-detected / schema drift) — upstream #44.
+  return String(text ?? "").toLowerCase().replace(/\d+/g, "N").replace(/[^\w\s]/g, " ").trim();
 }
 
 function tokenize(text: string): Set<string> {
@@ -124,12 +125,19 @@ export function findSimilarBugs(wolfDir: string, errorMessage: string): ScoredBu
 export function searchBugs(wolfDir: string, term: string): BugEntry[] {
   const bugLog = readBugLog(wolfDir);
   const lower = term.toLowerCase();
-  return bugLog.bugs.filter(
-    (b) =>
-      b.error_message.toLowerCase().includes(lower) ||
-      b.root_cause.toLowerCase().includes(lower) ||
-      b.fix.toLowerCase().includes(lower) ||
-      b.tags.some((t) => t.toLowerCase().includes(lower)) ||
-      b.file.toLowerCase().includes(lower)
-  );
+  // Null-safe across schema drift: any entry may miss a field, `tags` may be absent,
+  // and some tooling records `files: string[]` instead of a singular `file` (upstream #44).
+  const has = (v: unknown): boolean =>
+    typeof v === "string" && v.toLowerCase().includes(lower);
+  return bugLog.bugs.filter((b) => {
+    const bug = b as BugEntry & { files?: unknown };
+    const files = Array.isArray(bug.files) ? bug.files : bug.file != null ? [bug.file] : [];
+    return (
+      has(bug.error_message) ||
+      has(bug.root_cause) ||
+      has(bug.fix) ||
+      (Array.isArray(bug.tags) && bug.tags.some((t) => has(t))) ||
+      files.some((f) => has(f))
+    );
+  });
 }

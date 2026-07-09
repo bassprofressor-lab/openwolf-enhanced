@@ -57,6 +57,17 @@ function estimateTokens(text: string, filePath: string): number {
 
 // Files that should never appear in anatomy (secrets, env files)
 const ALWAYS_EXCLUDE_FILES = new Set([".env", ".env.local", ".env.production", ".env.staging", ".env.development"]);
+// Private keys, certs, keystores, credential files — must never be indexed (upstream #54).
+const SECRET_EXTS = new Set([".pem", ".key", ".p8", ".p12", ".pfx", ".keystore", ".jks", ".crt", ".cer", ".der", ".asc", ".gpg", ".pgp", ".ppk", ".kdbx"]);
+const SECRET_NAMES = new Set(["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", ".netrc", ".pgpass", ".htpasswd", ".npmrc", ".pypirc"]);
+function isSecretFile(basename: string): boolean {
+  const b = basename.toLowerCase();
+  if (b === ".env" || b.startsWith(".env.")) return true;
+  if (SECRET_NAMES.has(b)) return true;
+  const dot = b.lastIndexOf(".");
+  const ext = dot > 0 ? b.slice(dot) : "";
+  return SECRET_EXTS.has(ext);
+}
 
 function shouldExclude(
   relPath: string,
@@ -67,8 +78,8 @@ function shouldExclude(
 
   // Always exclude sensitive files regardless of config
   if (ALWAYS_EXCLUDE_FILES.has(basename)) return true;
-  // Also exclude .env.* variants not in the set (e.g., .env.backup)
-  if (basename.startsWith(".env.") || basename === ".env") return true;
+  // Also exclude .env.* variants and any secret-bearing file (keys/certs/keystores).
+  if (isSecretFile(basename)) return true;
 
   for (const pattern of excludePatterns) {
     // Simple glob: check if any path segment matches
@@ -186,7 +197,8 @@ export function parseAnatomy(content: string): Map<string, AnatomyEntry[]> {
   const sections = new Map<string, AnatomyEntry[]>();
   let currentSection = "";
 
-  for (const line of content.split("\n")) {
+  // Split on \r?\n so CRLF files don't leave a trailing \r that breaks the entry regex (upstream #50).
+  for (const line of content.split(/\r?\n/)) {
     const sectionMatch = line.match(/^## (.+)/);
     if (sectionMatch) {
       currentSection = sectionMatch[1].trim();

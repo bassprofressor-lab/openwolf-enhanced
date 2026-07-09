@@ -5,6 +5,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON, writeJSON, readText } from "../utils/fs-safe.js";
+import { ensureDashboardToken, tokenMatches } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "./cron-engine.js";
 import { startFileWatcher } from "./file-watcher.js";
@@ -19,7 +20,7 @@ const wolfDir = path.join(projectRoot, ".wolf");
 interface WolfConfig {
   openwolf: {
     daemon: { port: number; log_level: string };
-    dashboard: { enabled: boolean; port: number };
+    dashboard: { enabled: boolean; port: number; host?: string };
     cron: { enabled: boolean; heartbeat_interval_minutes: number };
   };
 }
@@ -31,6 +32,9 @@ const config = readJSON<WolfConfig>(path.join(wolfDir, "config.json"), {
     cron: { enabled: true, heartbeat_interval_minutes: 30 },
   },
 });
+
+// Per-project dashboard token, required on every /api/* request and WS connection.
+const dashboardToken = ensureDashboardToken(wolfDir);
 
 const logger = new Logger(
   path.join(wolfDir, "daemon.log"),
@@ -78,12 +82,23 @@ function readWolfFileForDashboard(file: string): string {
 const app = express();
 app.use(express.json());
 
-// Serve dashboard static files
+// Serve dashboard static files (unauthenticated so the page can load and read its token).
 // In dist: dist/src/daemon/wolf-daemon.js → ../../../dist/dashboard/
 const dashboardDir = path.resolve(__dirname, "..", "..", "..", "dist", "dashboard");
 if (fs.existsSync(dashboardDir)) {
   app.use(express.static(dashboardDir));
 }
+
+// Require the dashboard token on every /api/* call (header or ?token=). Blocks drive-by
+// requests from a page in the user's browser or another local user (upstream #30/#34).
+app.use("/api", (req, res, next) => {
+  const provided = (req.headers["x-openwolf-token"] as string) || (req.query.token as string) || "";
+  if (!tokenMatches(provided, dashboardToken)) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  next();
+});
 
 // Detect project metadata
 function detectProjectMeta(): { name: string; description: string } {
@@ -154,7 +169,7 @@ app.get("/api/health", (_req, res) => {
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
     last_heartbeat: cronState.last_heartbeat,
     tasks: taskCount,
-    dead_letters: cronState.dead_letter_queue.length,
+    dead_letters: Array.isArray(cronState.dead_letter_queue) ? cronState.dead_letter_queue.length : 0,
   });
 });
 
@@ -211,12 +226,23 @@ app.get("/{*path}", (_req, res) => {
 
 // Start HTTP server
 const port = config.openwolf.dashboard.port;
-const server = app.listen(port, () => {
-  logger.info(`Dashboard server listening on port ${port}`);
+// Bind to loopback by default so the dashboard isn't exposed on the network (upstream #30).
+const host = config.openwolf.dashboard.host || "127.0.0.1";
+const server = app.listen(port, host, () => {
+  logger.info(`Dashboard server listening on ${host}:${port}`);
 });
 
-// WebSocket server
-const wss = new WebSocketServer({ server });
+// WebSocket server. Reject the upgrade before it completes if the token is missing/wrong,
+// so an unauthenticated client never establishes a connection at all.
+const wss = new WebSocketServer({
+  server,
+  verifyClient: (info, cb) => {
+    let t = "";
+    try { t = new URL(info.req.url || "", "http://localhost").searchParams.get("token") || ""; } catch { /* reject */ }
+    if (tokenMatches(t, dashboardToken)) cb(true);
+    else cb(false, 401, "unauthorized");
+  },
+});
 
 wss.on("connection", (ws) => {
   wsClients.add(ws);

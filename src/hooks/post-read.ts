@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadWolfignore } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadWolfignore, isSecretFile } from "./shared.js";
 
 interface SessionData {
   files_read: Record<string, { count: number; tokens: number; first_read: string }>;
@@ -32,13 +32,21 @@ async function main(): Promise<void> {
   const relToProject = normalizedFile.startsWith(projectDir)
     ? normalizedFile.slice(projectDir.length).replace(/^\//, "")
     : "";
+  // Don't track reads of files outside the project root (upstream #56). relToProject is ""
+  // both when the path is outside projectDir and when it equals the root itself — neither
+  // is a trackable project file.
+  if (!relToProject) { process.exit(0); return; }
+
   if (relToProject.startsWith(".wolf/") || relToProject.startsWith(".wolf\\")) {
     process.exit(0);
     return;
   }
 
   // Skip anything matched by .wolfignore — don't track ignored reads in the ledger.
-  if (relToProject && loadWolfignore(projectDir)(relToProject)) { process.exit(0); return; }
+  if (loadWolfignore(projectDir)(relToProject)) { process.exit(0); return; }
+
+  // Never track secret-bearing files in the ledger (#54).
+  if (isSecretFile(normalizedFile)) { process.exit(0); return; }
 
   const ext = path.extname(filePath).toLowerCase();
   const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".css", ".json", ".yaml", ".yml"]);

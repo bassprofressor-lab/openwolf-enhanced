@@ -4,7 +4,7 @@ import * as crypto from "node:crypto";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateTokens, appendMarkdown, timeShort, readStdin, normalizePath,
-  getRetention, loadWolfignore, readBugLog
+  getRetention, loadWolfignore, readBugLog, isSecretFile
 } from "./shared.js";
 
 interface SessionData {
@@ -57,12 +57,16 @@ async function main(): Promise<void> {
   const relPath = normalizePath(path.relative(projectRoot, absolutePath));
   if (relPath.startsWith(".wolf/")) { process.exit(0); return; }
 
+  // Never track files outside the project root — an absolute path elsewhere (or ../foo)
+  // must not leak into anatomy/memory (upstream #56).
+  if (relPath === "" || relPath.startsWith("..")) { process.exit(0); return; }
+
   // Skip anything matched by .wolfignore — scopes both anatomy and session tracking.
   if (loadWolfignore(projectRoot)(relPath)) { process.exit(0); return; }
 
-  // Never track .env files in anatomy — they contain secrets
+  // Never track secret-bearing files (.env, private keys, certs, keystores…) — upstream #54.
   const baseName = path.basename(absolutePath);
-  if (baseName === ".env" || baseName.startsWith(".env.")) { process.exit(0); return; }
+  if (isSecretFile(baseName)) { process.exit(0); return; }
 
   const oldStr = input.tool_input?.old_string ?? "";
   const newStr = input.tool_input?.new_string ?? "";

@@ -1,3 +1,5 @@
+import { withToken } from "./auth";
+
 type MessageHandler = (msg: any) => void;
 
 export class WolfClient {
@@ -8,7 +10,7 @@ export class WolfClient {
 
   constructor(url?: string) {
     const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-    this.url = url || `${wsProtocol}//${location.host}/ws`;
+    this.url = url || withToken(`${wsProtocol}//${location.host}/ws`);
   }
 
   connect(): void {
