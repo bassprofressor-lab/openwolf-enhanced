@@ -6,6 +6,13 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.3.1] — 2026-07-09
+
+### Changed
+- **Stop-hook reminders no longer repeat every turn.** Each reminder type (missing buglog,
+  stale cerebrum, no memory summary) is now surfaced at most once per session — tracked in
+  `_session.json` — so it nudges once instead of re-firing on every turn.
+
 ## [1.3.0] — 2026-07-09
 
 Adopts a batch of upstream pull requests (never merged upstream), adapted to this fork.

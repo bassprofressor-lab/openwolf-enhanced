@@ -26,6 +26,7 @@ interface SessionData {
   repeated_reads_warned: number;
   cerebrum_warnings: number;
   stop_count: number;
+  reminders_shown?: string[];
 }
 
 interface SessionEntry {
@@ -82,11 +83,17 @@ async function main(): Promise<void> {
 
   // Collect end-of-turn reminders. These are surfaced via additionalContext (stdout) at the
   // very end so they land in Claude's next context window — stderr would only hit the terminal.
-  const reminders = [
-    checkForMissingBugLogs(wolfDir, session),
-    checkCerebrumFreshness(wolfDir, session),
-    checkSemanticSummaries(wolfDir, writeCount),
-  ].filter((r): r is string => r !== null);
+  // Each reminder type fires at most once per session so it doesn't re-nag every turn.
+  const candidates = [
+    { key: "buglog", msg: checkForMissingBugLogs(wolfDir, session) },
+    { key: "cerebrum", msg: checkCerebrumFreshness(wolfDir, session) },
+    { key: "summary", msg: checkSemanticSummaries(wolfDir, writeCount) },
+  ].filter((c): c is { key: string; msg: string } => c.msg !== null);
+  const alreadyShown = new Set(session.reminders_shown ?? []);
+  const fresh = candidates.filter((c) => !alreadyShown.has(c.key));
+  for (const c of fresh) alreadyShown.add(c.key);
+  session.reminders_shown = [...alreadyShown];
+  const reminders = fresh.map((c) => c.msg);
 
   // Build session entry for ledger
   const reads = Object.entries(session.files_read).map(([file, data]) => ({
