@@ -142,6 +142,48 @@ export async function probePort(port: number): Promise<boolean> {
 /**
  * Try to find a running dev server on common ports.
  */
+/**
+ * Detect the project's deployed/production URL from common config files
+ * (package.json homepage, .env* URL vars, vercel.json aliases). Returns null if none —
+ * the caller then falls back to a local dev server (upstream #4, bug 4).
+ */
+export function detectDeployedUrl(projectRoot: string): string | null {
+  // 1. package.json "homepage"
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
+    if (typeof pkg.homepage === "string" && pkg.homepage.startsWith("http")) return pkg.homepage;
+  } catch { /* ignore */ }
+
+  // 2. Common env files — a production URL variable
+  const envFiles = [".env.production", ".env.production.local", ".env.local", ".env"];
+  const urlVarNames = [
+    "NEXT_PUBLIC_SITE_URL", "NEXT_PUBLIC_URL", "NEXT_PUBLIC_APP_URL",
+    "NUXT_PUBLIC_SITE_URL", "VITE_APP_URL", "VITE_APP_BASE_URL",
+    "PUBLIC_URL", "APP_URL", "SITE_URL", "BASE_URL",
+  ];
+  for (const envFile of envFiles) {
+    try {
+      const content = fs.readFileSync(path.join(projectRoot, envFile), "utf-8");
+      for (const varName of urlVarNames) {
+        const match = content.match(new RegExp(`^${varName}=["']?([^"'\\s]+)["']?`, "m"));
+        if (match && match[1].startsWith("http")) return match[1].trim();
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 3. vercel.json alias(es)
+  try {
+    const vercelJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "vercel.json"), "utf-8"));
+    const aliases: unknown = vercelJson.alias ?? vercelJson.aliases;
+    if (Array.isArray(aliases) && aliases.length > 0 && typeof aliases[0] === "string") {
+      const alias = aliases[0] as string;
+      return alias.startsWith("http") ? alias : `https://${alias}`;
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+
 export async function detectDevServer(): Promise<{ url: string; port: number } | null> {
   const commonPorts = [3000, 3001, 5173, 5174, 4321, 8080, 8000, 4200];
   for (const port of commonPorts) {

@@ -64,13 +64,12 @@ export default function App() {
       <Sidebar
         activePanel={activePanel}
         onNavigate={setActivePanel}
-        daemonStatus={data.health.status}
         projectName={data.project.name || data.identity.name}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
       <Layout>
-        <Header title={panelTitles[activePanel] || "OpenWolf"} theme={theme} onToggleTheme={toggleTheme} />
+        <Header title={panelTitles[activePanel] || "OpenWolf"} theme={theme} onToggleTheme={toggleTheme} currentProject={data.project.root} connected={data.connected} />
         <Suspense fallback={<Skeleton />}>
           {activePanel === "overview" && <ProjectOverview data={data} />}
           {activePanel === "activity" && <ActivityTimeline data={data} />}

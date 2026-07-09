@@ -4,18 +4,24 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON, readText } from "../utils/fs-safe.js";
+import { readJSON, writeJSON } from "../utils/fs-safe.js";
 import { ensureDashboardToken, tokenMatches } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "./cron-engine.js";
 import { startFileWatcher } from "./file-watcher.js";
+import { DesignQCEngine } from "../designqc/designqc-engine.js";
+import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
+import { getRegisteredProjects } from "../cli/registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Prefer explicit OPENWOLF_PROJECT_ROOT env (set by CLI commands) over cwd detection
-const projectRoot = process.env.OPENWOLF_PROJECT_ROOT || findProjectRoot();
-const wolfDir = path.join(projectRoot, ".wolf");
+// Prefer explicit OPENWOLF_PROJECT_ROOT env (set by CLI commands) over cwd detection.
+// projectRoot/wolfDir are mutable so /api/switch can hot-reload another project in place.
+// The dashboard token, by contrast, is per-daemon (not re-read on switch) so an authenticated
+// dashboard session survives a project switch.
+let projectRoot = process.env.OPENWOLF_PROJECT_ROOT || findProjectRoot();
+let wolfDir = path.join(projectRoot, ".wolf");
 
 interface WolfConfig {
   openwolf: {
@@ -151,9 +157,32 @@ function detectProjectMeta(): { name: string; description: string } {
   return { name, description };
 }
 
-const projectMeta = detectProjectMeta();
+let projectMeta = detectProjectMeta();
 
 // API routes
+app.get("/api/config", (_req, res) => {
+  res.json({ hasApiKey: !!process.env.ANTHROPIC_API_KEY });
+});
+
+app.get("/api/projects", (_req, res) => {
+  res.json(getRegisteredProjects(true));
+});
+
+app.post("/api/switch", (req, res) => {
+  const { root } = (req.body ?? {}) as { root?: string };
+  if (!root || !fs.existsSync(path.join(root, ".wolf"))) {
+    res.status(400).json({ error: "Invalid project root" });
+    return;
+  }
+  if (root === projectRoot) {
+    res.status(400).json({ error: "Already on this project" });
+    return;
+  }
+  res.json({ ok: true });
+  // Hot-reload in place — no process restart, existing (authenticated) WS clients are kept.
+  setImmediate(() => switchProject(root));
+});
+
 app.get("/api/health", (_req, res) => {
   const cronState = readJSON<{ engine_status: string; last_heartbeat: string | null; dead_letter_queue: unknown[] }>(
     path.join(wolfDir, "cron-state.json"),
@@ -198,6 +227,26 @@ app.get("/api/files", (_req, res) => {
 app.get("/api/designqc-report", (_req, res) => {
   const report = readJSON(path.join(wolfDir, "designqc-report.json"), null);
   res.json(report);
+});
+
+// Manually trigger a Design QC capture (works on a deployed URL, not just localhost — #4, bug 4).
+app.post("/api/designqc/run", (req, res) => {
+  const dc = (config.openwolf as unknown as { designqc?: { viewports?: unknown[]; max_screenshots?: number; chrome_path?: string | null } }).designqc ?? {};
+  const engine = new DesignQCEngine(wolfDir, projectRoot, {
+    devServerUrl: (req.body as { url?: string })?.url || undefined,
+    viewports: (dc.viewports as never) || DEFAULT_VIEWPORTS,
+    maxScreenshots: dc.max_screenshots || 16,
+    chromePath: dc.chrome_path ?? undefined,
+    quality: 70,
+    maxWidth: 1200,
+  });
+  res.setTimeout(120_000);
+  engine.capture()
+    .then((result) => res.json({ status: "ok", screenshots: result.screenshots.length, total_size_kb: result.totalSizeKB }))
+    .catch((err) => {
+      logger.error(`DesignQC run failed: ${err}`);
+      res.status(500).json({ error: String(err) });
+    });
 });
 
 // Trigger a cron task by ID
@@ -327,7 +376,41 @@ if (config.openwolf.cron.enabled) {
 }
 
 // File watcher
-startFileWatcher(wolfDir, logger, broadcast);
+let fileWatcher = startFileWatcher(wolfDir, logger, broadcast);
+
+// Hot-switch to another registered project without restarting the process (#4, bug 7).
+// The dashboard token is unchanged, so already-connected clients stay authenticated.
+function switchProject(newRoot: string): void {
+  logger.info(`Switching project to: ${newRoot}`);
+
+  // Stop the current subsystems.
+  if (cronEngine) { cronEngine.stop(); cronEngine = null; }
+  fileWatcher.close();
+
+  // Swap the mutable project bindings.
+  projectRoot = newRoot;
+  wolfDir = path.join(newRoot, ".wolf");
+  projectMeta = detectProjectMeta();
+
+  // Restart subsystems for the new project.
+  if (config.openwolf.cron.enabled) {
+    cronEngine = new CronEngine(wolfDir, projectRoot, logger, broadcast);
+    cronEngine.start();
+  }
+  fileWatcher = startFileWatcher(wolfDir, logger, broadcast);
+
+  // Mark the new project as running.
+  const statePath = path.join(wolfDir, "cron-state.json");
+  const state = readJSON<Record<string, unknown>>(statePath, {});
+  state.engine_status = "running";
+  state.last_heartbeat = new Date().toISOString();
+  writeJSON(statePath, state);
+
+  // Push the new project's state to all connected dashboard clients (trimmed via the helper).
+  const files: Record<string, string> = {};
+  for (const file of WOLF_BROADCAST_FILES) files[file] = readWolfFileForDashboard(file);
+  broadcast({ type: "project_switched", project: { name: projectMeta.name, root: projectRoot }, files });
+}
 
 // Health heartbeat
 const heartbeatInterval = config.openwolf.cron.heartbeat_interval_minutes * 60 * 1000;

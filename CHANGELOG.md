@@ -6,6 +6,33 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.6.0] — 2026-07-09
+
+Completes upstream PR #4 — the larger dashboard sub-features, adapted to this fork's
+authenticated, per-project dashboard.
+
+### Added
+- **In-place project switcher (#4, bug 7).** A dropdown in the dashboard header lists your
+  registered projects and hot-swaps to one via `POST /api/switch` — the daemon stops and
+  restarts the cron engine and file watcher for the new project and broadcasts its state over
+  the existing WebSocket, with no process restart. The dashboard token is per-daemon, so an
+  authenticated session survives the switch. Verified: switching from project A to B swaps the
+  served project while the token keeps working.
+- **Design QC works on deployed URLs and can be run from the dashboard (#4, bug 4).** A new
+  `detectDeployedUrl()` reads the target URL from `package.json` `homepage`, env files, or
+  `vercel.json`; a "Run Capture" button posts to `POST /api/designqc/run`; and the capture engine
+  now writes `designqc-report.json` so the panel shows the result.
+- **AI Insights shows a copy-able prompt (#4, bug 2 client).** Since a background daemon can't
+  drive the interactive CLI, the panel offers a ready-to-paste prompt for a Claude Code session
+  instead of a button that opened the desktop app.
+
+### Changed
+- **Honest status indicators (#4, bug 6).** The always-green "Healthy" sidebar badge is gone; the
+  header's "Live" indicator now reflects the real WebSocket connection (it can genuinely drop under
+  this fork's auth or during a project switch), and the overview uses the real cron `engine_status`.
+- All new dashboard endpoints (`/api/projects`, `/api/switch`, `/api/designqc/run`, `/api/config`)
+  are behind the dashboard-token auth, and every new client call uses the authenticated fetch.
+
 ## [1.5.0] — 2026-07-09
 
 Adopts the core of upstream PR #4 (dashboard fixes by @MyEditHub), adapted to this fork's

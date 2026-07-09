@@ -1,10 +1,12 @@
 import { withToken } from "./auth";
 
 type MessageHandler = (msg: any) => void;
+type StatusHandler = (connected: boolean) => void;
 
 export class WolfClient {
   private ws: WebSocket | null = null;
   private handlers: MessageHandler[] = [];
+  private statusHandlers: StatusHandler[] = [];
   private reconnectTimer: number | null = null;
   private url: string;
 
@@ -16,6 +18,9 @@ export class WolfClient {
   connect(): void {
     try {
       this.ws = new WebSocket(this.url);
+      this.ws.onopen = () => {
+        for (const h of this.statusHandlers) h(true);
+      };
       this.ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
@@ -23,6 +28,7 @@ export class WolfClient {
         } catch { /* ignore parse errors */ }
       };
       this.ws.onclose = () => {
+        for (const h of this.statusHandlers) h(false);
         this.scheduleReconnect();
       };
       this.ws.onerror = () => {
@@ -39,6 +45,10 @@ export class WolfClient {
       this.reconnectTimer = null;
       this.connect();
     }, 3000);
+  }
+
+  onStatusChange(handler: StatusHandler): void {
+    this.statusHandlers.push(handler);
   }
 
   onMessage(handler: MessageHandler): () => void {
