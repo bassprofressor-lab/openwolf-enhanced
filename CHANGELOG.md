@@ -6,6 +6,43 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.8.0] — 2026-07-09
+
+Dependency currency pass (dev + runtime majors) plus a latent file-watcher fix surfaced by the chokidar bump.
+
+### Fixed
+- **File-watcher `ignored` never fired (latent since the chokidar 4 adoption).** chokidar 4+ dropped
+  glob-string support in the `ignored` option — a glob like `**/token-ledger.json` is treated as a
+  literal path and never matches, so the watcher was silently re-reading and broadcasting the full
+  contents of `token-ledger.json` / `buglog.json` / `*.tmp` / `*.lock` on every write — the exact
+  waste the ignore list was meant to prevent. Replaced the glob array with a `(path) => boolean`
+  predicate so the exclusions actually apply. Verified with an isolated chokidar test (glob strings
+  let `junk.tmp` and `token-ledger.json` through; the predicate correctly ignores them).
+
+### Changed
+- **Dev-dependency majors:** TypeScript 5.9 → 7.0, Vite 6 → 8, `@vitejs/plugin-react` 4 → 6,
+  recharts 2 → 3, `@types/node` 22 → 26, `@tailwindcss/vite` → 4.3. Build (main + hooks +
+  dashboard) and the 8-test suite stay green.
+  - `tsconfig.hooks.json` now sets `"types": ["node"]` explicitly — TypeScript 7's `@types`
+    auto-discovery behaves differently for the hooks project's `rootDir: "src/hooks"`.
+- **Runtime-dependency majors:** chokidar 4 → 5, commander 12 → 15, node-cron 3 → 4, open 10 → 11,
+  puppeteer-core 24 → 25. Smoke-tested: CLI (`--version`/`--help`) under commander 15, and the
+  daemon boots and serves HTTP with node-cron 4 (all cron tasks scheduled), chokidar 5 (watcher),
+  express 5, and ws.
+  - node-cron 4 moved `ScheduledTask` from a namespace (`cron.ScheduledTask`) to a named type
+    export — updated the import in `cron-engine.ts` accordingly.
+
+### Removed
+- **`chalk`** — it was declared but never imported anywhere in `src/`; dropped rather than upgraded.
+- **`@types/node-cron`** — node-cron 4 ships its own type definitions, so the separate `@types`
+  package is now redundant (and would conflict).
+
+### Notes
+- Audit is unchanged at 0 vulnerabilities (`pnpm audit --prod`); these bumps are currency/maintenance.
+- The Claude API call in `cron-engine.ts` was reviewed: `anthropic-version: 2023-06-01` is the current
+  stable API version header and `claude-haiku-4-5-20251001` is a current, active model ID — no change
+  needed.
+
 ## [1.7.0] — 2026-07-09
 
 Hardening and quality pass from the self-audit.

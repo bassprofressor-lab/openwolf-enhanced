@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
   "type": "module",
   "bin": {
@@ -20,32 +20,30 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "chalk": "^5.3.0",
-    "chokidar": "^4.0.0",
-    "commander": "^12.0.0",
+    "chokidar": "^5.0.0",
+    "commander": "^15.0.0",
     "express": "^5.2.1",
-    "node-cron": "^3.0.3",
-    "open": "^10.0.0",
+    "node-cron": "^4.0.0",
+    "open": "^11.0.0",
     "ws": "^8.21.0"
   },
   "optionalDependencies": {
-    "puppeteer-core": "^24.39.1"
+    "puppeteer-core": "^25.0.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.0",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.0.0",
-    "@types/node-cron": "^3.0.11",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.12",
-    "@vitejs/plugin-react": "^4.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^2.15.0",
+    "recharts": "^3.9.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0",
+    "typescript": "^7.0.0",
+    "vite": "^8.0.0",
     "vitepress": "^1.6.4"
   },
   "engines": {

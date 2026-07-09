@@ -10,16 +10,23 @@ export function startFileWatcher(
 ): FSWatcher {
   const watcher = watch(wolfDir, {
     ignoreInitial: true,
-    ignored: [
-      "**/hooks/_session.json",
-      "**/*.tmp",
-      "**/*.lock",
-      "**/daemon.log",
-      // Large, high-churn files: re-read + broadcast of the full content on every write
-      // is the daemon's worst waste. The dashboard fetches them via full_state on demand.
-      "**/token-ledger.json",
-      "**/buglog.json",
-    ],
+    // chokidar 4+ dropped glob-string support in `ignored` — a glob string is treated
+    // as a literal path and never matches, silently defeating these ignores. Use a
+    // predicate (path, stats?) => boolean so the exclusions actually fire.
+    // Large, high-churn files (token-ledger.json / buglog.json): re-read + broadcast of
+    // the full content on every write is the daemon's worst waste. The dashboard fetches
+    // them via full_state on demand.
+    ignored: (filePath: string): boolean => {
+      const base = path.basename(filePath);
+      return (
+        base.endsWith(".tmp") ||
+        base.endsWith(".lock") ||
+        base === "daemon.log" ||
+        base === "_session.json" ||
+        base === "token-ledger.json" ||
+        base === "buglog.json"
+      );
+    },
     persistent: true,
     awaitWriteFinish: {
       stabilityThreshold: 500,

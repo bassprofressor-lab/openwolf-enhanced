@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import cron from "node-cron";
+import cron, { type ScheduledTask } from "node-cron";
 import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
@@ -48,7 +48,7 @@ export class CronEngine {
   private projectRoot: string;
   private logger: Logger;
   private broadcast: (msg: unknown) => void;
-  private scheduledTasks: cron.ScheduledTask[] = [];
+  private scheduledTasks: ScheduledTask[] = [];
   private failureCounts = new Map<string, number>();
 
   constructor(
