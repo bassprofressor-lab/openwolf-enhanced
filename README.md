@@ -44,6 +44,27 @@ Everything from upstream still works. On top of that:
 | 🧹 **Less churn** | `anatomy.md` isn't rewritten when nothing changed; the daemon no longer re-broadcasts large files on every write; auto bug-detection no longer flags ordinary refactors. |
 | 📏 **Visibility** | `openwolf status` now shows the `.wolf/` footprint and size warnings. |
 
+### Security & correctness hardening (1.2.0)
+
+This fork also adopts security and bug fixes that were reported/proposed upstream but never
+merged (the upstream repo has been inactive since March 2026):
+
+- 🔒 **Dashboard is no longer network-exposed** — binds to `127.0.0.1` (was `0.0.0.0`) and
+  requires a per-project token on every API request and WebSocket connection, closing an
+  unauthenticated path to trigger cron tasks. *(upstream #30, #34)*
+- 🔒 **No command injection** — shell command strings replaced with argument arrays
+  (`execFileSync`); the PM2 process name is sanitized. *(upstream #34)*
+- 🔒 **No path traversal** — cron AI tasks can't read files outside the project root. *(upstream #34)*
+- 🛡 **No secret leakage** — private keys, certs and keystores (`.pem`, `.key`, `.p8`,
+  `.keystore`, `id_rsa`, `credentials`…) are excluded from the brain, not just `.env`. *(upstream #54)*
+- 🐛 **CRLF no longer wipes `anatomy.md`** — the entry parser tolerates `\r\n`, so Windows /
+  `git autocrlf` repos don't get their file map truncated. *(upstream #50)*
+- 🐛 **`bug search` won't crash** on entries with missing fields or a `files[]` array. *(upstream #44)*
+- 🐛 **Re-reads after edits aren't flagged** — a file that changed during the session can be
+  re-read without a "already read" warning. *(upstream #41)*
+- 🐛 **No off-project tracking** — files outside the project root never enter anatomy/memory. *(upstream #56)*
+- 🐛 **Saner auto bug-detection** — the noisy "any big diff is a bug" heuristic was removed. *(upstream #28)*
+
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
 ## Quick Start
