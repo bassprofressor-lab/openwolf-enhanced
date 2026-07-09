@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 
     const desc = extractDescription(absolutePath, fileContent).slice(0, 100);
     const ext = path.extname(absolutePath).toLowerCase();
-    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css"]);
+    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css", ".dart"]);
     const proseExts = new Set([".md", ".txt", ".rst"]);
     const type = codeExts.has(ext) ? "code" : proseExts.has(ext) ? "prose" : "mixed";
     const tokens = estimateTokens(fileContent, type as "code" | "prose" | "mixed");
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
     const relFile = normalizePath(path.relative(projectRoot, absolutePath));
     const fileContent = input.tool_input?.content ?? "";
     const ext = path.extname(absolutePath).toLowerCase();
-    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css"]);
+    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css", ".dart"]);
     const type = codeExts.has(ext) ? "code" : "mixed";
     const writeTokens = estimateTokens(fileContent || newStr, type as "code" | "prose" | "mixed");
 

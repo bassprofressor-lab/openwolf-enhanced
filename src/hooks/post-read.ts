@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   if (isSecretFile(normalizedFile)) { process.exit(0); return; }
 
   const ext = path.extname(filePath).toLowerCase();
-  const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".css", ".json", ".yaml", ".yml"]);
+  const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".css", ".json", ".yaml", ".yml", ".dart"]);
   const proseExts = new Set([".md", ".txt", ".rst"]);
   const type = codeExts.has(ext) ? "code" : proseExts.has(ext) ? "prose" : "mixed";
 

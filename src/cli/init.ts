@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
-import { readJSON, writeJSON, readText, writeText } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
 import { ensureDir } from "../utils/paths.js";
 import { isWindows } from "../utils/platform.js";
 import { registerProject, getRegisteredProjects } from "./registry.js";
@@ -53,6 +53,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"',
             timeout: 5,
           },
@@ -65,6 +66,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-read.js"',
             timeout: 5,
           },
@@ -75,6 +77,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-write.js"',
             timeout: 5,
           },
@@ -87,6 +90,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-read.js"',
             timeout: 5,
           },
@@ -97,6 +101,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-write.js"',
             timeout: 10,
           },
@@ -109,6 +114,7 @@ const HOOK_SETTINGS = {
         hooks: [
           {
             type: "command",
+            _managedBy: "openwolf",
             command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/stop.js"',
             timeout: 10,
           },
@@ -313,7 +319,7 @@ function writeTemplateFile(templatesDir: string, wolfDir: string, file: string):
   const srcPath = path.join(templatesDir, file);
   const destPath = path.join(wolfDir, file);
   if (fs.existsSync(srcPath)) {
-    fs.copyFileSync(srcPath, destPath);
+    safeCopyFile(srcPath, destPath);
   } else {
     generateTemplate(destPath, file);
   }
@@ -486,7 +492,7 @@ function copyHookScripts(wolfDir: string): void {
     for (const file of hookFiles) {
       const src = path.join(sourceDir, file);
       if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(hooksDir, file));
+        safeCopyFile(src, path.join(hooksDir, file));
         copiedAny = true;
       }
     }
@@ -536,7 +542,7 @@ function replaceOpenWolfHooks(
     // Remove any existing OpenWolf hook entries (match by .wolf/hooks/ in command)
     hooks[event] = hooks[event].filter((entry) => {
       const isOpenWolfHook = entry.hooks?.some(
-        (h) => h.command && h.command.includes(".wolf/hooks/")
+        (h) => (h.command && h.command.includes(".wolf/hooks/")) || (h as { _managedBy?: string })._managedBy === "openwolf"
       );
       return !isOpenWolfHook;
     });

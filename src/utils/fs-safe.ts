@@ -53,6 +53,16 @@ export function writeText(filePath: string, content: string): void {
   }
 }
 
+// Copy a file via read+write instead of fs.copyFileSync. copyFileSync uses the
+// copy_file_range syscall on Linux, which fails with EPERM on WSL2 9P mounts whose
+// destination sits under an EFS-encrypted NTFS directory — a plain read()+write() works
+// in the same conditions (upstream #33).
+export function safeCopyFile(src: string, dest: string): void {
+  const dir = path.dirname(dest);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dest, fs.readFileSync(src));
+}
+
 export function appendText(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {

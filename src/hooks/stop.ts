@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries } from "./shared.js";
 
 interface FileRead {
   count: number;
@@ -80,11 +80,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Check for files edited many times without a buglog entry
-  checkForMissingBugLogs(wolfDir, session);
-
-  // Check if cerebrum was updated this session (it should be if there were edits)
-  checkCerebrumFreshness(wolfDir, session);
+  // Collect end-of-turn reminders. These are surfaced via additionalContext (stdout) at the
+  // very end so they land in Claude's next context window — stderr would only hit the terminal.
+  const reminders = [
+    checkForMissingBugLogs(wolfDir, session),
+    checkCerebrumFreshness(wolfDir, session),
+    checkSemanticSummaries(wolfDir, writeCount),
+  ].filter((r): r is string => r !== null);
 
   // Build session entry for ledger
   const reads = Object.entries(session.files_read).map(([file, data]) => ({
@@ -192,6 +194,12 @@ async function main(): Promise<void> {
 
   writeJSON(sessionFile, session);
 
+  // Surface reminders into Claude's next context window (Stop hooks can inject via stdout JSON).
+  if (reminders.length > 0) {
+    const additionalContext = `⚠️ OpenWolf end-of-turn reminders:\n${reminders.map((r) => `• ${r}`).join("\n")}`;
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "Stop", additionalContext } }));
+  }
+
   process.exit(0);
 }
 
@@ -199,14 +207,14 @@ async function main(): Promise<void> {
  * Check if files were edited multiple times but buglog.json wasn't updated.
  * Emit a stderr reminder so Claude sees it in the next turn.
  */
-function checkForMissingBugLogs(wolfDir: string, session: SessionData): void {
-  if (!session.edit_counts) return;
+function checkForMissingBugLogs(wolfDir: string, session: SessionData): string | null {
+  if (!session.edit_counts) return null;
 
   const multiEditFiles = Object.entries(session.edit_counts)
     .filter(([, count]) => count >= 3)
     .map(([file]) => path.basename(file));
 
-  if (multiEditFiles.length === 0) return;
+  if (multiEditFiles.length === 0) return null;
 
   // Check if buglog was written to this session
   const buglogWritten = session.files_written.some(w =>
@@ -214,17 +222,16 @@ function checkForMissingBugLogs(wolfDir: string, session: SessionData): void {
   );
 
   if (!buglogWritten) {
-    process.stderr.write(
-      `⚠️ OpenWolf: Files edited 3+ times this session (${multiEditFiles.join(", ")}) but buglog.json was not updated. If you fixed bugs, please log them.\n`
-    );
+    return `Files edited 3+ times this session (${multiEditFiles.join(", ")}) but buglog.json was not updated. If you fixed bugs, log them to .wolf/buglog.json.`;
   }
+  return null;
 }
 
 /**
  * Check if cerebrum.md was updated recently. If it hasn't been updated in
- * a while and there was significant activity, emit a gentle reminder.
+ * a while and there was significant activity, return a gentle reminder.
  */
-function checkCerebrumFreshness(wolfDir: string, session: SessionData): void {
+function checkCerebrumFreshness(wolfDir: string, session: SessionData): string | null {
   const cerebrumPath = path.join(wolfDir, "cerebrum.md");
   try {
     const stat = fs.statSync(cerebrumPath);
@@ -232,13 +239,22 @@ function checkCerebrumFreshness(wolfDir: string, session: SessionData): void {
 
     // If cerebrum hasn't been updated in 24h+ and there were significant writes
     if (hoursSinceUpdate > 24 && session.files_written.length >= 3) {
-      process.stderr.write(
-        `💡 OpenWolf: cerebrum.md hasn't been updated in ${Math.floor(hoursSinceUpdate)}h. Did you learn any user preferences, conventions, or gotchas this session? Consider updating .wolf/cerebrum.md.\n`
-      );
+      return `cerebrum.md hasn't been updated in ${Math.floor(hoursSinceUpdate)}h. Did you learn any user preferences, conventions, or gotchas this session? Consider updating .wolf/cerebrum.md.`;
     }
   } catch {
     // cerebrum.md doesn't exist, that's ok
   }
+  return null;
+}
+
+/**
+ * If there were meaningful edits this session but no non-mechanical memory.md summary
+ * was written, nudge Claude to record what it did. (upstream #55)
+ */
+function checkSemanticSummaries(wolfDir: string, writeCount: number): string | null {
+  if (writeCount < 3) return null;
+  if (countSemanticEntries(wolfDir) > 0) return null;
+  return `${writeCount} files were changed this session but no meaningful summary was written to memory.md. Consider recording what you did and why.`;
 }
 
 main().catch(() => process.exit(0));

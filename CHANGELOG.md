@@ -6,6 +6,29 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.3.0] — 2026-07-09
+
+Adopts a batch of upstream pull requests (never merged upstream), adapted to this fork.
+
+### Added
+- **End-of-turn reminders now reach Claude (#55 by @JarrodAI).** The stop hook's reminders
+  (files edited 3+ times without a buglog entry, stale `cerebrum.md`, and — new — no
+  meaningful `memory.md` summary) were written to stderr, which Claude Code never surfaces to
+  the model. They're now emitted via the `additionalContext` stdout channel, so they actually
+  land in the next context window.
+- **Dart support (#10 by @levnikmyskin).** `.dart` files are treated as code for token
+  estimation (description extraction already existed).
+
+### Changed
+- **Hook entries are tagged `_managedBy: "openwolf"` (#32 by @mann1x).** `init`/`update` mark
+  the `.claude/settings.json` entries they own, so they can be cleanly replaced/removed even if
+  a user relocates the hook script — while leaving unrelated hooks untouched.
+
+### Fixed
+- **`EPERM` on WSL2 9P + EFS (#33 by @WeathermanTony).** `init`/`update`/`restore` now copy
+  files with a `safeCopyFile` read+write shim instead of `fs.copyFileSync`, whose
+  `copy_file_range` fast path fails on WSL2 mounts under EFS-encrypted NTFS directories.
+
 ## [1.2.1] — 2026-07-09
 
 More adopted upstream bug fixes.
