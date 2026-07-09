@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock } from "./shared.js";
 
 interface FileRead {
   count: number;
@@ -129,8 +129,11 @@ async function main(): Promise<void> {
     },
   };
 
-  // Update token-ledger.json
+  // Update token-ledger.json — lock the read-modify-write so concurrent sessions and the cron
+  // token report don't clobber each other (M1).
+  const ret = getRetention(wolfDir);
   const ledgerPath = path.join(wolfDir, "token-ledger.json");
+  withLock(ledgerPath, () => {
   const ledger = readJSON(ledgerPath, {
     version: 1,
     created_at: "",
@@ -159,7 +162,6 @@ async function main(): Promise<void> {
   // Without this, sessions[] (each embedding full reads[]/writes[]) grows without limit
   // and writeJSON's full-file rewrite becomes quadratic over time. Limits are tunable
   // via config.json openwolf.retention.
-  const ret = getRetention(wolfDir);
   if (Array.isArray(sessionEntry.reads) && sessionEntry.reads.length > ret.session_io_max) {
     sessionEntry.reads = sessionEntry.reads.slice(-ret.session_io_max);
   }
@@ -185,6 +187,7 @@ async function main(): Promise<void> {
   ledger.lifetime.estimated_savings_vs_bare_cli += savedFromAnatomy + savedFromRepeats;
 
   writeJSON(ledgerPath, ledger);
+  });
 
   // Write a session summary line to memory.md if there was meaningful activity
   if (writeCount > 0) {

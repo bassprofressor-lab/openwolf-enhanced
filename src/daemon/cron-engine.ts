@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import cron from "node-cron";
-import { readJSON, writeJSON, readText, writeText } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
 import type { Logger } from "../utils/logger.js";
@@ -292,15 +292,18 @@ export class CronEngine {
   private generateTokenReport(): void {
     const flags = detectWaste(this.wolfDir);
     const ledgerPath = path.join(this.wolfDir, "token-ledger.json");
-    const ledger = readJSON<Record<string, unknown>>(ledgerPath, {});
-    // Keep waste_flags bounded (defensive — detectWaste could in principle return many).
-    (ledger as { waste_flags: unknown[] }).waste_flags =
-      flags.length > 200 ? flags.slice(-200) : flags;
-    (ledger as { optimization_report: { last_generated: string; patterns: unknown[] } }).optimization_report = {
-      last_generated: new Date().toISOString(),
-      patterns: flags.map((f) => f.pattern),
-    };
-    writeJSON(ledgerPath, ledger);
+    // Lock the read-modify-write — the stop hook writes the same ledger from another process (M1).
+    withLock(ledgerPath, () => {
+      const ledger = readJSON<Record<string, unknown>>(ledgerPath, {});
+      // Keep waste_flags bounded (defensive — detectWaste could in principle return many).
+      (ledger as { waste_flags: unknown[] }).waste_flags =
+        flags.length > 200 ? flags.slice(-200) : flags;
+      (ledger as { optimization_report: { last_generated: string; patterns: unknown[] } }).optimization_report = {
+        last_generated: new Date().toISOString(),
+        patterns: flags.map((f) => f.pattern),
+      };
+      writeJSON(ledgerPath, ledger);
+    });
   }
 
   private async runAiTask(params: { prompt: string; context_files: string[] }): Promise<void> {

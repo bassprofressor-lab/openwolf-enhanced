@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
   "type": "module",
   "bin": {
@@ -13,6 +13,8 @@
     "build:hooks": "tsc -p tsconfig.hooks.json",
     "build:dashboard": "cd src/dashboard/app && npx vite build --outDir ../../../dist/dashboard",
     "dev": "tsc --watch",
+    "pretest": "tsc && tsc -p tsconfig.hooks.json",
+    "test": "node --test test/*.test.js",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "prepublishOnly": "pnpm build"

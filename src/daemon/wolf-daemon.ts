@@ -174,6 +174,13 @@ app.post("/api/switch", (req, res) => {
     res.status(400).json({ error: "Invalid project root" });
     return;
   }
+  // Only switch to a project that's actually registered — don't let an authenticated request
+  // point the daemon at an arbitrary directory on disk that happens to contain a .wolf/.
+  const isRegistered = getRegisteredProjects(true).some((p) => path.resolve(p.root) === path.resolve(root));
+  if (!isRegistered) {
+    res.status(403).json({ error: "Not a registered OpenWolf project" });
+    return;
+  }
   if (root === projectRoot) {
     res.status(400).json({ error: "Already on this project" });
     return;

@@ -13,6 +13,7 @@ export function startFileWatcher(
     ignored: [
       "**/hooks/_session.json",
       "**/*.tmp",
+      "**/*.lock",
       "**/daemon.log",
       // Large, high-churn files: re-read + broadcast of the full content on every write
       // is the daemon's worst waste. The dashboard fetches them via full_state on demand.

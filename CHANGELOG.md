@@ -6,6 +6,29 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.7.0] — 2026-07-09
+
+Hardening and quality pass from the self-audit.
+
+### Added
+- **File locking for the token ledger (M1).** The read-modify-write of `token-ledger.json` in the
+  stop hook and the cron token report is now wrapped in a best-effort advisory lock, so two
+  sessions ending at once (or a session plus the cron report) can't clobber each other. The lock
+  never blocks a hook for long — it waits up to ~1s, steals a stale lock (>5s), and proceeds
+  unlocked rather than risk a hook timeout. `.lock` files are ignored by the watcher and scanner.
+- **Test suite.** `pnpm test` runs `node --test` over the core logic — retention/ledger caps,
+  buglog legacy-array migration + de-dup, the `.gitignore`/`.wolfignore` matcher, secret-file
+  detection, CRLF-tolerant anatomy parsing, and config/retention defaults (8 tests).
+
+### Security
+- **`/api/switch` only accepts registered projects.** Previously any authenticated request could
+  point the daemon at an arbitrary directory containing a `.wolf/`; it now must match a project in
+  the registry.
+
+### Notes
+- The package is npm-publish ready (`npm pack` ships only `dist/`, templates and license/docs) —
+  publishing under `openwolf-enhanced` would enable `npm i -g openwolf-enhanced`.
+
 ## [1.6.1] — 2026-07-09
 
 Security patch — resolves all advisories reported by `pnpm audit` (found in a self-audit).

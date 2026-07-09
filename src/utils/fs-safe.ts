@@ -53,6 +53,39 @@ export function writeText(filePath: string, content: string): void {
   }
 }
 
+// Best-effort advisory lock around a read-modify-write cycle (M1). Duplicated from
+// hooks/shared.ts (separate build roots). Never blocks for long — waits up to ~1s, steals a
+// stale lock (>5s), and runs unlocked if it can't acquire, so it can't wedge a process.
+function sleepSync(ms: number): void {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no-op */ }
+}
+export function withLock<T>(targetPath: string, fn: () => T): T {
+  const lockPath = targetPath + ".lock";
+  const MAX_WAIT_MS = 1000;
+  const STALE_MS = 5000;
+  const start = Date.now();
+  let held = false;
+  while (Date.now() - start < MAX_WAIT_MS) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      try { fs.writeSync(fd, String(process.pid)); } catch { /* ignore */ }
+      fs.closeSync(fd);
+      held = true;
+      break;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_MS) { fs.unlinkSync(lockPath); continue; }
+      } catch { continue; }
+      sleepSync(25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) { try { fs.unlinkSync(lockPath); } catch { /* ignore */ } }
+  }
+}
+
 // Copy a file via read+write instead of fs.copyFileSync. copyFileSync uses the
 // copy_file_range syscall on Linux, which fails with EPERM on WSL2 9P mounts whose
 // destination sits under an EFS-encrypted NTFS directory — a plain read()+write() works
