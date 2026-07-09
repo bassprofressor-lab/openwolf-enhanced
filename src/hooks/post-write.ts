@@ -4,7 +4,7 @@ import * as crypto from "node:crypto";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateTokens, appendMarkdown, timeShort, readStdin, normalizePath,
-  getRetention, loadWolfignore
+  getRetention, loadWolfignore, readBugLog
 } from "./shared.js";
 
 interface SessionData {
@@ -296,7 +296,7 @@ function extractCalls(code: string): string[] {
 
 function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: string, oldStr: string, newStr: string): void {
   const bugLogPath = path.join(wolfDir, "buglog.json");
-  const bugLog = readJSON<BugLog>(bugLogPath, { version: 1, bugs: [] });
+  const bugLog = readBugLog(wolfDir) as unknown as BugLog; // tolerates legacy array format
   const relFile = normalizePath(path.relative(projectRoot, absolutePath));
   const basename = path.basename(absolutePath);
   const ext = path.extname(basename).toLowerCase();

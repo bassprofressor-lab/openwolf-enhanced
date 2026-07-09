@@ -301,7 +301,12 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
   const p = path.join(wolfDir, "buglog.json");
   if (!fs.existsSync(p)) return noop("buglog");
   const before = fileSize(p);
-  const log = readJSON<{ version?: number; bugs?: Bug[] }>(p, { bugs: [] });
+  // Tolerate legacy bare-array buglogs ([...]) as well as {version, bugs:[]}.
+  const raw = readJSON<unknown>(p, { version: 1, bugs: [] as Bug[] });
+  const wasArray = Array.isArray(raw);
+  const log: { version?: number; bugs?: Bug[] } = wasArray
+    ? { version: 1, bugs: raw as Bug[] }
+    : (raw as { version?: number; bugs?: Bug[] });
   const bugs = Array.isArray(log.bugs) ? log.bugs : [];
   const startCount = bugs.length;
 
@@ -326,11 +331,14 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
   let result = [...manual, ...merged.values()];
   if (result.length > max) result = result.slice(-max);
 
-  if (result.length === startCount) return { changed: false, before, after: before, detail: `buglog: ${startCount} entries, within limits` };
-  log.bugs = result;
-  writeJSON(p, log);
+  // No change AND already in the canonical object form → nothing to do.
+  if (result.length === startCount && !wasArray) {
+    return { changed: false, before, after: before, detail: `buglog: ${startCount} entries, within limits` };
+  }
+  writeJSON(p, { version: log.version ?? 1, bugs: result });
   const after = fileSize(p);
-  return { changed: true, before, after, detail: `buglog: ${startCount} → ${result.length} entries, ${humanBytes(before)} → ${humanBytes(after)}` };
+  const note = wasArray ? " (migrated legacy array → {version,bugs})" : "";
+  return { changed: true, before, after, detail: `buglog: ${startCount} → ${result.length} entries${note}, ${humanBytes(before)} → ${humanBytes(after)}` };
 }
 
 export function pruneBackups(wolfDir: string, keep: number): CompactResult {
