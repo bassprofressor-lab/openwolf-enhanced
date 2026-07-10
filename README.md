@@ -83,7 +83,7 @@ Useful upstream pull requests that were never merged, adapted to this fork:
   "openwolf"`, so `init`/`update` can replace/remove only their own hooks. *(upstream #32)*
 - 🎯 **Dart support** — `.dart` files are recognized for token estimation. *(upstream #10)*
 
-### Reliability, dependencies & dashboard (1.6–1.9)
+### Reliability, dependencies & dashboard (1.6–1.10)
 
 Ongoing hardening and modernization beyond the upstream backlog:
 
@@ -97,6 +97,18 @@ Ongoing hardening and modernization beyond the upstream backlog:
 - 🌱 **`update` seeds files a project never received** — user-data files are never overwritten, but that was implemented as *never touched*, so a project initialised before a file existed never got one. `STATUS.md` was the casualty. Missing files are now created from the templates; existing ones are still left alone. *(1.9.2)*
 - 🪝 **The hooks we test are the hooks we ship** — hook deployment and the test suite pointed at two different `tsc` outputs of the same sources, free to diverge. One artifact now, deployed from one shared `hooks-deploy` module. *(1.9.2)*
 - 🧭 **Session-start resume context** — on session start, a compact, hard-capped digest (STATUS.md + cerebrum's Do-Not-Repeat + the latest memory session) is injected as context, so the model resumes where you left off without spending reads to reconstruct it. Skips an unedited template STATUS; configurable via `session_context`. *(1.10.0)*
+
+### Memory, search & multi-project (1.11–1.12)
+
+Ideas adapted from a review of [claude-mem](https://github.com/thedotmack/claude-mem), kept within OpenWolf's zero-infra, git-native model — no database, no background LLM worker:
+
+- 🔎 **`openwolf recall <query>`** — keyword search across STATUS.md / cerebrum.md / memory.md / buglog.json, ranked by term matches, returning a compact `file:line` index you can Read into. The query interface OpenWolf lacked — without a database. *(1.12.0)*
+- 🧭 **Progressive-disclosure resume digest** — the session-start context keeps curated knowledge inline (with token-cost hints), collapses recent activity to a one-line headline, and lists the rest as an **"Available on demand"** index (entry counts + token cost + how to pull via `Read`/`recall`) instead of pre-dumping it. *(1.12.0)*
+- 🔒 **`<private>…</private>` exclusion** — content wrapped in these tags in any `.wolf` file stays out of the resume digest and `recall` results, so secrets are never re-injected into the model. *(1.12.0)*
+- 🗒 **Structured session summaries** — SessionStart seeds a `<!-- session summary … -->` scaffold; filling `Did / Learned / Next / Files` at session end keeps memory consistent and greppable. *(1.12.0)*
+- 📤 **`openwolf export <sessions|bugs>`** — export the token-ledger sessions or the bug log as JSON or CSV (RFC 4180), to stdout or a file. *(1.11.0)*
+- 🧹 **`.wolfignore` suggestions in `doctor`** — flags not-yet-ignored directories that add real scanner load (scannable text-file count, not raw bytes) or weigh on space, so you can trim what gets indexed. *(1.11.0)*
+- 🖥️ **Dashboard: routing, All Projects & jump-to-file** — hash-based deep-linking (shareable panel URLs, working back/forward), a cross-project **All Projects** aggregate view (`/api/aggregate`), and clickable file paths in AI insights that deep-link into the Anatomy browser. *(1.11.0)*
 
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
