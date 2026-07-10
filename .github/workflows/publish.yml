@@ -24,7 +24,12 @@ jobs:
         with:
           fetch-depth: 0        # need tags so the prepublish guard can verify v<version> on HEAD
 
+      # Explicit version installs pnpm standalone — WITHOUT corepack. If corepack is
+      # enabled while packageManager points at pnpm, it shims `npm` too and every npm
+      # call ("npm install -g npm", "npm publish") fails. Explicit version avoids that.
       - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
 
       - uses: actions/setup-node@v4
         with:
