@@ -258,3 +258,30 @@ test("recall: ranks multi-term matches, searches buglog entries, empty query →
   assert.deepEqual(recall(w, "   ", {}), []);
   assert.deepEqual(recall(w, "zzznomatchzzz", {}), []);
 });
+
+// --- <private> tag exclusion (recall + resume digest) ---
+import { stripPrivate } from "../dist/hooks/shared.js";
+test("stripPrivate: removes blocks (multiline, inline, case-insensitive)", () => {
+  assert.equal(stripPrivate("a <private>secret</private> b"), "a  b");
+  assert.equal(stripPrivate("x\n<PRIVATE>\nline1\nline2\n</PRIVATE>\ny").replace(/\n+/g, "\n"), "x\ny");
+});
+
+test("recall + buildResumeDigest exclude <private> content", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "STATUS.md"),
+    "# STATUS\n\n## Next\nShip it.\n\n<private>\nAPI_KEY=sk-supersecret-value\n</private>\n\nafter\n");
+  fs.writeFileSync(path.join(w, "cerebrum.md"), "## Do-Not-Repeat\n- keep it public\n");
+  fs.writeFileSync(path.join(w, "memory.md"), "note with <private>sk-supersecret-value</private> inline\n");
+
+  const hits = recall(w, "supersecret");
+  assert.equal(hits.length, 0, "private content is not searchable");
+
+  const d = buildResumeDigest(w, 6000);
+  assert.ok(!d.includes("supersecret"), "private content is not injected");
+  assert.ok(d.includes("Ship it."), "public content still present");
+
+  // line numbers stay accurate after a multi-line private block: 'after' is on original line 9
+  fs.writeFileSync(path.join(w, "memory.md"), "l1\n<private>\nx\n</private>\nfindme\n");
+  const h2 = recall(w, "findme");
+  assert.equal(h2[0].line, 5, "line number preserved across a private block");
+});

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { stripPrivate } from "../hooks/shared.js";
 
 // A keyword search over the flat .wolf knowledge files — the query interface OpenWolf
 // lacked. No database: it scans STATUS.md / cerebrum.md / memory.md / buglog.json, scores
@@ -28,11 +29,13 @@ function unitsFor(src: string, content: string): Unit[] {
       : Array.isArray((raw as { bugs?: unknown[] }).bugs) ? (raw as { bugs: Array<Record<string, unknown>> }).bugs : [];
     return (bugs as Array<Record<string, unknown>>).map((b, i) => ({
       line: i + 1,
-      text: [b.id, b.error_message, b.root_cause, b.fix, Array.isArray(b.tags) ? (b.tags as unknown[]).join(" ") : b.tags]
-        .filter(Boolean).join(" — "),
+      text: stripPrivate([b.id, b.error_message, b.root_cause, b.fix, Array.isArray(b.tags) ? (b.tags as unknown[]).join(" ") : b.tags]
+        .filter(Boolean).join(" — ")),
     }));
   }
-  return content.split(/\r?\n/)
+  // Blank out private blocks but KEEP the newlines, so reported line numbers stay accurate.
+  const deprivated = content.replace(/<private>[\s\S]*?<\/private>/gi, (m) => m.replace(/[^\n]/g, ""));
+  return deprivated.split(/\r?\n/)
     .map((text, i) => ({ line: i + 1, text }))
     .filter((u) => u.text.trim().length > 0);
 }

@@ -31,6 +31,9 @@ architecture (📁), open pendencies (⚠️), and useful commands (🔧).
 1. After every significant action, append a one-line entry to `.wolf/memory.md`:
    `| HH:MM | description | file(s) | outcome | ~tokens |`
 2. After creating, deleting, or renaming files: update `.wolf/anatomy.md`.
+3. **Sensitive content:** wrap anything secret/private in `<private>…</private>` in any `.wolf`
+   knowledge file. It is kept out of the session-start resume context and out of `openwolf recall`
+   results, so it never gets re-injected into the model.
 
 ## Cerebrum Learning (MANDATORY — every session)
 
