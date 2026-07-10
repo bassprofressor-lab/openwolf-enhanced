@@ -20,14 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.1.3
-
+      # setup-node first (installs the matrix Node), then pnpm on top of it — no
+      # pnpm cache, which is the only thing that differed between the passing (22)
+      # and failing (20) legs and is a pure optimisation we don't need here.
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
