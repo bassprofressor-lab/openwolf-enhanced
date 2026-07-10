@@ -93,6 +93,9 @@ Ongoing hardening and modernization beyond the upstream backlog:
 - 🔒 **`/api/switch` is allow-listed** — the daemon only switches to projects in the registry, not arbitrary directories. *(1.7.0)*
 - 🐛 **File-watcher exclusions actually fire** — a latent bug (glob strings silently stopped matching under chokidar 4+) meant the daemon was re-reading and broadcasting `token-ledger.json`/`buglog.json` on every write; fixed with a predicate matcher. *(1.8.0)*
 - 📊 **Dashboard quick wins** — daemon-down banner with retry, Design QC thumbnails + lightbox (new path-safe token-gated image route), theme-aware tooltips. *(1.9.0)*
+- 💾 **Backups stay small** — `update` no longer snapshots the regenerable `token-ledger.json` into every backup, and `createBackup()` now enforces `retention.backups_keep` on the write path instead of only when `doctor` happened to run. One project went from 41 MB to 9 MB of `.wolf/` with no loss of restorable state. *(1.9.1)*
+- 🌱 **`update` seeds files a project never received** — user-data files are never overwritten, but that was implemented as *never touched*, so a project initialised before a file existed never got one. `STATUS.md` was the casualty. Missing files are now created from the templates; existing ones are still left alone. *(1.9.2)*
+- 🪝 **The hooks we test are the hooks we ship** — hook deployment and the test suite pointed at two different `tsc` outputs of the same sources, free to diverge. One artifact now, deployed from one shared `hooks-deploy` module. *(1.9.2)*
 
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
