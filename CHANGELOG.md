@@ -8,8 +8,8 @@ release of this fork.
 
 ## [1.12.0] — 2026-07-10
 
-Ideas adapted from a review of [claude-mem](https://github.com/thedotmack/claude-mem), kept within
-OpenWolf's zero-infra, git-native model (no database, no background LLM worker).
+Memory search, privacy, and a progressive-disclosure resume digest — all within OpenWolf's
+zero-infra, git-native model (no database, no background LLM worker).
 
 ### Added
 - **`<private>…</private>` exclusion** — content wrapped in these tags in any `.wolf` knowledge file
