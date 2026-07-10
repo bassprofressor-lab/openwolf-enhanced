@@ -233,3 +233,28 @@ test("projectSummary: reads lifetime stats + bug count; missing .wolf → exists
   assert.equal(agg.length, 2);
   assert.equal(agg[0].name, "p1");
 });
+
+// --- recall: keyword search over knowledge files ---
+import { recall } from "../dist/src/utils/recall.js";
+test("recall: ranks multi-term matches, searches buglog entries, empty query → []", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "cerebrum.md"),
+    "## Do-Not-Repeat\n- never force-push the main branch\n- the daemon port is 18791\n");
+  fs.writeFileSync(path.join(w, "memory.md"),
+    "| 10:00 | force-push incident on main | git | fixed | 1k |\n| 11:00 | unrelated | x | ok | 1k |\n");
+  fs.writeFileSync(path.join(w, "buglog.json"), JSON.stringify({ version: 1, bugs: [
+    { id: "bug-1", error_message: "EADDRINUSE port already in use", root_cause: "daemon port clash", tags: ["daemon"] },
+  ]}));
+
+  const hits = recall(w, "force-push main", { limit: 5 });
+  assert.ok(hits.length >= 2, "finds matches in cerebrum + memory");
+  // a unit containing BOTH terms outranks single-term ones
+  assert.ok(hits[0].text.toLowerCase().includes("force-push") && hits[0].text.toLowerCase().includes("main"));
+
+  const bugHits = recall(w, "EADDRINUSE", { limit: 5 });
+  assert.equal(bugHits[0].file, "buglog.json");
+  assert.ok(bugHits[0].text.includes("EADDRINUSE"));
+
+  assert.deepEqual(recall(w, "   ", {}), []);
+  assert.deepEqual(recall(w, "zzznomatchzzz", {}), []);
+});

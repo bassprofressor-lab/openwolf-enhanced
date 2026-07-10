@@ -6,6 +6,28 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [Unreleased]
+
+Ideas adapted from a review of [claude-mem](https://github.com/thedotmack/claude-mem), kept within
+OpenWolf's zero-infra, git-native model (no database, no background LLM worker).
+
+### Added
+- **`openwolf recall <query>`** — keyword search across the flat knowledge files (STATUS.md,
+  cerebrum.md, memory.md, buglog.json), ranked by term matches (bonus for hitting every term),
+  returning a compact `file:line` index so you can Read the exact spot. `--limit`, `--json`. The
+  query interface OpenWolf lacked — without a DB. Pure `recall()`, tested.
+- **Structured session-summary scaffold** — the SessionStart hook now writes a
+  `<!-- session summary … -->` comment under each session header (invisible when rendered), and
+  OPENWOLF.md instructs replacing it at session end with `**Did:** … · **Learned:** … · **Next:** …
+  · **Files:** …`. Consistent, greppable memory; feeds a cleaner resume headline.
+
+### Changed
+- **Session-start resume digest is now progressive-disclosure.** Curated, high-value knowledge
+  (STATUS.md, cerebrum's Do-Not-Repeat) stays inline with a token-cost hint; recent activity collapses
+  to a one-line headline instead of dumping every row; and an **"Available on demand"** index lists
+  the remaining knowledge files with entry counts and token cost plus how to pull them (`Read` /
+  `openwolf recall`). The model sees what exists without us pre-dumping it.
+
 ## [1.11.0] — 2026-07-10
 
 Batched v1.10-cycle features.

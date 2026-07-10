@@ -173,6 +173,17 @@ export function createProgram(): Command {
       exportCommand(what, opts);
     });
 
+  // --- Recall command ---
+  program
+    .command("recall <query...>")
+    .description("Keyword-search the .wolf knowledge files (STATUS, cerebrum, memory, buglog)")
+    .option("--limit <n>", "Max results", "12")
+    .option("--json", "Output JSON")
+    .action(async (query: string[], opts: { limit?: string; json?: boolean }) => {
+      const { recallCommand } = await import("./recall-cmd.js");
+      recallCommand(query, opts);
+    });
+
   // --- Bug command ---
   const bug = program
     .command("bug")

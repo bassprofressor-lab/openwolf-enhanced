@@ -143,5 +143,9 @@ When the user asks to change, pick, migrate, or "reframe" their project's UI fra
 
 Before ending or when asked to wrap up:
 
-1. Write a session summary to `.wolf/memory.md`.
+1. Write a session summary to `.wolf/memory.md` by **replacing the `<!-- session summary … -->`
+   scaffold** under this session's header with the structured one-liner:
+   `**Did:** … · **Learned:** … · **Next:** … · **Files:** …`
+   Keeping these fields consistent makes memory greppable (`openwolf recall <query>`) and lets the
+   next session's resume digest surface a clean headline.
 2. Review the session: did you learn anything? Did the user correct you? Did you fix a bug? If yes, update `.wolf/cerebrum.md` and/or `.wolf/buglog.json`.
