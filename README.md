@@ -44,7 +44,8 @@ Everything upstream does, plus — grouped by what it gives you:
 | 🩺 **Self-maintenance** | `openwolf doctor` reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), flags cross-project registry issues, and suggests `.wolfignore` entries for noisy dirs. `--dry-run` previews. |
 | 📦 **Bounded, tunable storage** | Ledger, bug log, cron queues and waste flags are all capped — no runaway multi-MB files. Every limit lives in `openwolf.retention` and survives updates (config is deep-merged, not overwritten). |
 | 🧭 **Smart session resume** | On session start a compact, token-bounded digest is injected — STATUS + Do-Not-Repeat inline, recent activity as a one-line headline, the rest as an *"Available on demand"* index — so the model continues without re-reading. |
-| 🔎 **Searchable memory** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog and returns a compact `file:line` index. A query interface with no database. |
+| 🔎 **Searchable memory** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog **and Claude's native Auto Memory**, returning a compact `file:line` index. A query interface with no database. |
+| 🧠 **Native-memory interop** | Reads Claude Code's own Auto Memory (read-only): `doctor` flags its blind spots (files the `MEMORY.md` index never loads, the 200-line cutoff, dead links), a dashboard panel browses it, and an **MCP server** (`openwolf mcp`) exposes recall/resume to **Claude Desktop** and other MCP clients — so OpenWolf works beyond Claude Code. |
 | 🔒 **Privacy** | `<private>…</private>` content in any `.wolf` file is kept out of the injected context and out of search. |
 | 🗒 **Structured summaries** | Each session gets a `Did / Learned / Next / Files` scaffold, keeping memory consistent and greppable. |
 | 📤 **Export** | `openwolf export <sessions\|bugs>` to JSON or CSV (RFC 4180). |
@@ -191,7 +192,7 @@ dist/
 openwolf init                 Initialize .wolf/ and register hooks
 openwolf status               Show health, stats, .wolf/ footprint, size warnings
 openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dry-run]
-openwolf recall <query>       Keyword-search STATUS/cerebrum/memory/buglog [--limit N] [--json]
+openwolf recall <query>       Keyword-search .wolf + Claude's native memory [--limit N] [--json]
 openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
 openwolf mcp                  Run an MCP server (recall/resume/memory-health) [--project DIR]
 openwolf scan                 Refresh the project structure map [--check]

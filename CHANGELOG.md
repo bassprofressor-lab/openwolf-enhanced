@@ -6,11 +6,11 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
-## [Unreleased]
+## [1.13.0] — 2026-07-10
 
 Interop with Claude Code's native Auto Memory (`~/.claude/projects/<slug>/memory/`) — OpenWolf reads
 and surfaces it read-only instead of maintaining a competing store. It leaves writing/consolidation to
-Claude's own Auto Dream.
+Claude's own Auto Dream. Plus an MCP server so this works in Claude Desktop, not just Claude Code.
 
 ### Added
 - **`openwolf recall` also searches native Auto Memory.** Every topic file under the project's native

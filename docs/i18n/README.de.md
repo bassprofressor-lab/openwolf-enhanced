@@ -37,7 +37,8 @@ Alles, was Upstream tut, plus — gruppiert nach dem, was es dir bringt:
 | 🩺 **Selbstwartung** | `openwolf doctor` meldet den `.wolf/`-Footprint und kompaktiert alles (Ledger, Memory, Bug-Log, Backups, Logs, tmp), erkennt projektübergreifende Registry-Probleme und schlägt `.wolfignore`-Einträge für rauschende Verzeichnisse vor. `--dry-run` zeigt eine Vorschau. |
 | 📦 **Begrenzter, einstellbarer Speicher** | Ledger, Bug-Log, Cron-Queues und Waste-Flags sind alle gedeckelt — keine ausufernden Multi-MB-Dateien. Jedes Limit steht in `openwolf.retention` und übersteht Updates (Config wird tief gemerged, nicht überschrieben). |
 | 🧭 **Intelligenter Session-Resume** | Beim Session-Start wird ein kompakter, token-begrenzter Digest injiziert — STATUS + Do-Not-Repeat inline, jüngste Aktivität als Ein-Zeilen-Headline, der Rest als *„Available on demand"*-Index — damit das Modell weiterarbeitet, ohne neu zu lesen. |
-| 🔎 **Durchsuchbares Gedächtnis** | `openwolf recall <query>` durchsucht STATUS / cerebrum / memory / buglog per Keyword und liefert einen kompakten `file:line`-Index. Eine Abfrage-Schnittstelle ohne Datenbank. |
+| 🔎 **Durchsuchbares Gedächtnis** | `openwolf recall <query>` durchsucht STATUS / cerebrum / memory / buglog **und Claudes native Auto Memory** per Keyword und liefert einen kompakten `file:line`-Index. Eine Abfrage-Schnittstelle ohne Datenbank. |
+| 🧠 **Native-Memory-Interop** | Liest Claude Codes eigene Auto Memory (read-only): `doctor` deckt deren Blindstellen auf (Dateien, die der `MEMORY.md`-Index nie lädt, die 200-Zeilen-Grenze, tote Links), ein Dashboard-Panel durchstöbert sie, und ein **MCP-Server** (`openwolf mcp`) stellt recall/resume für **Claude Desktop** und andere MCP-Clients bereit — so wirkt OpenWolf über Claude Code hinaus. |
 | 🔒 **Datenschutz** | `<private>…</private>`-Inhalt in einer beliebigen `.wolf`-Datei bleibt aus dem injizierten Kontext und aus der Suche heraus. |
 | 🗒 **Strukturierte Summaries** | Jede Session bekommt ein `Did / Learned / Next / Files`-Gerüst — konsistentes, grep-bares Gedächtnis. |
 | 📤 **Export** | `openwolf export <sessions\|bugs>` als JSON oder CSV (RFC 4180). |
@@ -166,8 +167,9 @@ dist/
 openwolf init                 .wolf/ initialisieren und Hooks registrieren
 openwolf status               Health, Stats, .wolf/-Footprint, Größen-Warnungen anzeigen
 openwolf doctor               .wolf/ melden + kompaktieren, .wolfignore vorschlagen [--dry-run]
-openwolf recall <query>       STATUS/cerebrum/memory/buglog per Keyword suchen [--limit N] [--json]
+openwolf recall <query>       .wolf + Claudes native Memory per Keyword suchen [--limit N] [--json]
 openwolf export <what>        sessions|bugs als JSON oder CSV exportieren [--format csv] [--out FILE]
+openwolf mcp                  MCP-Server (recall/resume/memory-health) starten [--project DIR]
 openwolf scan                 Projekt-Strukturkarte aktualisieren [--check]
 openwolf dashboard            Das Echtzeit-Web-Dashboard öffnen
 openwolf daemon <cmd>         start | stop | restart | logs — Hintergrund-Scheduler
@@ -187,6 +189,28 @@ openwolf designqc
 ```
 
 Erkennt deinen Dev-Server automatisch, erfasst viewport-hohe JPEG-Abschnitte jeder Route und speichert sie in `.wolf/designqc-captures/`. Dann sagst du Claude, es soll die Screenshots lesen und bewerten. Benötigt `puppeteer-core`.
+
+## Nutzung in Claude Desktop (MCP)
+
+OpenWolfs Such- und Resume-Werkzeuge laufen auch als **MCP-Server** — funktionieren also in der
+Claude-Desktop-App und jedem MCP-Client, nicht nur in Claude Code. Trag ihn in deine
+`claude_desktop_config.json` ein:
+
+```json
+{
+  "mcpServers": {
+    "openwolf": {
+      "command": "openwolf",
+      "args": ["mcp", "--project", "/pfad/zu/deinem/projekt"]
+    }
+  }
+}
+```
+
+Er stellt drei **read-only** Tools bereit: `openwolf_recall` (durchsucht das Projekt-Wissen **und**
+Claudes native Auto Memory), `openwolf_resume` (der Resume-Digest) und `openwolf_memory_health`.
+Die Hook-basierte Auto-Injektion/-Erfassung gilt nur in Claude Code; hier werden die Tools explizit
+aufgerufen. OpenWolf schreibt nie in Claudes native Memory — es liest und macht sie sichtbar.
 
 ## Voraussetzungen
 
