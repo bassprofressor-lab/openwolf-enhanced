@@ -33,84 +33,23 @@ OpenWolf gives Claude a second brain: a file index so it knows what files contai
 
 ## What's Enhanced
 
-Everything from upstream still works. On top of that:
+Everything upstream does, plus — grouped by what it gives you:
 
 | Area | Enhancement |
 |------|-------------|
-| 🩺 **Self-maintenance** | New `openwolf doctor` — a daemon-independent command that reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), and flags cross-project registry issues (dead entries, dashboard-port collisions). `--dry-run` to preview. |
-| 📊 **Dashboard upgrades** | A daemon-down banner (no more empty panels that look like an empty project), a Design QC thumbnail grid + lightbox (was filenames only), and theme-aware chart tooltips. |
-| 📦 **Bounded storage** | `token-ledger.json`, `buglog.json`, cron dead-letter queue and waste flags are all capped. No more runaway multi-MB files. |
-| 🎯 **`.wolfignore`** | gitignore-style scoping for anatomy scanning **and** hook tracking. Stop indexing `vendor/`, generated code, or `*.log`. |
-| ⚙️ **Tunable retention** | New `openwolf.retention` config block — every limit is user-adjustable. |
-| 🔁 **Non-destructive updates** | `openwolf update` now **deep-merges** `config.json` instead of overwriting it, so your settings survive. |
-| 🧹 **Less churn** | `anatomy.md` isn't rewritten when nothing changed; the daemon no longer re-broadcasts large files on every write; auto bug-detection no longer flags ordinary refactors. |
-| 📏 **Visibility** | `openwolf status` now shows the `.wolf/` footprint and size warnings. |
+| 🩺 **Self-maintenance** | `openwolf doctor` reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), flags cross-project registry issues, and suggests `.wolfignore` entries for noisy dirs. `--dry-run` previews. |
+| 📦 **Bounded, tunable storage** | Ledger, bug log, cron queues and waste flags are all capped — no runaway multi-MB files. Every limit lives in `openwolf.retention` and survives updates (config is deep-merged, not overwritten). |
+| 🧭 **Smart session resume** | On session start a compact, token-bounded digest is injected — STATUS + Do-Not-Repeat inline, recent activity as a one-line headline, the rest as an *"Available on demand"* index — so the model continues without re-reading. |
+| 🔎 **Searchable memory** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog and returns a compact `file:line` index. A query interface with no database. |
+| 🔒 **Privacy** | `<private>…</private>` content in any `.wolf` file is kept out of the injected context and out of search. |
+| 🗒 **Structured summaries** | Each session gets a `Did / Learned / Next / Files` scaffold, keeping memory consistent and greppable. |
+| 📤 **Export** | `openwolf export <sessions\|bugs>` to JSON or CSV (RFC 4180). |
+| 🎯 **`.wolfignore`** | gitignore-style scoping for anatomy scanning **and** hook tracking; `doctor` suggests what to add. |
+| 📊 **Dashboard** | Deep-linkable panels, a cross-project **All Projects** view, jump-to-file from AI insights, a Design QC thumbnail grid + lightbox, and a daemon-down banner. |
+| 🔒 **Security & correctness** | Dashboard bound to loopback and token-gated, no command injection / path traversal, secret-file exclusion (`.pem`/`.key`/`id_rsa`…), plus ~15 adopted upstream security & bug fixes the inactive upstream never merged. |
+| 🚀 **Trusted releases** | Published to npm via GitHub OIDC — no long-lived token — with SLSA provenance; CI builds and tests on every push. |
 
-### Security & correctness hardening (1.2.0)
-
-This fork also adopts security and bug fixes that were reported/proposed upstream but never
-merged (the upstream repo has been inactive since March 2026):
-
-- 🔒 **Dashboard is no longer network-exposed** — binds to `127.0.0.1` (was `0.0.0.0`) and
-  requires a per-project token on every API request and WebSocket connection, closing an
-  unauthenticated path to trigger cron tasks. *(upstream #30, #34)*
-- 🔒 **No command injection** — shell command strings replaced with argument arrays
-  (`execFileSync`); the PM2 process name is sanitized. *(upstream #34)*
-- 🔒 **No path traversal** — cron AI tasks can't read files outside the project root. *(upstream #34)*
-- 🛡 **No secret leakage** — private keys, certs and keystores (`.pem`, `.key`, `.p8`,
-  `.keystore`, `id_rsa`, `credentials`…) are excluded from the brain, not just `.env`. *(upstream #54)*
-- 🐛 **CRLF no longer wipes `anatomy.md`** — the entry parser tolerates `\r\n`, so Windows /
-  `git autocrlf` repos don't get their file map truncated. *(upstream #50)*
-- 🐛 **`bug search` won't crash** on entries with missing fields or a `files[]` array. *(upstream #44)*
-- 🐛 **Re-reads after edits aren't flagged** — a file that changed during the session can be
-  re-read without a "already read" warning. *(upstream #41)*
-- 🐛 **No off-project tracking** — files outside the project root never enter anatomy/memory. *(upstream #56)*
-- 🐛 **Saner auto bug-detection** — the noisy "any big diff is a bug" heuristic was removed. *(upstream #28)*
-- 🐛 **`.gitignore` is respected** — anatomy scanning and hook tracking honor `.gitignore` (not just `.wolfignore`), so ignored/build files aren't indexed. *(upstream #15)*
-- 🐛 **`init` won't scaffold `$HOME`** — `findProjectRoot` stops at the home directory, and multi-project port collisions are avoided. *(upstream #20)*
-
-### Adopted upstream PRs (1.3.x)
-
-Useful upstream pull requests that were never merged, adapted to this fork:
-
-- 💬 **End-of-turn reminders actually reach Claude** — the stop hook's reminders (unlogged bug
-  fixes, stale `cerebrum.md`, missing session summary) were written to stderr, which the model
-  never sees; they now use the `additionalContext` stdout channel, and each fires **at most
-  once per session** instead of nagging every turn. *(upstream #55)*
-- 🖥 **Works on WSL2 / EFS** — file copies use a read+write shim, fixing `EPERM` on WSL2 mounts
-  under EFS-encrypted directories. *(upstream #33)*
-- 🏷 **Cleaner hook management** — `.claude/settings.json` entries are tagged `_managedBy:
-  "openwolf"`, so `init`/`update` can replace/remove only their own hooks. *(upstream #32)*
-- 🎯 **Dart support** — `.dart` files are recognized for token estimation. *(upstream #10)*
-
-### Reliability, dependencies & dashboard (1.6–1.10)
-
-Ongoing hardening and modernization beyond the upstream backlog:
-
-- 🔒 **Zero known vulnerabilities** — a self-audit fixed 11 transitive advisories; `pnpm audit --prod` is clean, kept current with a dependency pass (all dev **and** runtime majors upgraded: TypeScript 7, Vite 8, recharts 3, chokidar 5, commander 15, node-cron 4…). *(1.6.1, 1.8.0)*
-- 🔐 **Safe concurrent sessions** — the token-ledger read-modify-write is wrapped in a best-effort file lock, so two sessions ending at once (or a session plus the cron report) can't clobber each other. It never blocks a hook for long. *(1.7.0)*
-- 🧪 **Test suite** — `pnpm test` covers the core logic (retention/ledger caps, buglog migration, ignore matcher, secret detection, CRLF parsing). *(1.7.0)*
-- 🔒 **`/api/switch` is allow-listed** — the daemon only switches to projects in the registry, not arbitrary directories. *(1.7.0)*
-- 🐛 **File-watcher exclusions actually fire** — a latent bug (glob strings silently stopped matching under chokidar 4+) meant the daemon was re-reading and broadcasting `token-ledger.json`/`buglog.json` on every write; fixed with a predicate matcher. *(1.8.0)*
-- 📊 **Dashboard quick wins** — daemon-down banner with retry, Design QC thumbnails + lightbox (new path-safe token-gated image route), theme-aware tooltips. *(1.9.0)*
-- 💾 **Backups stay small** — `update` no longer snapshots the regenerable `token-ledger.json` into every backup, and `createBackup()` now enforces `retention.backups_keep` on the write path instead of only when `doctor` happened to run. One project went from 41 MB to 9 MB of `.wolf/` with no loss of restorable state. *(1.9.1)*
-- 🌱 **`update` seeds files a project never received** — user-data files are never overwritten, but that was implemented as *never touched*, so a project initialised before a file existed never got one. `STATUS.md` was the casualty. Missing files are now created from the templates; existing ones are still left alone. *(1.9.2)*
-- 🪝 **The hooks we test are the hooks we ship** — hook deployment and the test suite pointed at two different `tsc` outputs of the same sources, free to diverge. One artifact now, deployed from one shared `hooks-deploy` module. *(1.9.2)*
-- 🧭 **Session-start resume context** — on session start, a compact, hard-capped digest (STATUS.md + cerebrum's Do-Not-Repeat + the latest memory session) is injected as context, so the model resumes where you left off without spending reads to reconstruct it. Skips an unedited template STATUS; configurable via `session_context`. *(1.10.0)*
-
-### Memory, search & multi-project (1.11–1.12)
-
-Ideas adapted from a review of [claude-mem](https://github.com/thedotmack/claude-mem), kept within OpenWolf's zero-infra, git-native model — no database, no background LLM worker:
-
-- 🔎 **`openwolf recall <query>`** — keyword search across STATUS.md / cerebrum.md / memory.md / buglog.json, ranked by term matches, returning a compact `file:line` index you can Read into. The query interface OpenWolf lacked — without a database. *(1.12.0)*
-- 🧭 **Progressive-disclosure resume digest** — the session-start context keeps curated knowledge inline (with token-cost hints), collapses recent activity to a one-line headline, and lists the rest as an **"Available on demand"** index (entry counts + token cost + how to pull via `Read`/`recall`) instead of pre-dumping it. *(1.12.0)*
-- 🔒 **`<private>…</private>` exclusion** — content wrapped in these tags in any `.wolf` file stays out of the resume digest and `recall` results, so secrets are never re-injected into the model. *(1.12.0)*
-- 🗒 **Structured session summaries** — SessionStart seeds a `<!-- session summary … -->` scaffold; filling `Did / Learned / Next / Files` at session end keeps memory consistent and greppable. *(1.12.0)*
-- 📤 **`openwolf export <sessions|bugs>`** — export the token-ledger sessions or the bug log as JSON or CSV (RFC 4180), to stdout or a file. *(1.11.0)*
-- 🧹 **`.wolfignore` suggestions in `doctor`** — flags not-yet-ignored directories that add real scanner load (scannable text-file count, not raw bytes) or weigh on space, so you can trim what gets indexed. *(1.11.0)*
-- 🖥️ **Dashboard: routing, All Projects & jump-to-file** — hash-based deep-linking (shareable panel URLs, working back/forward), a cross-project **All Projects** aggregate view (`/api/aggregate`), and clickable file paths in AI insights that deep-link into the Anatomy browser. *(1.11.0)*
-
-Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
+Every change is versioned in the [CHANGELOG](CHANGELOG.md); attribution is in the [NOTICE](NOTICE).
 
 ## Quick Start
 
@@ -168,6 +107,7 @@ Two things to know before you re-run `pnpm build` on a copy you have already ins
 
 | File | Purpose |
 |------|---------|
+| `STATUS.md` | Single-source-of-truth handoff — current quest, next steps, gotchas; read first on resume |
 | `anatomy.md` | Project file map with descriptions and token estimates |
 | `cerebrum.md` | Learned preferences, corrections, Do-Not-Repeat list |
 | `memory.md` | Chronological action log with token estimates |
@@ -244,23 +184,19 @@ dist/
 ## Commands
 
 ```
-openwolf init              Initialize .wolf/ and register hooks
-openwolf status            Show health, stats, .wolf/ footprint, size warnings
-openwolf doctor            Report + compact .wolf/ (daemon-independent) [--dry-run]
-openwolf scan              Refresh the project structure map
-openwolf scan --check      Verify anatomy matches filesystem (exits 1 if stale)
-openwolf dashboard         Open the real-time web dashboard
-openwolf daemon start      Start background task scheduler
-openwolf daemon stop       Stop the scheduler
-openwolf daemon restart    Restart the scheduler
-openwolf daemon logs       View scheduler logs
-openwolf cron list         Show all scheduled tasks
-openwolf cron run <id>     Trigger a task manually
-openwolf cron retry <id>   Retry a dead-lettered task
-openwolf designqc          Capture full-page screenshots for design evaluation
-openwolf bug search <term> Search bug memory for known fixes
-openwolf update            Update registered projects (deep-merges config)
-openwolf restore [backup]  Restore .wolf/ from a timestamped backup
+openwolf init                 Initialize .wolf/ and register hooks
+openwolf status               Show health, stats, .wolf/ footprint, size warnings
+openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dry-run]
+openwolf recall <query>       Keyword-search STATUS/cerebrum/memory/buglog [--limit N] [--json]
+openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
+openwolf scan                 Refresh the project structure map [--check]
+openwolf dashboard            Open the real-time web dashboard
+openwolf daemon <cmd>         start | stop | restart | logs — background task scheduler
+openwolf cron <cmd>           list | run <id> | retry <id> — scheduled tasks
+openwolf designqc             Capture full-page screenshots for design evaluation
+openwolf bug search <term>    Search bug memory for known fixes
+openwolf update               Update registered projects [--project NAME] [--dry-run] [--list]
+openwolf restore [backup]     Restore .wolf/ from a timestamped backup
 ```
 
 ## Design QC
