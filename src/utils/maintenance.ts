@@ -89,6 +89,101 @@ export function loadIgnore(projectRoot: string): (relPath: string) => boolean {
   return makeIgnoreMatcher(lines);
 }
 
+export interface IgnoreSuggestion {
+  pattern: string; // the line to add to .wolfignore
+  reason: string;  // human-readable why
+  files: number;
+  bytes: number;
+}
+
+const SUGGEST_DEFAULT_EXCLUDES = new Set([
+  "node_modules", ".git", "dist", "build", ".wolf", ".next", ".nuxt", "coverage",
+  "__pycache__", ".cache", "target", ".vscode", ".idea", ".turbo", ".vercel",
+  ".netlify", ".output", ".venv", "venv",
+]);
+
+// Extensions the anatomy scanner never reads — bytes here cost the scanner nothing, so
+// they shouldn't drive a "too noisy to scan" suggestion (only the space/watch trigger).
+const SUGGEST_BINARY_EXT = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf", ".zip", ".gz",
+  ".tar", ".tgz", ".7z", ".rar", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".woff",
+  ".woff2", ".ttf", ".eot", ".so", ".dylib", ".dll", ".exe", ".bin", ".onnx", ".pt",
+  ".pth", ".h5", ".pkl", ".parquet", ".wasm", ".class", ".o", ".a", ".lib",
+]);
+
+// Suggest .wolfignore entries for directories that aren't ignored yet and either add real
+// scanner load (many *scannable* text files — the true token cost) or are large enough to
+// weigh on watching/space. Bytes from big binaries don't trigger the noise rule, since the
+// scanner skips those anyway. Respects existing .gitignore/.wolfignore and the default
+// excludes, so accepted suggestions never re-appear. Stats sizes only (never reads content)
+// and is bounded by maxNodes for huge trees.
+export function suggestIgnores(
+  projectRoot: string,
+  opts: { minFiles?: number; bigBytes?: number; maxNodes?: number } = {}
+): IgnoreSuggestion[] {
+  const minFiles = opts.minFiles ?? 40;              // scannable text files → noise
+  const bigBytes = opts.bigBytes ?? 50 * 1024 * 1024; // total bytes → space/watch weight
+  const maxNodes = opts.maxNodes ?? 20000;
+  const ignore = loadIgnore(projectRoot);
+
+  interface Agg { scannable: number; bytes: number; }
+  const dirAgg = new Map<string, Agg>();
+  let nodes = 0;
+
+  const walk = (absDir: string, relDir: string): Agg => {
+    const agg: Agg = { scannable: 0, bytes: 0 };
+    let items: fs.Dirent[];
+    try { items = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return agg; }
+    for (const item of items) {
+      if (nodes >= maxNodes) break;
+      nodes++;
+      const name = item.name;
+      const rel = relDir ? `${relDir}/${name}` : name;
+      if (SUGGEST_DEFAULT_EXCLUDES.has(name)) continue;
+      if (ignore(rel)) continue;
+      if (item.isDirectory()) {
+        const sub = walk(path.join(absDir, name), rel);
+        agg.scannable += sub.scannable;
+        agg.bytes += sub.bytes;
+      } else if (item.isFile()) {
+        let sz = 0;
+        try { sz = fs.statSync(path.join(absDir, name)).size; } catch { /* unreadable */ }
+        agg.bytes += sz;
+        // Scannable = the scanner would actually read it: text, under its 1MB cap.
+        if (sz <= 1024 * 1024 && !SUGGEST_BINARY_EXT.has(path.extname(name).toLowerCase())) {
+          agg.scannable += 1;
+        }
+      }
+    }
+    if (relDir) dirAgg.set(relDir, agg);
+    return agg;
+  };
+  walk(projectRoot, "");
+
+  const exceeds = (a: Agg): boolean => a.scannable >= minFiles || a.bytes >= bigBytes;
+  const aboveSet = new Set([...dirAgg.entries()].filter(([, a]) => exceeds(a)).map(([rel]) => rel));
+
+  // Keep only the top-most noisy directory on each path (no ancestor already above threshold).
+  const suggestions: IgnoreSuggestion[] = [];
+  for (const rel of aboveSet) {
+    const parts = rel.split("/");
+    let hasAboveAncestor = false;
+    for (let i = 1; i < parts.length; i++) {
+      if (aboveSet.has(parts.slice(0, i).join("/"))) { hasAboveAncestor = true; break; }
+    }
+    if (hasAboveAncestor) continue;
+    const a = dirAgg.get(rel)!;
+    const noisy = a.scannable >= minFiles;
+    const reason = noisy
+      ? `${a.scannable} scannable files (${humanBytes(a.bytes)})`
+      : `${humanBytes(a.bytes)} (large, mostly non-text)`;
+    suggestions.push({ pattern: `${rel}/`, reason, files: a.scannable, bytes: a.bytes });
+  }
+  // Noise (scannable-heavy) first, then space hogs; each group by size.
+  suggestions.sort((x, y) => (y.files - x.files) || (y.bytes - x.bytes));
+  return suggestions.slice(0, 12);
+}
+
 // ---------------------------------------------------------------------------
 // Size helpers
 // ---------------------------------------------------------------------------

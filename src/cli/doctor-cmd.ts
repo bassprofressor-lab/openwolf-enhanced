@@ -13,6 +13,7 @@ import {
   cleanTmp,
   rotateDaemonLog,
   dirSize,
+  suggestIgnores,
   type CompactResult,
 } from "../utils/maintenance.js";
 
@@ -73,6 +74,18 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
       console.log(`\nRegistry health: ${projects.length} projects — unique ports, no dead entries ✓`);
     }
   } catch { /* registry not readable — skip */ }
+
+  // --- .wolfignore suggestions: noisy project dirs the scanner reads but needn't ---
+  try {
+    const suggestions = suggestIgnores(projectRoot);
+    if (suggestions.length) {
+      console.log("\nSuggested .wolfignore entries (not ignored yet, add to skip scanning):");
+      for (const s of suggestions) {
+        console.log(`  ${s.pattern.padEnd(32)} ${s.reason}`);
+      }
+      console.log(`  → append the useful ones to ${path.join(projectRoot, ".wolfignore")}`);
+    }
+  } catch { /* scan failed — skip suggestions */ }
 
   if (dry) {
     console.log("\n(dry run — no changes written. Run without --dry-run to compact.)");

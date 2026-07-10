@@ -10,6 +10,7 @@ import {
   compactLedger,
   dedupeAndCapBuglog,
   humanBytes,
+  suggestIgnores,
 } from "../dist/src/utils/maintenance.js";
 import {
   isSecretFile,
@@ -179,4 +180,27 @@ test("collectRows: sessions flatten totals; bugs flatten fields; unknown throws"
   assert.equal(bugs[0].tags, "x; y");
 
   assert.throws(() => collectRows(w, "nope"), /unknown export target/);
+});
+
+// --- suggestIgnores: flags noisy dirs, respects existing ignores + defaults ---
+test("suggestIgnores: suggests noisy dir, skips ignored + default-excluded + child dirs", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "owsug-"));
+  const mk = (rel, n) => {
+    const d = path.join(root, rel);
+    fs.mkdirSync(d, { recursive: true });
+    for (let i = 0; i < n; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), "x");
+  };
+  mk("generated", 60);           // noisy → should be suggested
+  mk("generated/sub", 60);       // child of a suggested dir → must NOT be suggested separately
+  mk("src", 5);                  // small → ignored
+  mk("node_modules/pkg", 100);   // default-excluded → never suggested
+  mk("vendor", 60);              // noisy but...
+  fs.writeFileSync(path.join(root, ".wolfignore"), "vendor/\n"); // ...already ignored → skip
+
+  const s = suggestIgnores(root, { minFiles: 40 });
+  const pats = s.map((x) => x.pattern);
+  assert.ok(pats.includes("generated/"), "flags the noisy generated/ dir");
+  assert.ok(!pats.some((p) => p.startsWith("generated/sub")), "does not also flag the child dir");
+  assert.ok(!pats.includes("node_modules/"), "never flags default-excluded dirs");
+  assert.ok(!pats.includes("vendor/"), "respects existing .wolfignore");
 });

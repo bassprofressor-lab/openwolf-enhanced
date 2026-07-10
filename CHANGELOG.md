@@ -14,6 +14,11 @@ Batched v1.10-cycle features — not yet published.
 - **`openwolf export <sessions|bugs>`** — export the token-ledger sessions or the bug log as JSON
   (default) or CSV (`--format csv`), to stdout or a file (`--out`). CSV flattens nested totals/tags
   and quotes per RFC 4180. Pure `toCSV`/`collectRows` helpers, covered by tests.
+- **`.wolfignore` suggestions in `openwolf doctor`** — doctor now lists project directories that
+  aren't ignored yet and either add real scanner load (many *scannable* text files) or are large
+  enough to weigh on watching/space, so you can add the noisy ones to `.wolfignore`. Bytes from big
+  binaries (which the scanner skips anyway) don't trigger the noise rule. Respects existing
+  `.gitignore`/`.wolfignore` and default excludes; stats sizes only, bounded for huge trees.
 
 ## [1.10.0] — 2026-07-10
 
