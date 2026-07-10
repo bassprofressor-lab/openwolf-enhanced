@@ -6,6 +6,25 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.9.3] — 2026-07-10
+
+First release published to npm as [`openwolf-enhanced`](https://www.npmjs.com/package/openwolf-enhanced) — `npm install -g openwolf-enhanced`.
+
+### Fixed
+- **`prepublishOnly` no longer builds — it verifies.** It previously ran `pnpm build`, whose
+  `prebuild` deletes `dist/`; since the global `openwolf` command symlinks into
+  `dist/bin/openwolf.js`, a build failure mid-publish would take the installed CLI down with it, and
+  a publish at the wrong moment could ship a stale `dist/`. `scripts/prepublish-guard.mjs` now
+  refuses to publish unless `dist/` is present, no source is newer than the compiled CLI, the working
+  tree is clean, and `package.json`'s version has a matching git tag on `HEAD`. Building is a
+  deliberate, separate step. (This `prepublishOnly → prebuild-deletes-dist` trap was inherited
+  verbatim from upstream 1.0.4.)
+
+### Documentation
+- README Quick Start leads with `npm install -g openwolf-enhanced`, notes that the bare `openwolf`
+  package is the unmaintained upstream 1.0.4, and keeps the from-source build as a collapsible
+  fallback.
+
 ## [1.9.2] — 2026-07-10
 
 Three findings from the 1.9.1 investigation, fixed.

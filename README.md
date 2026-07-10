@@ -101,7 +101,17 @@ Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
 ## Quick Start
 
-Not published to a package registry — install from source:
+```bash
+npm install -g openwolf-enhanced
+```
+
+> **Note:** this is the maintained fork. `npm install -g openwolf` installs the
+> original `openwolf` (last released 1.0.4, March 2026, unmaintained) — a different
+> package. Install `openwolf-enhanced` for the bounded-storage, self-maintenance and
+> security work described above. Both provide the same `openwolf` command.
+
+<details>
+<summary>Install from source instead</summary>
 
 ```bash
 git clone https://github.com/bassprofressor-lab/openwolf-enhanced.git
@@ -110,6 +120,7 @@ pnpm install
 pnpm build            # builds CLI, hooks, and dashboard
 npm install -g .      # installs the `openwolf` command globally
 ```
+</details>
 
 Then, in any project:
 
