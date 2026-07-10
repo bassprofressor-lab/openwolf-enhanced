@@ -6,6 +6,18 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.9.4] — 2026-07-10
+
+### Added
+- **Tokenless releases via npm Trusted Publishing (OIDC).** `.github/workflows/publish.yml` publishes
+  from GitHub Actions on a `v*` tag push, authenticating with a short-lived, workflow-scoped OIDC
+  credential instead of a stored `NPM_TOKEN`, and attaching a provenance attestation automatically.
+  No long-lived publish token exists anymore; the one used to bootstrap the package on npm was
+  revoked. Releasing is now: bump the version, tag `vX.Y.Z`, push.
+
+### Changed
+- **`packageManager` pinned to `pnpm@11.1.3`** so `pnpm/action-setup` resolves a version in CI.
+
 ## [1.9.3] — 2026-07-10
 
 First release published to npm as [`openwolf-enhanced`](https://www.npmjs.com/package/openwolf-enhanced) — `npm install -g openwolf-enhanced`.
