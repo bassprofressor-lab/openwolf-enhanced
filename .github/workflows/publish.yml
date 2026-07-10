@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # required for OIDC — this is what replaces the token
-      contents: read
+      contents: write   # create the GitHub Release for this tag
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,3 +46,19 @@ jobs:
 
       # prepublishOnly runs scripts/prepublish-guard.mjs; provenance is automatic under OIDC.
       - run: npm publish
+
+      # Publish a GitHub Release for this tag, notes taken from the CHANGELOG section.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#v}"
+          awk -v v="$ver" '
+            $0 ~ ("^## \\[" v "\\]") { grab=1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || printf 'Release %s\n' "$TAG" > notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag

@@ -1,0 +1,49 @@
+name: Backfill GitHub Releases
+
+# One-time (idempotent) backfill of GitHub Releases for tags created before the
+# release automation existed. Runs when this file is pushed to main — a tokenless
+# way to trigger it (the built-in GITHUB_TOKEN creates the releases). It skips tags
+# that already have a release, so re-running is safe. New tags get their release
+# from publish.yml, not here.
+#
+# NOTE: the paths filter is reliable only for BRANCH pushes, so this workflow does
+# not react to tag pushes — exactly what we want.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backfill-releases.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # all tags + full history
+
+      - name: Create a release for every tag missing one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for tag in $(git tag -l 'v*' | sort -V); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "exists:  $tag"
+              continue
+            fi
+            ver="${tag#v}"
+            awk -v v="$ver" '
+              $0 ~ ("^## \\[" v "\\]") { grab=1; next }
+              grab && /^## \[/ { exit }
+              grab { print }
+            ' CHANGELOG.md > notes.md
+            [ -s notes.md ] || printf 'Release %s\n' "$tag" > notes.md
+            echo "create:  $tag"
+            gh release create "$tag" --title "$tag" --notes-file notes.md --verify-tag
+          done
