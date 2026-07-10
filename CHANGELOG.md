@@ -6,6 +6,27 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.9.1] — 2026-07-10
+
+Backup retention — the ledger-growth fix (1.5.0) had a blind spot one layer up.
+
+### Fixed
+- **`openwolf update` no longer copies `token-ledger.json` into its backup.** The ledger is capped by
+  *session count*, not bytes, so a mature project's ledger sits at a few MB — and every update snapshotted
+  it. Twelve updates in one afternoon left 38 MB of backups in a 41 MB `.wolf/`, of which ~30 MB were
+  redundant ledger copies. The ledger is regenerable telemetry: it is now excluded from `BACKUP_FILES`.
+  `restoreCommand()` reads the backup directory directly, so an excluded file is simply left untouched on
+  restore — rolling a project back no longer rolls back its usage telemetry either. Backups dropped from
+  3.2 MB to 484 KB.
+- **`createBackup()` now enforces `retention.backups_keep`.** `pruneBackups()` existed and knew the limit,
+  but was only ever called from `openwolf doctor` — so repeated updates accumulated snapshots indefinitely
+  and the limit only applied if you happened to run doctor. Pruning now runs immediately after each backup
+  is written. Oldest-first, so the snapshot just created always survives.
+
+### Notes
+Together these took `orderflow/.wolf` from 41 MB → 9.0 MB with no loss of restorable state. The same class
+of bug as 1.5.0's unbounded ledger: a bound that exists but is never enforced on the write path.
+
 ## [1.9.0] — 2026-07-09
 
 Dashboard & CLI quick wins — usability and self-diagnosis, verified headless (Chromium).

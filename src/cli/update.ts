@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { getRegisteredProjects, registerProject, type RegisteredProject } from "./registry.js";
 import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
 import { ensureDir } from "../utils/paths.js";
+import { getRetention, pruneBackups } from "../utils/maintenance.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,11 +60,18 @@ const USER_DATA_FILES = [
   "suggestions.json", "designqc-report.json",
 ];
 
+// Regenerable telemetry — excluded from backups. token-ledger.json is capped rather than
+// bounded in size (retention.token_ledger_max_sessions), so copying it into every backup
+// made each snapshot grow with the cap. restoreCommand() reads the backup dir directly,
+// so an excluded file is simply left untouched on restore — which is what we want here:
+// rolling a project back should not roll back its usage telemetry.
+const BACKUP_EXCLUDE = new Set(["token-ledger.json"]);
+
 // Files to include in backup
 const BACKUP_FILES = [
   ...ALWAYS_OVERWRITE,
   ...USER_DATA_FILES,
-];
+].filter((f) => !BACKUP_EXCLUDE.has(f));
 
 const HOOK_SETTINGS = {
   hooks: {
@@ -182,9 +190,12 @@ async function updateProject(
   }
 
   try {
-    // 1. Create backup
+    // 1. Create backup, then enforce retention.backups_keep. Pruning here (not only in
+    // `openwolf doctor`) keeps repeated updates from accumulating snapshots indefinitely.
     const backupDir = createBackup(wolfDir);
     console.log(`    ✓ Backup: ${path.basename(backupDir)}`);
+    const pruned = pruneBackups(wolfDir, getRetention(wolfDir).backups_keep);
+    if (pruned.changed) console.log(`    ✓ ${pruned.detail}`);
 
     // 2. Update template files (OPENWOLF.md, config.json)
     const templatesDir = findTemplatesDir();
