@@ -6,6 +6,15 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [Unreleased]
+
+Batched v1.10-cycle features — not yet published.
+
+### Added
+- **`openwolf export <sessions|bugs>`** — export the token-ledger sessions or the bug log as JSON
+  (default) or CSV (`--format csv`), to stdout or a file (`--out`). CSV flattens nested totals/tags
+  and quotes per RFC 4180. Pure `toCSV`/`collectRows` helpers, covered by tests.
+
 ## [1.10.0] — 2026-07-10
 
 ### Added

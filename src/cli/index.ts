@@ -162,6 +162,17 @@ export function createProgram(): Command {
       await doctorCommand(opts);
     });
 
+  // --- Export command ---
+  program
+    .command("export <what>")
+    .description("Export .wolf data (sessions | bugs) as JSON or CSV")
+    .option("--format <fmt>", "Output format: json or csv", "json")
+    .option("--out <file>", "Write to a file instead of stdout")
+    .action(async (what: string, opts: { format?: string; out?: string }) => {
+      const { exportCommand } = await import("./export-cmd.js");
+      exportCommand(what, opts);
+    });
+
   // --- Bug command ---
   const bug = program
     .command("bug")

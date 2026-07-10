@@ -17,6 +17,7 @@ import {
   readBugLog,
   buildResumeDigest,
 } from "../dist/hooks/shared.js";
+import { toCSV, collectRows } from "../dist/src/cli/export-cmd.js";
 
 function tmpWolf() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owtest-"));
@@ -139,4 +140,43 @@ test("buildResumeDigest: respects the char cap", () => {
   const d = buildResumeDigest(wolf, 2000);
   assert.ok(d.length <= 2000, `digest ${d.length} within cap`);
   assert.ok(d.includes("truncated"), "marks truncation");
+});
+
+// --- export: toCSV escaping + union columns ---
+test("toCSV: header union, RFC4180 quoting, arrays joined", () => {
+  const csv = toCSV([
+    { a: 1, b: "plain" },
+    { a: 2, b: 'has,comma "and" quote', c: ["x", "y"] },
+  ]);
+  const lines = csv.split("\n");
+  assert.equal(lines[0], "a,b,c");
+  assert.equal(lines[1], "1,plain,");
+  assert.equal(lines[2], '2,"has,comma ""and"" quote",x; y');
+});
+
+test("toCSV: empty input → empty string", () => {
+  assert.equal(toCSV([]), "");
+});
+
+// --- export: collectRows flattens ledger + buglog ---
+test("collectRows: sessions flatten totals; bugs flatten fields; unknown throws", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "token-ledger.json"), JSON.stringify({
+    version: 1, lifetime: {}, sessions: [
+      { id: "s1", started: "t0", ended: "t1", totals: { reads_count: 3, writes_count: 1 } },
+    ],
+  }));
+  const sess = collectRows(w, "sessions");
+  assert.equal(sess.length, 1);
+  assert.equal(sess[0].id, "s1");
+  assert.equal(sess[0].reads_count, 3);
+
+  fs.writeFileSync(path.join(w, "buglog.json"), JSON.stringify({ version: 1, bugs: [
+    { id: "b1", file: "a.ts", tags: ["x", "y"], occurrences: 2 },
+  ]}));
+  const bugs = collectRows(w, "bugs");
+  assert.equal(bugs[0].id, "b1");
+  assert.equal(bugs[0].tags, "x; y");
+
+  assert.throws(() => collectRows(w, "nope"), /unknown export target/);
 });
