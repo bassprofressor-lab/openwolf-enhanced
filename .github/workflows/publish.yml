@@ -36,8 +36,9 @@ jobs:
           node-version: '22.14'
           cache: pnpm
 
-      # Trusted publishing requires npm ≥ 11.5.1; node 22.14 still ships npm 10.
-      - run: npm install -g npm@latest
+      # Trusted publishing requires npm ≥ 11.5.1; node 22.14 ships npm 10. Pin to 11.x:
+      # npm@latest is now 12.x, which requires node ≥ 22.22.2 and would EBADENGINE here.
+      - run: npm install -g npm@11
 
       - run: pnpm install --frozen-lockfile
 
