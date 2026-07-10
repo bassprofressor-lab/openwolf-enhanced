@@ -6,6 +6,18 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.10.0] — 2026-07-10
+
+### Added
+- **Session-start resume context.** The `SessionStart` hook now injects a compact, hard-capped digest
+  as `additionalContext`, so the model resumes with the project's own handoff notes already in context
+  instead of spending reads to reconstruct them. It assembles three high-signal sections — `STATUS.md`
+  (the resume point), the `Do-Not-Repeat` section of `cerebrum.md`, and the most recent `memory.md`
+  session block that has real entries — each individually clipped, with a hard total cap (default 6000
+  chars ≈ 1.5k tokens). An unedited template `STATUS.md` is detected and skipped, and if nothing useful
+  exists no context is injected. Configurable via `openwolf.session_context` (`enabled`, `max_chars`);
+  `stdout` carries only this JSON, so the existing stderr reminders are unaffected. Covered by tests.
+
 ## [1.9.4] — 2026-07-10
 
 ### Added

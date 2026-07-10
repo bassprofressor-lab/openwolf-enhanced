@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort } from "./shared.js";
+import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest } from "./shared.js";
 
 async function main(): Promise<void> {
   ensureWolfDir();
@@ -83,6 +83,25 @@ async function main(): Promise<void> {
   };
   ledger.lifetime.total_sessions++;
   writeJSON(ledgerPath, ledger);
+
+  // Inject a compact resume digest as additionalContext so the model continues without
+  // re-reading STATUS.md/cerebrum/memory. Bounded and config-gated. stdout is reserved
+  // for this JSON — reminders above go to stderr, so they don't collide.
+  try {
+    const config = readJSON<{ openwolf?: { session_context?: { enabled?: boolean; max_chars?: number } } }>(
+      path.join(wolfDir, "config.json"),
+      {}
+    );
+    const sc = config.openwolf?.session_context ?? {};
+    if (sc.enabled !== false) {
+      const digest = buildResumeDigest(wolfDir, sc.max_chars ?? 6000);
+      if (digest) {
+        process.stdout.write(
+          JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: digest } })
+        );
+      }
+    }
+  } catch {}
 
   process.exit(0);
 }

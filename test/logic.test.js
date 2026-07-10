@@ -15,6 +15,7 @@ import {
   isSecretFile,
   parseAnatomy,
   readBugLog,
+  buildResumeDigest,
 } from "../dist/hooks/shared.js";
 
 function tmpWolf() {
@@ -109,4 +110,33 @@ test("humanBytes: B/KB/MB", () => {
   assert.equal(humanBytes(512), "512 B");
   assert.match(humanBytes(2048), /2\.0 KB/);
   assert.match(humanBytes(5 * 1024 * 1024), /5\.0 MB/);
+});
+
+// --- buildResumeDigest (session-start resume context) ---
+test("buildResumeDigest: includes real STATUS, Do-Not-Repeat, last session; skips stub", () => {
+  const wolf = tmpWolf();
+  fs.writeFileSync(path.join(wolf, "STATUS.md"), "# STATUS\n\n## Next\nShip the widget.\n");
+  fs.writeFileSync(path.join(wolf, "cerebrum.md"),
+    "## Key Learnings\n- x\n\n## Do-Not-Repeat\n- [07.10] never force-push main\n\n## Decision Log\n- y\n");
+  fs.writeFileSync(path.join(wolf, "memory.md"),
+    "## Session: 2026-07-09 10:00\n\n| 10:01 | old | f | ok | 1k |\n\n## Session: 2026-07-10 12:00\n\n| 12:30 | new work | g | done | 2k |\n");
+  const d = buildResumeDigest(wolf, 6000);
+  assert.ok(d.includes("Ship the widget."), "has STATUS content");
+  assert.ok(d.includes("never force-push main"), "has Do-Not-Repeat");
+  assert.ok(d.includes("new work"), "has latest session");
+  assert.ok(!d.includes("old"), "excludes older session block");
+});
+
+test("buildResumeDigest: returns null when nothing useful (stub STATUS, no cerebrum/memory)", () => {
+  const wolf = tmpWolf();
+  fs.writeFileSync(path.join(wolf, "STATUS.md"), "# STATUS — {{PROJECT_NAME}}\n\n## Next\n_<what next>_\n\n- (nothing yet)\n");
+  assert.equal(buildResumeDigest(wolf, 6000), null);
+});
+
+test("buildResumeDigest: respects the char cap", () => {
+  const wolf = tmpWolf();
+  fs.writeFileSync(path.join(wolf, "STATUS.md"), "# STATUS\n\n" + "x".repeat(20000));
+  const d = buildResumeDigest(wolf, 2000);
+  assert.ok(d.length <= 2000, `digest ${d.length} within cap`);
+  assert.ok(d.includes("truncated"), "marks truncation");
 });

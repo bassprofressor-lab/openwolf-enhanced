@@ -48,6 +48,10 @@
       "consolidation_after_days": 7,
       "max_entries_before_consolidation": 200
     },
+    "session_context": {
+      "enabled": true,
+      "max_chars": 6000
+    },
     "retention": {
       "token_ledger_max_sessions": 200,
       "session_io_max": 100,

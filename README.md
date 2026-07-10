@@ -96,6 +96,7 @@ Ongoing hardening and modernization beyond the upstream backlog:
 - 💾 **Backups stay small** — `update` no longer snapshots the regenerable `token-ledger.json` into every backup, and `createBackup()` now enforces `retention.backups_keep` on the write path instead of only when `doctor` happened to run. One project went from 41 MB to 9 MB of `.wolf/` with no loss of restorable state. *(1.9.1)*
 - 🌱 **`update` seeds files a project never received** — user-data files are never overwritten, but that was implemented as *never touched*, so a project initialised before a file existed never got one. `STATUS.md` was the casualty. Missing files are now created from the templates; existing ones are still left alone. *(1.9.2)*
 - 🪝 **The hooks we test are the hooks we ship** — hook deployment and the test suite pointed at two different `tsc` outputs of the same sources, free to diverge. One artifact now, deployed from one shared `hooks-deploy` module. *(1.9.2)*
+- 🧭 **Session-start resume context** — on session start, a compact, hard-capped digest (STATUS.md + cerebrum's Do-Not-Repeat + the latest memory session) is injected as context, so the model resumes where you left off without spending reads to reconstruct it. Skips an unedited template STATUS; configurable via `session_context`. *(1.10.0)*
 
 Full details in the [CHANGELOG](CHANGELOG.md) and [NOTICE](NOTICE).
 
