@@ -76,7 +76,7 @@ export function Sidebar({ activePanel, onNavigate, projectName, theme, onToggleT
               className="text-xs underline transition-colors"
               style={{ color: "var(--accent)" }}
             >Docs</a>
-            <span className="text-xs" style={{ color: "var(--text-faint)" }}>v1.0.0</span>
+            <span className="text-xs" style={{ color: "var(--text-faint)" }}>v{__APP_VERSION__}</span>
           </div>
         </div>
       </aside>
