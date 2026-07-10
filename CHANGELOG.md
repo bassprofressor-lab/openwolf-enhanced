@@ -6,6 +6,17 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.12.1] — 2026-07-10
+
+### Fixed
+- **Dashboard sidebar shows the real version** instead of a hardcoded `v1.0.0` — the version is
+  injected from `package.json` at build time (Vite `define`).
+
+### Documentation
+- **German README** added at `docs/i18n/README.de.md`, with language links from the English README.
+- Compacted "What's Enhanced" into a single thematic table (per-version detail lives here in the
+  CHANGELOG); refreshed the command list (`recall`, `export`) and added `STATUS.md` to the files table.
+
 ## [1.12.0] — 2026-07-10
 
 Memory search, privacy, and a progressive-disclosure resume digest — all within OpenWolf's
