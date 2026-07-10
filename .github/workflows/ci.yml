@@ -1,8 +1,9 @@
 name: CI
 
-# Build + test on every push and PR, across the Node range the package claims to
-# support (engines.node >=20). If code ever depends on a Node 22-only API, the
-# node-20 leg fails here — before a release, not after.
+# Build + test on the toolchain Node (22 — pnpm 11 does not run on Node 20), then
+# verify the *packed artifact* runs on Node 20. This is the honest guard for
+# engines.node >=20: the build tools may need 22, but the shipped CLI must start on
+# 20. If code ever depends on a Node 22-only runtime API, the smoke step fails.
 
 on:
   push:
@@ -13,19 +14,12 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['20', '22']
     steps:
       - uses: actions/checkout@v4
 
-      # setup-node first (installs the matrix Node), then pnpm on top of it — no
-      # pnpm cache, which is the only thing that differed between the passing (22)
-      # and failing (20) legs and is a pure optimisation we don't need here.
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '22'
 
       - uses: pnpm/action-setup@v4
         with:
@@ -34,3 +28,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+
+      # Pack the exact tarball npm would publish (no prepublishOnly on pack).
+      - run: npm pack
+
+      # Switch to Node 20 and confirm the shipped CLI installs and starts there.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Runtime smoke on Node 20
+        run: |
+          set -euo pipefail
+          npm install -g ./openwolf-enhanced-*.tgz
+          openwolf --version
+          openwolf --help >/dev/null
