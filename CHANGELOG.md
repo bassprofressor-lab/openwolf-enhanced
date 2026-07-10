@@ -6,6 +6,26 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [Unreleased]
+
+Interop with Claude Code's native Auto Memory (`~/.claude/projects/<slug>/memory/`) — OpenWolf reads
+and surfaces it read-only instead of maintaining a competing store. It leaves writing/consolidation to
+Claude's own Auto Dream.
+
+### Added
+- **`openwolf recall` also searches native Auto Memory.** Every topic file under the project's native
+  memory directory is searched alongside `.wolf/`; native hits are labelled `native/<file>`. This makes
+  the native memory searchable at all — natively you can only grep it by hand. `--limit`/`--json` apply;
+  `<private>` still filtered. (`OPENWOLF_NATIVE_MEMORY_DIR` overrides the auto-resolved path; falls back
+  to `.wolf/` when Auto Memory isn't present.)
+- **`openwolf doctor` reports native-memory health.** Surfaces the blind spot the feature hides: how many
+  topic files exist vs. how many the sub-200-line `MEMORY.md` index actually references (the rest never
+  load at session start), a warning when `MEMORY.md` exceeds the 200-line auto-load cutoff, dead index
+  links, footprint, and stale files. (On a real project: *447 topic files, only 94 indexed → 353 never
+  surface on resume.*)
+- **Session-start resume digest lists native memory** in its "Available on demand" index, pointing at
+  `openwolf recall` to reach the topic files the native index leaves out.
+
 ## [1.12.1] — 2026-07-10
 
 ### Fixed

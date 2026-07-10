@@ -14,8 +14,10 @@ import {
   rotateDaemonLog,
   dirSize,
   suggestIgnores,
+  nativeMemoryHealth,
   type CompactResult,
 } from "../utils/maintenance.js";
+import { nativeMemoryDir } from "../hooks/shared.js";
 
 interface DoctorOpts {
   dryRun?: boolean;
@@ -74,6 +76,24 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
       console.log(`\nRegistry health: ${projects.length} projects — unique ports, no dead entries ✓`);
     }
   } catch { /* registry not readable — skip */ }
+
+  // --- Claude native Auto Memory health (read-only interop) ---
+  try {
+    const nd = nativeMemoryDir(projectRoot);
+    if (nd) {
+      const h = nativeMemoryHealth(nd);
+      console.log("\nClaude native memory (~/.claude/…/memory):");
+      console.log(`  ${h.topicFiles} topic files, ${humanBytes(h.footprintBytes)}; MEMORY.md index ${h.indexLines} lines (${h.indexedCount} referenced)`);
+      if (h.indexCutoffExceeded)
+        console.log(`  ⚠ MEMORY.md > 200 lines — only the first 200 load at session start; the rest is invisible until you trim it.`);
+      if (h.orphanCount)
+        console.log(`  ⚠ ${h.orphanCount} topic files not in the index → never surface on resume. Search them: \`openwolf recall <query>\``);
+      if (h.deadLinks.length)
+        console.log(`  ⚠ ${h.deadLinks.length} dead index link(s) → missing file: ${h.deadLinks.slice(0, 3).join(", ")}${h.deadLinks.length > 3 ? "…" : ""}`);
+      if (h.staleCount)
+        console.log(`  · ${h.staleCount} topic files untouched in 90+ days`);
+    }
+  } catch { /* native memory unreadable — skip */ }
 
   // --- .wolfignore suggestions: noisy project dirs the scanner reads but needn't ---
   try {

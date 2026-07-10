@@ -230,6 +230,59 @@ export function aggregateProjects(projects: Array<{ root: string; name: string }
   return projects.map((p) => projectSummary(p.root, p.name));
 }
 
+export interface NativeMemoryHealth {
+  topicFiles: number;
+  indexLines: number;
+  indexCutoffExceeded: boolean; // MEMORY.md > 200 lines → only first 200 load at session start
+  indexedCount: number;         // topic files referenced by MEMORY.md
+  orphanCount: number;          // topic files NOT referenced (won't surface on resume)
+  deadLinks: string[];          // MEMORY.md links to files that don't exist
+  staleCount: number;
+  footprintBytes: number;
+}
+
+// Read-only health report on Claude Code's native Auto Memory directory. Surfaces the blind
+// spots the native feature hides: topic files not in the <200-line MEMORY.md index (which never
+// load at session start), a MEMORY.md that exceeds the 200-line cutoff, and dead index links.
+export function nativeMemoryHealth(dir: string, opts: { staleDays?: number } = {}): NativeMemoryHealth {
+  const staleMs = (opts.staleDays ?? 90) * 24 * 60 * 60 * 1000;
+  let indexContent = "";
+  try { indexContent = fs.readFileSync(path.join(dir, "MEMORY.md"), "utf-8"); } catch { /* no index */ }
+  const indexLines = indexContent ? indexContent.split(/\r?\n/).length : 0;
+
+  const referenced = new Set<string>();
+  for (const m of indexContent.matchAll(/\]\(([^)]+\.md)\)/g)) referenced.add(path.basename(m[1]));
+
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".md") && !n.includes(".bak") && n !== "MEMORY.md");
+  } catch { /* unreadable */ }
+  const existing = new Set(names);
+
+  let footprint = 0;
+  let stale = 0;
+  const now = Date.now();
+  for (const n of [...names, "MEMORY.md"]) {
+    try {
+      const st = fs.statSync(path.join(dir, n));
+      footprint += st.size;
+      if (n !== "MEMORY.md" && now - st.mtimeMs > staleMs) stale++;
+    } catch { /* vanished */ }
+  }
+
+  const indexed = names.filter((n) => referenced.has(n)).length;
+  return {
+    topicFiles: names.length,
+    indexLines,
+    indexCutoffExceeded: indexLines > 200,
+    indexedCount: indexed,
+    orphanCount: names.length - indexed,
+    deadLinks: [...referenced].filter((r) => !existing.has(r)),
+    staleCount: stale,
+    footprintBytes: footprint,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Size helpers
 // ---------------------------------------------------------------------------

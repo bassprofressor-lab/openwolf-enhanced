@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { stripPrivate } from "../hooks/shared.js";
+import { stripPrivate, nativeMemoryDir } from "../hooks/shared.js";
 
 // A keyword search over the flat .wolf knowledge files — the query interface OpenWolf
 // lacked. No database: it scans STATUS.md / cerebrum.md / memory.md / buglog.json, scores
@@ -43,17 +43,36 @@ function unitsFor(src: string, content: string): Unit[] {
 export function recall(
   wolfDir: string,
   query: string,
-  opts: { limit?: number; sources?: string[] } = {}
+  opts: { limit?: number; sources?: string[]; includeNative?: boolean; nativeDir?: string | null } = {}
 ): RecallHit[] {
   const limit = opts.limit ?? 12;
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [];
   const sources = opts.sources ?? DEFAULT_SOURCES;
 
+  // Search both OpenWolf's own files and Claude's native Auto Memory (read-only), so one query
+  // covers everything. Native hits are labelled `native/<file>` so you know where to look.
+  const files: Array<{ label: string; abspath: string }> = sources.map((src) => ({
+    label: src,
+    abspath: path.join(wolfDir, src),
+  }));
+  if (opts.includeNative !== false) {
+    const nd = opts.nativeDir !== undefined ? opts.nativeDir : nativeMemoryDir(path.dirname(wolfDir));
+    if (nd) {
+      let entries: string[] = [];
+      try { entries = fs.readdirSync(nd); } catch { /* unreadable */ }
+      for (const name of entries) {
+        if (name.endsWith(".md") && !name.includes(".bak")) {
+          files.push({ label: `native/${name}`, abspath: path.join(nd, name) });
+        }
+      }
+    }
+  }
+
   const hits: RecallHit[] = [];
-  for (const src of sources) {
+  for (const { label: src, abspath } of files) {
     let content: string;
-    try { content = fs.readFileSync(path.join(wolfDir, src), "utf-8"); } catch { continue; }
+    try { content = fs.readFileSync(abspath, "utf-8"); } catch { continue; }
     for (const { line, text } of unitsFor(src, content)) {
       const lower = text.toLowerCase();
       let score = 0;

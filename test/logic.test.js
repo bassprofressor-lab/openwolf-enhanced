@@ -13,12 +13,14 @@ import {
   suggestIgnores,
   aggregateProjects,
   projectSummary,
+  nativeMemoryHealth,
 } from "../dist/src/utils/maintenance.js";
 import {
   isSecretFile,
   parseAnatomy,
   readBugLog,
   buildResumeDigest,
+  nativeMemoryDir,
 } from "../dist/hooks/shared.js";
 import { toCSV, collectRows } from "../dist/src/cli/export-cmd.js";
 
@@ -284,4 +286,40 @@ test("recall + buildResumeDigest exclude <private> content", () => {
   fs.writeFileSync(path.join(w, "memory.md"), "l1\n<private>\nx\n</private>\nfindme\n");
   const h2 = recall(w, "findme");
   assert.equal(h2[0].line, 5, "line number preserved across a private block");
+});
+
+// --- native memory interop: resolver, recall, health ---
+test("nativeMemoryDir: env override wins; missing dir → null", () => {
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), "ownm-"));
+  process.env.OPENWOLF_NATIVE_MEMORY_DIR = real;
+  assert.equal(nativeMemoryDir("/whatever"), real);
+  process.env.OPENWOLF_NATIVE_MEMORY_DIR = path.join(real, "nope");
+  assert.equal(nativeMemoryDir("/whatever"), null);
+  delete process.env.OPENWOLF_NATIVE_MEMORY_DIR;
+});
+
+test("recall searches native memory when nativeDir given, labels hits native/…", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "memory.md"), "| 10:00 | local note about widgets | f | ok | 1k |\n");
+  const nd = fs.mkdtempSync(path.join(os.tmpdir(), "ownm2-"));
+  fs.writeFileSync(path.join(nd, "topic_widgets.md"), "deep dive on the widget subsystem redesign\n");
+  const hits = recall(w, "widget", { nativeDir: nd });
+  assert.ok(hits.some((h) => h.file.startsWith("native/")), "has a native hit");
+  assert.ok(hits.some((h) => h.file === "memory.md"), "still searches .wolf files");
+  // native off:
+  assert.ok(!recall(w, "widget", { includeNative: false }).some((h) => h.file.startsWith("native/")));
+});
+
+test("nativeMemoryHealth: counts orphans, dead links, 200-line cutoff", () => {
+  const nd = fs.mkdtempSync(path.join(os.tmpdir(), "ownm3-"));
+  fs.writeFileSync(path.join(nd, "MEMORY.md"),
+    "# Index\n- [A](existing.md) — x\n- [B](deadlink.md) — y\n" + "filler\n".repeat(210));
+  fs.writeFileSync(path.join(nd, "existing.md"), "content\n");
+  fs.writeFileSync(path.join(nd, "orphan.md"), "not in index\n");
+  const h = nativeMemoryHealth(nd);
+  assert.equal(h.topicFiles, 2);            // existing + orphan (MEMORY.md excluded)
+  assert.equal(h.indexedCount, 1);          // only existing.md is referenced AND exists
+  assert.equal(h.orphanCount, 1);           // orphan.md
+  assert.deepEqual(h.deadLinks, ["deadlink.md"]);
+  assert.equal(h.indexCutoffExceeded, true);
 });
