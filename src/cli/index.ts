@@ -173,6 +173,17 @@ export function createProgram(): Command {
       exportCommand(what, opts);
     });
 
+  // --- MCP server ---
+  program
+    .command("mcp")
+    .description("Run an MCP server (recall/resume/memory-health) for Claude Desktop & other MCP clients")
+    .option("--project <dir>", "Project directory to serve (default: $OPENWOLF_PROJECT_DIR or cwd)")
+    .action(async (opts: { project?: string }) => {
+      const { runMcpStdio } = await import("../mcp/server.js");
+      const projectDir = opts.project || process.env.OPENWOLF_PROJECT_DIR || process.cwd();
+      runMcpStdio({ projectDir, version: getVersion() });
+    });
+
   // --- Recall command ---
   program
     .command("recall <query...>")

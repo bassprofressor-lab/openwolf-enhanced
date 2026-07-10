@@ -193,6 +193,7 @@ openwolf status               Show health, stats, .wolf/ footprint, size warning
 openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dry-run]
 openwolf recall <query>       Keyword-search STATUS/cerebrum/memory/buglog [--limit N] [--json]
 openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
+openwolf mcp                  Run an MCP server (recall/resume/memory-health) [--project DIR]
 openwolf scan                 Refresh the project structure map [--check]
 openwolf dashboard            Open the real-time web dashboard
 openwolf daemon <cmd>         start | stop | restart | logs — background task scheduler
@@ -212,6 +213,27 @@ openwolf designqc
 ```
 
 Auto-detects your dev server, captures viewport-height JPEG sections of every route, and saves them to `.wolf/designqc-captures/`. Then tell Claude to read the screenshots and evaluate. Requires `puppeteer-core`.
+
+## Use in Claude Desktop (MCP)
+
+OpenWolf's search and resume tools also run as an **MCP server**, so they work in the Claude Desktop
+app — and any MCP client — not just Claude Code. Add it to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openwolf": {
+      "command": "openwolf",
+      "args": ["mcp", "--project", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+It exposes three **read-only** tools: `openwolf_recall` (keyword-search this project's knowledge **and**
+Claude's native Auto Memory), `openwolf_resume` (the resume digest), and `openwolf_memory_health`.
+The hook-based auto-injection/auto-capture only applies inside Claude Code; here the tools are called
+explicitly. OpenWolf never writes to Claude's native memory — it reads and surfaces it.
 
 ## Requirements
 

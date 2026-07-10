@@ -29,6 +29,11 @@ Claude's own Auto Dream.
   orphaned), a warning when `MEMORY.md` exceeds the 200-line auto-load cutoff, dead-link and stale-file
   counts, and a searchable file list (size, modified, indexed/orphan badge) with click-to-view. Backed by
   read-only `/api/native-memory` and a path-validated `/api/native-memory/file` endpoint.
+- **`openwolf mcp` — an MCP server for Claude Desktop and other MCP clients.** A dependency-free,
+  spec-compliant JSON-RPC/stdio server exposing three read-only tools — `openwolf_recall`,
+  `openwolf_resume`, `openwolf_memory_health` — so OpenWolf's search and resume work outside Claude Code
+  (the hook lifecycle doesn't exist there; the tools are called explicitly). Serves one project via
+  `--project` / `$OPENWOLF_PROJECT_DIR`. README documents `claude_desktop_config.json` registration.
 
 ## [1.12.1] — 2026-07-10
 

@@ -339,3 +339,34 @@ test("nativeMemoryFiles: lists topic files with correct indexed flag, excludes M
   assert.equal(byName["orphan.md"].indexed, false);
   assert.ok(byName["existing.md"].bytes > 0 && byName["existing.md"].mtime);
 });
+
+// --- MCP server dispatch ---
+import { handleMcpMessage, MCP_TOOLS } from "../dist/src/mcp/server.js";
+test("handleMcpMessage: initialize, tools/list, tools/call, notifications, unknown method", () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "owmcp-"));
+  fs.mkdirSync(path.join(proj, ".wolf"), { recursive: true });
+  fs.writeFileSync(path.join(proj, ".wolf", "memory.md"), "| 10:00 | fixed the widget bug | f | ok | 1k |\n");
+  const opts = { projectDir: proj, version: "9.9.9" };
+
+  const init = handleMcpMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, opts);
+  assert.equal(init.result.serverInfo.name, "openwolf");
+  assert.equal(init.result.serverInfo.version, "9.9.9");
+  assert.equal(init.result.protocolVersion, "2025-06-18");
+
+  const list = handleMcpMessage({ jsonrpc: "2.0", id: 2, method: "tools/list" }, opts);
+  assert.equal(list.result.tools.length, MCP_TOOLS.length);
+  assert.ok(list.result.tools.some((t) => t.name === "openwolf_recall"));
+
+  const call = handleMcpMessage({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "openwolf_recall", arguments: { query: "widget" } } }, opts);
+  assert.equal(call.result.isError, false);
+  assert.ok(call.result.content[0].text.includes("widget"));
+
+  // notification → no reply
+  assert.equal(handleMcpMessage({ jsonrpc: "2.0", method: "notifications/initialized" }, opts), null);
+  // unknown tool → isError text result
+  const bad = handleMcpMessage({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "nope", arguments: {} } }, opts);
+  assert.equal(bad.result.isError, true);
+  // unknown method with id → JSON-RPC error
+  const unk = handleMcpMessage({ jsonrpc: "2.0", id: 5, method: "foo/bar" }, opts);
+  assert.equal(unk.error.code, -32601);
+});
