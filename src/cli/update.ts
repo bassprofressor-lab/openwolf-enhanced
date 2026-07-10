@@ -14,6 +14,8 @@ import { getRegisteredProjects, registerProject, type RegisteredProject } from "
 import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
 import { ensureDir } from "../utils/paths.js";
 import { getRetention, pruneBackups } from "../utils/maintenance.js";
+import { copyHookScripts } from "../utils/hooks-deploy.js";
+import { seedMissingUserData } from "../utils/seed.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -223,6 +225,14 @@ async function updateProject(
       }
     }
 
+    // 2c. Create any user-data file the project never received. These are never overwritten,
+    // but a project initialised before a file existed (STATUS.md, added in 1.4.0) would
+    // otherwise never get one — while OPENWOLF.md tells the agent to read it first.
+    const seeded = seedMissingUserData(wolfDir, root, templatesDir, USER_DATA_FILES);
+    if (seeded.length > 0) {
+      console.log(`    ✓ Seeded missing user data (${seeded.join(", ")})`);
+    }
+
     // 3. Update hook scripts
     copyHookScripts(wolfDir);
     console.log(`    ✓ Hook scripts updated`);
@@ -361,43 +371,6 @@ function readTemplateContent(filename: string, templatesDir: string): string {
     "claude-rules-openwolf.md": `---\ndescription: OpenWolf protocol enforcement — active on all files\nglobs: **/*\n---\n\n- Check .wolf/anatomy.md before reading any project file\n- Check .wolf/cerebrum.md Do-Not-Repeat list before generating code\n- After writing or editing files, update .wolf/anatomy.md and append to .wolf/memory.md\n- After receiving a user correction, update .wolf/cerebrum.md immediately (Preferences, Learnings, or Do-Not-Repeat)\n- LEARN from every interaction: if you discover a convention, user preference, or project pattern, add it to .wolf/cerebrum.md. Low threshold — when in doubt, log it.\n- BEFORE fixing any bug or error: read .wolf/buglog.json for known fixes\n- AFTER fixing any bug, error, failed test, failed build, or user-reported problem: ALWAYS log to .wolf/buglog.json with error_message, root_cause, fix, and tags\n- If you edit a file more than twice in a session, that likely indicates a bug — log it to .wolf/buglog.json\n- When the user asks to check/evaluate UI design: run \`openwolf designqc\` to capture screenshots, then read them from .wolf/designqc-captures/\n- When the user asks to change/pick/migrate UI framework: read .wolf/reframe-frameworks.md, ask decision questions, recommend a framework, then execute with the framework's prompt`,
   };
   return templates[filename] ?? "";
-}
-
-function copyHookScripts(wolfDir: string): void {
-  const hooksDir = path.join(wolfDir, "hooks");
-  ensureDir(hooksDir);
-
-  const candidates = [
-    path.join(__dirname, "..", "hooks"),
-    path.resolve(__dirname, "..", "..", "hooks"),
-    path.resolve(__dirname, "..", "..", "dist", "hooks"),
-  ];
-
-  let sourceDir = "";
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, "shared.js"))) {
-      sourceDir = candidate;
-      break;
-    }
-  }
-
-  const hookFiles = [
-    "session-start.js", "pre-read.js", "pre-write.js",
-    "post-read.js", "post-write.js", "stop.js", "shared.js",
-  ];
-
-  if (sourceDir) {
-    for (const file of hookFiles) {
-      const src = path.join(sourceDir, file);
-      if (fs.existsSync(src)) {
-        safeCopyFile(src, path.join(hooksDir, file));
-      }
-    }
-  }
-
-  // Always ensure package.json with type:module
-  const hooksPkgPath = path.join(hooksDir, "package.json");
-  fs.writeFileSync(hooksPkgPath, JSON.stringify({ type: "module" }, null, 2) + "\n", "utf-8");
 }
 
 function replaceOpenWolfHooks(

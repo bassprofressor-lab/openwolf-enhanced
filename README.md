@@ -117,6 +117,18 @@ openwolf init
 
 That's it. Use `claude` normally. OpenWolf is watching.
 
+### Rebuilding an installed copy
+
+Two things to know before you re-run `pnpm build` on a copy you have already installed globally:
+
+- **`prebuild` deletes `dist/` before compiling**, and the global `openwolf` command is a symlink
+  into `dist/bin/openwolf.js`. If the build then fails, the CLI is gone until you build again. Back
+  `dist/` up first if you are mid-change, or build in a clean checkout.
+- **A rebuild does not deploy anything.** The hooks that actually run are per-project copies under
+  `<project>/.wolf/hooks/`, invoked by `.claude/settings.json` — not the installed package. Run
+  `openwolf update` afterwards to push new hooks into your projects (it touches *every* registered
+  project; scope it with `--project <name>`).
+
 > **Upgrading the tool?** The hooks that actually run are **per-project copies** in
 > `<project>/.wolf/hooks/`, not the global package. After rebuilding/reinstalling, run
 > `openwolf update` (or `openwolf update --project <name>`) to copy the new hooks into your

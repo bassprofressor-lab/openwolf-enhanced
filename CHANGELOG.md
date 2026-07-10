@@ -6,6 +6,36 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.9.2] — 2026-07-10
+
+Three findings from the 1.9.1 investigation, fixed.
+
+### Fixed
+- **`openwolf update` now seeds user-data files a project never received.** `USER_DATA_FILES` are
+  never overwritten — but that was implemented as *never touched*, so a project initialised before a
+  file existed never got one. `STATUS.md` (added in 1.4.0) was the casualty: older projects had none,
+  while `OPENWOLF.md` instructs the agent to read it first. Missing files are now copied from
+  `src/templates/` with `{{PROJECT_NAME}}`/`{{DATE}}` substituted. Existing files are still never
+  touched.
+- **The hooks we test are now the hooks we ship.** `copyHookScripts()` picked `dist/src/hooks/`
+  (the main `tsc` emit) while `test/logic.test.js` imported `dist/hooks/` (the dedicated
+  `tsconfig.hooks.json` build). Same sources, two compilations — free to diverge. Deployment now
+  prefers `dist/hooks/`, with `dist/src/hooks/` kept as a fallback for older installs. Verified
+  behaviourally identical (the two artifacts differed only by a `sourceMappingURL` comment).
+
+### Changed
+- **`copyHookScripts()` extracted to `src/utils/hooks-deploy.ts`.** `init` and `update` each carried a
+  private copy that had already drifted: different candidate ordering, and only `init` warned when no
+  compiled hooks were found. One implementation now, and `init`'s unreachable "dev mode" branch —
+  which looked for `.ts` files in a compiled output directory — is gone.
+- **`detectProjectName()` and template placeholder substitution moved to `src/utils/seed.ts`**, shared
+  by `init` and `update`.
+
+### Documentation
+- README documents two rebuild traps: `prebuild` deletes `dist/` (which the global `openwolf` symlink
+  points into, so a failed build removes the CLI), and rebuilding the package deploys nothing — the
+  hooks that run are per-project copies, so `openwolf update` is required.
+
 ## [1.9.1] — 2026-07-10
 
 Backup retention — the ledger-growth fix (1.5.0) had a blind spot one layer up.
