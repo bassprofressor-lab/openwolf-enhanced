@@ -1,0 +1,42 @@
+name: Publish to npm
+
+# Tokenless publishing via npm Trusted Publishing (OIDC).
+# No NPM_TOKEN secret: with `id-token: write` and a Trusted Publisher configured
+# on npmjs.com for this repo + workflow, npm ≥ 11.5.1 mints a short-lived,
+# workflow-scoped credential at publish time and attaches a provenance attestation.
+#
+# Trigger: push a version tag (v1.2.3), or run manually from the Actions tab.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC — this is what replaces the token
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # need tags so the prepublish guard can verify v<version> on HEAD
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14'
+          cache: pnpm
+
+      # Trusted publishing requires npm ≥ 11.5.1; node 22.14 still ships npm 10.
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # prepublishOnly runs scripts/prepublish-guard.mjs; provenance is automatic under OIDC.
+      - run: npm publish
