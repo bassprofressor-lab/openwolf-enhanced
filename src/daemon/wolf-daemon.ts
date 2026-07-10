@@ -12,6 +12,7 @@ import { startFileWatcher } from "./file-watcher.js";
 import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
+import { aggregateProjects } from "../utils/maintenance.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -166,6 +167,11 @@ app.get("/api/config", (_req, res) => {
 
 app.get("/api/projects", (_req, res) => {
   res.json(getRegisteredProjects(true));
+});
+
+// Cross-project rollup for the aggregate dashboard view.
+app.get("/api/aggregate", (_req, res) => {
+  res.json({ projects: aggregateProjects(getRegisteredProjects(true)) });
 });
 
 app.post("/api/switch", (req, res) => {

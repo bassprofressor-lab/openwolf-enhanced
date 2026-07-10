@@ -4,6 +4,7 @@ import type { Theme } from "../../hooks/useTheme.js";
 
 const navItems = [
   { id: "overview", label: "Overview", icon: "◉" },
+  { id: "projects", label: "All Projects", icon: "▥" },
   { id: "activity", label: "Activity", icon: "◷" },
   { id: "tokens", label: "Tokens", icon: "◈" },
   { id: "cron", label: "Cron", icon: "⟳" },

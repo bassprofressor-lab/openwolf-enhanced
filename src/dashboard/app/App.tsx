@@ -1,11 +1,13 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { Suspense, lazy } from "react";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { Layout } from "./components/layout/Layout.js";
 import { Header } from "./components/layout/Header.js";
 import { useWolfData } from "./hooks/useWolfData.js";
 import { useTheme } from "./hooks/useTheme.js";
+import { useHashRoute } from "./hooks/useHashRoute.js";
 
 const ProjectOverview = lazy(() => import("./components/panels/ProjectOverview.js").then(m => ({ default: m.ProjectOverview })));
+const ProjectsAggregate = lazy(() => import("./components/panels/ProjectsAggregate.js").then(m => ({ default: m.ProjectsAggregate })));
 const ActivityTimeline = lazy(() => import("./components/panels/ActivityTimeline.js").then(m => ({ default: m.ActivityTimeline })));
 const TokenUsage = lazy(() => import("./components/panels/TokenUsage.js").then(m => ({ default: m.TokenUsage })));
 const CronStatus = lazy(() => import("./components/panels/CronStatus.js").then(m => ({ default: m.CronStatus })));
@@ -18,6 +20,7 @@ const DesignQC = lazy(() => import("./components/panels/DesignQC.js").then(m => 
 
 const panelTitles: Record<string, string> = {
   overview: "Overview",
+  projects: "All Projects",
   activity: "Activity Timeline",
   tokens: "Token Intelligence",
   cron: "Cron Control Center",
@@ -44,7 +47,7 @@ function Skeleton() {
 }
 
 export default function App() {
-  const [activePanel, setActivePanel] = useState("overview");
+  const { panel: activePanel, params, navigate } = useHashRoute("overview");
   const data = useWolfData();
   const { theme, toggleTheme } = useTheme();
 
@@ -63,7 +66,7 @@ export default function App() {
     <div className="min-h-screen" style={{ background: "var(--bg-base)" }}>
       <Sidebar
         activePanel={activePanel}
-        onNavigate={setActivePanel}
+        onNavigate={(p) => navigate(p)}
         projectName={data.project.name || data.identity.name}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -91,14 +94,15 @@ export default function App() {
         )}
         <Suspense fallback={<Skeleton />}>
           {activePanel === "overview" && <ProjectOverview data={data} />}
+          {activePanel === "projects" && <ProjectsAggregate data={data} />}
           {activePanel === "activity" && <ActivityTimeline data={data} />}
           {activePanel === "tokens" && <TokenUsage data={data} />}
           {activePanel === "cron" && <CronStatus data={data} />}
           {activePanel === "cerebrum" && <CerebrumViewer data={data} />}
           {activePanel === "memory" && <MemoryViewer data={data} />}
-          {activePanel === "anatomy" && <AnatomyBrowser data={data} />}
+          {activePanel === "anatomy" && <AnatomyBrowser data={data} initialFile={params.get("file") || undefined} />}
           {activePanel === "bugs" && <BugLog data={data} />}
-          {activePanel === "suggestions" && <AISuggestions data={data} />}
+          {activePanel === "suggestions" && <AISuggestions data={data} onNavigate={navigate} />}
           {activePanel === "designqc" && <DesignQC data={data} />}
         </Suspense>
       </Layout>

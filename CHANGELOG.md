@@ -19,6 +19,15 @@ Batched v1.10-cycle features — not yet published.
   enough to weigh on watching/space, so you can add the noisy ones to `.wolfignore`. Bytes from big
   binaries (which the scanner skips anyway) don't trigger the noise rule. Respects existing
   `.gitignore`/`.wolfignore` and default excludes; stats sizes only, bounded for huge trees.
+- **Dashboard: hash routing & deep-linking** — panels are now addressable as `#<panel>` (with an
+  optional query), so links are shareable and the browser back/forward buttons work. Foundation for
+  the two features below.
+- **Dashboard: All Projects view** — a new panel aggregating every registered OpenWolf project
+  (sessions, tokens, tokens saved, open bugs, last activity), backed by a new `/api/aggregate`
+  endpoint, with one-click switching to any project. Highlights the current project; flags missing ones.
+- **Dashboard: jump-to-file from AI Insights** — file paths mentioned in AI insight items are now
+  clickable and deep-link to the Anatomy Browser filtered to that file (`#anatomy?file=…`). Only
+  real paths linkify (slash or known code extension), so version strings stay plain text.
 
 ## [1.10.0] — 2026-07-10
 

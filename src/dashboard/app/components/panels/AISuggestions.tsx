@@ -2,6 +2,43 @@ import React, { useState } from "react";
 import { relativeTime } from "../../lib/utils.js";
 import type { WolfData } from "../../hooks/useWolfData.js";
 
+const CODE_EXTS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "rb", "php", "cs",
+  "cpp", "cc", "c", "h", "hpp", "swift", "kt", "vue", "svelte", "json", "md", "mdx",
+  "yml", "yaml", "toml", "css", "scss", "html", "sh", "sql", "prisma", "graphql",
+]);
+const PATH_RE = /([A-Za-z0-9_.\-/]+\.[A-Za-z][A-Za-z0-9]{0,7})/g;
+
+// Render free text with file-path-looking tokens turned into buttons that jump to the
+// Anatomy Browser filtered to that file. A token counts as a path if it contains a slash
+// or ends in a known code extension (so "v1.10.0" or "99.9" stay plain text).
+function linkifyPaths(text: string, onJump?: (file: string) => void): React.ReactNode {
+  if (!onJump) return text;
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  PATH_RE.lastIndex = 0;
+  while ((m = PATH_RE.exec(text)) !== null) {
+    const token = m[1];
+    const ext = token.slice(token.lastIndexOf(".") + 1).toLowerCase();
+    const isPath = token.includes("/") || CODE_EXTS.has(ext);
+    if (!isPath) continue;
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(
+      <button
+        key={`${m.index}-${token}`}
+        onClick={() => onJump(token)}
+        className="font-mono underline decoration-dotted underline-offset-2"
+        style={{ color: "var(--accent)" }}
+        title={`Jump to ${token} in Anatomy`}
+      >{token}</button>
+    );
+    last = m.index + token.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length ? out : text;
+}
+
 const sections = [
   { key: "achievements", title: "Achievements", icon: "🏆", color: "#059669" },
   { key: "improvements", title: "Improvements", icon: "✨", color: "#3b82f6" },
@@ -19,9 +56,10 @@ const PROMPT = `Analyze this project and write a JSON file to .wolf/suggestions.
 }
 Base it on the recent memory, anatomy, and current project state. Be specific and actionable.`;
 
-export function AISuggestions({ data }: { data: WolfData }) {
+export function AISuggestions({ data, onNavigate }: { data: WolfData; onNavigate?: (panel: string, params?: Record<string, string>) => void }) {
   const { suggestions } = data;
   const [copied, setCopied] = useState(false);
+  const jumpToFile = onNavigate ? (file: string) => onNavigate("anatomy", { file }) : undefined;
 
   const copyPrompt = () => {
     navigator.clipboard.writeText(PROMPT).then(() => {
@@ -83,7 +121,7 @@ export function AISuggestions({ data }: { data: WolfData }) {
                   {items.map((item: string, i: number) => (
                     <li key={i} className="text-sm flex items-start gap-2" style={{ color: "var(--text-secondary)" }}>
                       <span className="mt-1 shrink-0" style={{ color: "var(--text-faint)" }}>•</span>
-                      <span>{item}</span>
+                      <span>{linkifyPaths(item, jumpToFile)}</span>
                     </li>
                   ))}
                 </ul>

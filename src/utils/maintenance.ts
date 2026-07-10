@@ -184,6 +184,52 @@ export function suggestIgnores(
   return suggestions.slice(0, 12);
 }
 
+export interface ProjectSummary {
+  name: string;
+  root: string;
+  exists: boolean;
+  total_sessions: number;
+  total_tokens_estimated: number;
+  estimated_savings: number;
+  open_bugs: number;
+  last_activity: string | null;
+}
+
+// Per-project rollup for the cross-project dashboard view: lifetime ledger stats, open bug
+// count, and last activity (newest mtime among memory.md / token-ledger.json). Pure fs reads;
+// a project whose .wolf/ is gone comes back exists:false with zeros.
+export function projectSummary(root: string, name: string): ProjectSummary {
+  const w = path.join(root, ".wolf");
+  const exists = fs.existsSync(w);
+  const ledger = readJSON<{ lifetime?: Record<string, number> }>(path.join(w, "token-ledger.json"), {});
+  const life = ledger.lifetime ?? {};
+  const rawBugs = readJSON<unknown>(path.join(w, "buglog.json"), { bugs: [] });
+  const bugs = Array.isArray(rawBugs)
+    ? rawBugs
+    : Array.isArray((rawBugs as { bugs?: unknown[] }).bugs) ? (rawBugs as { bugs: unknown[] }).bugs : [];
+  let lastActivity: string | null = null;
+  for (const f of ["memory.md", "token-ledger.json"]) {
+    try {
+      const m = fs.statSync(path.join(w, f)).mtime.toISOString();
+      if (!lastActivity || m > lastActivity) lastActivity = m;
+    } catch { /* absent */ }
+  }
+  return {
+    name,
+    root,
+    exists,
+    total_sessions: life.total_sessions ?? 0,
+    total_tokens_estimated: life.total_tokens_estimated ?? 0,
+    estimated_savings: life.estimated_savings_vs_bare_cli ?? 0,
+    open_bugs: bugs.length,
+    last_activity: lastActivity,
+  };
+}
+
+export function aggregateProjects(projects: Array<{ root: string; name: string }>): ProjectSummary[] {
+  return projects.map((p) => projectSummary(p.root, p.name));
+}
+
 // ---------------------------------------------------------------------------
 // Size helpers
 // ---------------------------------------------------------------------------

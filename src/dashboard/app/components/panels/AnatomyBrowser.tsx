@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { TokenBadge } from "../shared/TokenBadge.js";
 import type { WolfData } from "../../hooks/useWolfData.js";
 
@@ -86,10 +86,13 @@ function hasMatches(node: TreeNode, search: string): boolean {
   return node.children.some((c) => hasMatches(c, search));
 }
 
-export function AnatomyBrowser({ data }: { data: WolfData }) {
+export function AnatomyBrowser({ data, initialFile }: { data: WolfData; initialFile?: string }) {
   const { anatomy } = data;
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialFile ?? "");
   const [sortBySize, setSortBySize] = useState(false);
+
+  // Deep-link: when navigated here with a ?file= param (e.g. from an AI insight), filter to it.
+  useEffect(() => { if (initialFile) setSearch(initialFile); }, [initialFile]);
 
   const tree = useMemo(() => buildTree(anatomy.entries), [anatomy.entries]);
 

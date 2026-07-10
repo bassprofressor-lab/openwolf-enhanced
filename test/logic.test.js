@@ -11,6 +11,8 @@ import {
   dedupeAndCapBuglog,
   humanBytes,
   suggestIgnores,
+  aggregateProjects,
+  projectSummary,
 } from "../dist/src/utils/maintenance.js";
 import {
   isSecretFile,
@@ -203,4 +205,31 @@ test("suggestIgnores: suggests noisy dir, skips ignored + default-excluded + chi
   assert.ok(!pats.some((p) => p.startsWith("generated/sub")), "does not also flag the child dir");
   assert.ok(!pats.includes("node_modules/"), "never flags default-excluded dirs");
   assert.ok(!pats.includes("vendor/"), "respects existing .wolfignore");
+});
+
+// --- aggregateProjects / projectSummary (cross-project rollup) ---
+test("projectSummary: reads lifetime stats + bug count; missing .wolf → exists:false", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "owagg-"));
+  const proj = path.join(base, "p1");
+  fs.mkdirSync(path.join(proj, ".wolf"), { recursive: true });
+  fs.writeFileSync(path.join(proj, ".wolf", "token-ledger.json"), JSON.stringify({
+    version: 1, lifetime: { total_sessions: 7, total_tokens_estimated: 1234, estimated_savings_vs_bare_cli: 500 },
+  }));
+  fs.writeFileSync(path.join(proj, ".wolf", "buglog.json"), JSON.stringify({ version: 1, bugs: [{ id: "a" }, { id: "b" }] }));
+
+  const s = projectSummary(proj, "p1");
+  assert.equal(s.exists, true);
+  assert.equal(s.total_sessions, 7);
+  assert.equal(s.total_tokens_estimated, 1234);
+  assert.equal(s.estimated_savings, 500);
+  assert.equal(s.open_bugs, 2);
+
+  const gone = projectSummary(path.join(base, "does-not-exist"), "ghost");
+  assert.equal(gone.exists, false);
+  assert.equal(gone.total_sessions, 0);
+  assert.equal(gone.open_bugs, 0);
+
+  const agg = aggregateProjects([{ root: proj, name: "p1" }, { root: path.join(base, "does-not-exist"), name: "ghost" }]);
+  assert.equal(agg.length, 2);
+  assert.equal(agg[0].name, "p1");
 });
