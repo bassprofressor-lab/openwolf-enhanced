@@ -25,6 +25,10 @@ Claude's own Auto Dream.
   surface on resume.*)
 - **Session-start resume digest lists native memory** in its "Available on demand" index, pointing at
   `openwolf recall` to reach the topic files the native index leaves out.
+- **Dashboard "Native Memory" panel.** Browse Claude's native memory: index-coverage stats (indexed vs
+  orphaned), a warning when `MEMORY.md` exceeds the 200-line auto-load cutoff, dead-link and stale-file
+  counts, and a searchable file list (size, modified, indexed/orphan badge) with click-to-view. Backed by
+  read-only `/api/native-memory` and a path-validated `/api/native-memory/file` endpoint.
 
 ## [1.12.1] — 2026-07-10
 

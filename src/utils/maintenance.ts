@@ -283,6 +283,41 @@ export function nativeMemoryHealth(dir: string, opts: { staleDays?: number } = {
   };
 }
 
+export interface NativeMemoryFile {
+  name: string;
+  bytes: number;
+  mtime: string; // ISO
+  indexed: boolean; // referenced by MEMORY.md
+}
+
+// Basenames the MEMORY.md index links to (for the "indexed vs orphan" distinction).
+function nativeReferencedNames(dir: string): Set<string> {
+  let idx = "";
+  try { idx = fs.readFileSync(path.join(dir, "MEMORY.md"), "utf-8"); } catch { /* no index */ }
+  const s = new Set<string>();
+  for (const m of idx.matchAll(/\]\(([^)]+\.md)\)/g)) s.add(path.basename(m[1]));
+  return s;
+}
+
+// Per-file listing of the native memory dir for the dashboard: size, mtime, and whether the
+// MEMORY.md index references it (unreferenced files never auto-load at session start).
+export function nativeMemoryFiles(dir: string): NativeMemoryFile[] {
+  const ref = nativeReferencedNames(dir);
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".md") && !n.includes(".bak") && n !== "MEMORY.md");
+  } catch { /* unreadable */ }
+  const out: NativeMemoryFile[] = [];
+  for (const n of names) {
+    try {
+      const st = fs.statSync(path.join(dir, n));
+      out.push({ name: n, bytes: st.size, mtime: new Date(st.mtimeMs).toISOString(), indexed: ref.has(n) });
+    } catch { /* vanished */ }
+  }
+  out.sort((a, b) => b.mtime.localeCompare(a.mtime)); // most recent first
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Size helpers
 // ---------------------------------------------------------------------------

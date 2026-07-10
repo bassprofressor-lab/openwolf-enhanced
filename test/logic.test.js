@@ -323,3 +323,19 @@ test("nativeMemoryHealth: counts orphans, dead links, 200-line cutoff", () => {
   assert.deepEqual(h.deadLinks, ["deadlink.md"]);
   assert.equal(h.indexCutoffExceeded, true);
 });
+
+// --- nativeMemoryFiles: per-file listing with indexed flag ---
+import { nativeMemoryFiles } from "../dist/src/utils/maintenance.js";
+test("nativeMemoryFiles: lists topic files with correct indexed flag, excludes MEMORY.md/.bak", () => {
+  const nd = fs.mkdtempSync(path.join(os.tmpdir(), "ownm4-"));
+  fs.writeFileSync(path.join(nd, "MEMORY.md"), "# Index\n- [A](existing.md) — x\n");
+  fs.writeFileSync(path.join(nd, "existing.md"), "content\n");
+  fs.writeFileSync(path.join(nd, "orphan.md"), "not indexed\n");
+  fs.writeFileSync(path.join(nd, "MEMORY.md.bak-pre-compact-1"), "backup\n");
+  const files = nativeMemoryFiles(nd);
+  assert.equal(files.length, 2, "excludes MEMORY.md and .bak");
+  const byName = Object.fromEntries(files.map((f) => [f.name, f]));
+  assert.equal(byName["existing.md"].indexed, true);
+  assert.equal(byName["orphan.md"].indexed, false);
+  assert.ok(byName["existing.md"].bytes > 0 && byName["existing.md"].mtime);
+});

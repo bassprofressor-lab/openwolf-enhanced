@@ -12,7 +12,8 @@ import { startFileWatcher } from "./file-watcher.js";
 import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
-import { aggregateProjects } from "../utils/maintenance.js";
+import { aggregateProjects, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
+import { nativeMemoryDir } from "../hooks/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -172,6 +173,36 @@ app.get("/api/projects", (_req, res) => {
 // Cross-project rollup for the aggregate dashboard view.
 app.get("/api/aggregate", (_req, res) => {
   res.json({ projects: aggregateProjects(getRegisteredProjects(true)) });
+});
+
+// Claude's native Auto Memory for this project — read-only browse + health.
+app.get("/api/native-memory", (_req, res) => {
+  const nd = nativeMemoryDir(projectRoot);
+  if (!nd) { res.json({ available: false }); return; }
+  try {
+    res.json({ available: true, health: nativeMemoryHealth(nd), files: nativeMemoryFiles(nd) });
+  } catch {
+    res.json({ available: false });
+  }
+});
+
+// Read one native-memory topic file. Name must be a plain .md basename that actually exists in
+// the directory (no path separators / traversal), and the content is size-capped.
+app.get("/api/native-memory/file", (req, res) => {
+  const nd = nativeMemoryDir(projectRoot);
+  if (!nd) { res.status(404).json({ error: "no native memory" }); return; }
+  const name = String(req.query.name ?? "");
+  if (!/^[A-Za-z0-9._-]+\.md$/.test(name)) { res.status(400).json({ error: "invalid name" }); return; }
+  let listing: string[] = [];
+  try { listing = fs.readdirSync(nd); } catch { /* unreadable */ }
+  if (!listing.includes(name)) { res.status(404).json({ error: "not found" }); return; }
+  try {
+    let content = fs.readFileSync(path.join(nd, name), "utf-8");
+    if (content.length > 200_000) content = content.slice(0, 200_000) + "\n… (truncated)";
+    res.json({ name, content });
+  } catch {
+    res.status(500).json({ error: "read failed" });
+  }
 });
 
 app.post("/api/switch", (req, res) => {

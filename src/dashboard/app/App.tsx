@@ -13,6 +13,7 @@ const TokenUsage = lazy(() => import("./components/panels/TokenUsage.js").then(m
 const CronStatus = lazy(() => import("./components/panels/CronStatus.js").then(m => ({ default: m.CronStatus })));
 const CerebrumViewer = lazy(() => import("./components/panels/CerebrumViewer.js").then(m => ({ default: m.CerebrumViewer })));
 const MemoryViewer = lazy(() => import("./components/panels/MemoryViewer.js").then(m => ({ default: m.MemoryViewer })));
+const NativeMemory = lazy(() => import("./components/panels/NativeMemory.js").then(m => ({ default: m.NativeMemory })));
 const AnatomyBrowser = lazy(() => import("./components/panels/AnatomyBrowser.js").then(m => ({ default: m.AnatomyBrowser })));
 const BugLog = lazy(() => import("./components/panels/BugLog.js").then(m => ({ default: m.BugLog })));
 const AISuggestions = lazy(() => import("./components/panels/AISuggestions.js").then(m => ({ default: m.AISuggestions })));
@@ -26,6 +27,7 @@ const panelTitles: Record<string, string> = {
   cron: "Cron Control Center",
   cerebrum: "Cerebrum",
   memory: "Memory Browser",
+  native: "Native Memory",
   anatomy: "Anatomy Browser",
   bugs: "Bug Log",
   suggestions: "AI Insights",
@@ -100,6 +102,7 @@ export default function App() {
           {activePanel === "cron" && <CronStatus data={data} />}
           {activePanel === "cerebrum" && <CerebrumViewer data={data} />}
           {activePanel === "memory" && <MemoryViewer data={data} />}
+          {activePanel === "native" && <NativeMemory data={data} />}
           {activePanel === "anatomy" && <AnatomyBrowser data={data} initialFile={params.get("file") || undefined} />}
           {activePanel === "bugs" && <BugLog data={data} />}
           {activePanel === "suggestions" && <AISuggestions data={data} onNavigate={navigate} />}
