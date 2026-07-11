@@ -58,7 +58,7 @@ const WOLF_BROADCAST_FILES = [
   "OPENWOLF.md", "identity.md", "cerebrum.md", "memory.md", "anatomy.md",
   "config.json", "token-ledger.json", "buglog.json",
   "cron-manifest.json", "cron-state.json",
-  "designqc-report.json",
+  "designqc-report.json", "activity.log",
 ];
 
 // Read a .wolf file for delivery to the dashboard, trimming the largest ones so a

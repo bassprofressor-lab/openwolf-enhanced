@@ -184,6 +184,20 @@ export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): R
   return hits.slice(0, limit);
 }
 
+export interface ProjectHit extends RecallHit { project?: string; wolfDir: string }
+
+// Search several projects and return the global top-N by score. Each hit is tagged with its
+// project name + wolfDir (so a follow-up resolveId knows where to look). Per-project limit = the
+// final limit, which is enough for a correct global top-N.
+export function recallAcross(targets: Array<{ name?: string; wolfDir: string }>, query: string, opts: RecallOpts = {}): ProjectHit[] {
+  const limit = opts.limit ?? 12;
+  const tagged: ProjectHit[] = targets.flatMap((t) =>
+    recall(t.wolfDir, query, opts).map((h) => ({ ...h, project: t.name, wolfDir: t.wolfDir }))
+  );
+  tagged.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line);
+  return tagged.slice(0, limit);
+}
+
 // Resolve a citation id back to its full block — the targeted second disclosure layer. Scans the
 // same sources, recomputes each block's id, and returns the first match (null if none). Accepts
 // the id with or without its category prefix so `recall --id 3f9a2b` also works.

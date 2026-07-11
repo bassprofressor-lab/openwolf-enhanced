@@ -162,6 +162,18 @@ export function createProgram(): Command {
       await doctorCommand(opts);
     });
 
+  // --- Consolidate command ---
+  program
+    .command("consolidate")
+    .description("Merge near-duplicate cerebrum.md entries using the configured LLM")
+    .option("--dry-run", "Show proposed merges without writing")
+    .option("--threshold <n>", "Similarity threshold 0.3–0.95 (default 0.5)")
+    .option("--max <n>", "Max pairs to process (default 8)")
+    .action(async (opts: { dryRun?: boolean; threshold?: string; max?: string }) => {
+      const { consolidateCommand } = await import("./consolidate-cmd.js");
+      await consolidateCommand(opts);
+    });
+
   // --- Export command ---
   program
     .command("export <what>")
@@ -191,8 +203,9 @@ export function createProgram(): Command {
     .option("--limit <n>", "Max results", "12")
     .option("--full", "Expand each hit to its full logical block (second disclosure layer)")
     .option("--id <id>", "Resolve a citation id to its full entry (no query needed)")
+    .option("--all", "Search across all registered projects, not just this one")
     .option("--json", "Output JSON")
-    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string }) => {
+    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean }) => {
       const { recallCommand } = await import("./recall-cmd.js");
       recallCommand(query, opts);
     });

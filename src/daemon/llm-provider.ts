@@ -104,6 +104,29 @@ export function buildLlmRequest(cfg: LlmConfig, apiKey: string, prompt: string, 
   };
 }
 
+// Run a single-prompt completion against the configured provider. Bundles the security hardening:
+// base-url validation (via buildLlmRequest), a hard timeout, and redirect:"error" so the API key
+// never follows a 3xx to another host. Used by the cron engine and `openwolf consolidate`.
+export async function callLlm(cfg: LlmConfig, apiKey: string, prompt: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
+  const req = buildLlmRequest(cfg, apiKey, prompt, opts.maxTokens ?? 2048);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 120_000);
+  let response: Response;
+  try {
+    response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal, redirect: "error" });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw new Error(`${cfg.provider} API request timed out`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
+  }
+  return parseLlmResponse(cfg.provider, await response.json());
+}
+
 // Extract the assistant text from either API's response shape — pure.
 export function parseLlmResponse(provider: LlmProvider, data: unknown): string {
   if (provider === "openai") {

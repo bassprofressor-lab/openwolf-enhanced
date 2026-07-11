@@ -1,7 +1,7 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.15.1",
-  "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
+  "version": "1.16.0",
+  "description": "A second brain for Claude Code, Codex & Gemini — persistent git-native project memory with searchable citations, an MCP server for Claude Desktop, and invisible hook-based context. No database.",
   "type": "module",
   "bin": {
     "openwolf": "./dist/bin/openwolf.js"
@@ -67,12 +67,25 @@
   },
   "keywords": [
     "claude",
-    "ai",
-    "context",
-    "token",
-    "openwolf",
     "claude-code",
-    "developer-tools"
+    "claude-desktop",
+    "codex",
+    "gemini",
+    "opencode",
+    "mcp",
+    "ai",
+    "ai-memory",
+    "memory",
+    "context",
+    "context-management",
+    "token",
+    "hooks",
+    "cli",
+    "developer-tools",
+    "llm",
+    "coding-agent",
+    "agent",
+    "openwolf"
   ],
   "files": [
     "dist/",

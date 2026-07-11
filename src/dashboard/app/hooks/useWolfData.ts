@@ -60,6 +60,7 @@ export interface WolfData {
   cronState: CronState;
   cronManifest: CronManifest;
   buglog: BugLog;
+  activityLog: string;
   suggestions: any;
   designqcReport: DesignQCReport | null;
   health: Health;
@@ -80,6 +81,7 @@ export function useWolfData(): WolfData {
   const [cronState, setCronState] = useState<CronState>({ engine_status: "unknown", last_heartbeat: null, execution_log: [], dead_letter_queue: [] });
   const [cronManifest, setCronManifest] = useState<CronManifest>({ tasks: [] });
   const [buglog, setBuglog] = useState<BugLog>({ bugs: [] });
+  const [activityLog, setActivityLog] = useState<string>("");
   const [suggestions, setSuggestions] = useState<any>(null);
   const [designqcReport, setDesignqcReport] = useState<DesignQCReport | null>(null);
   const [health, setHealth] = useState<Health>({ status: "unknown", uptime_seconds: 0 });
@@ -104,6 +106,7 @@ export function useWolfData(): WolfData {
     if (files["buglog.json"]) {
       try { setBuglog(JSON.parse(files["buglog.json"])); } catch {}
     }
+    if (typeof files["activity.log"] === "string") setActivityLog(files["activity.log"]);
     if (files["suggestions.json"]) {
       try { setSuggestions(JSON.parse(files["suggestions.json"])); } catch {}
     }
@@ -178,5 +181,5 @@ export function useWolfData(): WolfData {
     return () => wsClient.disconnect();
   }, [refresh]);
 
-  return { anatomy, cerebrum, memory, tokenLedger, cronState, cronManifest, buglog, suggestions, designqcReport, health, identity, project, loading, connected, client, retry };
+  return { anatomy, cerebrum, memory, tokenLedger, cronState, cronManifest, buglog, activityLog, suggestions, designqcReport, health, identity, project, loading, connected, client, retry };
 }

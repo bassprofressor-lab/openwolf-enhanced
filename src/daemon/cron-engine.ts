@@ -4,7 +4,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
-import { resolveLlmConfig, buildLlmRequest, parseLlmResponse, type LlmConfig } from "./llm-provider.js";
+import { resolveLlmConfig, callLlm } from "./llm-provider.js";
 import type { Logger } from "../utils/logger.js";
 
 interface CronAction {
@@ -345,7 +345,7 @@ export class CronEngine {
         `Set it in your shell profile: export ${llm.apiKeyEnv}=…`
       );
     }
-    let result = await this.runViaApi(fullPrompt, llm, apiKey);
+    let result = await callLlm(llm, apiKey, fullPrompt);
 
     const fenceMatch = result.match(/```[\w]*\n([\s\S]*?)\n```/);
     if (fenceMatch) result = fenceMatch[1].trim();
@@ -361,26 +361,4 @@ export class CronEngine {
     }
   }
 
-  private async runViaApi(prompt: string, cfg: LlmConfig, apiKey: string): Promise<string> {
-    // Abort after 120s so a hung request can't leave the cron task stuck forever
-    // (the previous spawnSync path had a 120s timeout; fetch has none by default).
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120_000);
-    const req = buildLlmRequest(cfg, apiKey, prompt);
-    let response: Response;
-    try {
-      // redirect:"error" — never follow a 3xx to another host (the API key header would ride along).
-      response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal, redirect: "error" });
-    } catch (err) {
-      if ((err as Error).name === "AbortError") throw new Error(`${cfg.provider} API request timed out after 120s`);
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
-    }
-    return parseLlmResponse(cfg.provider, await response.json());
-  }
 }

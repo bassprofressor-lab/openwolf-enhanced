@@ -293,6 +293,39 @@ test("recall: BM25 ranks a rare term above a common one; substring matching pres
   assert.ok(recall(w, "restar", { includeNative: false }).length >= 3, "substring match preserved");
 });
 
+// --- consolidate: apply LLM-merged entries to cerebrum ---
+import { applyConsolidations } from "../dist/src/cli/consolidate-cmd.js";
+test("applyConsolidations: replaces block A with merged text, deletes block B, keeps the rest", () => {
+  const content = "## Key Learnings\n- entry alpha detail\n- entry bravo detail\n- unrelated keep me\n";
+  // 1-based lines: heading=1, alpha=2, bravo=3, keep=4
+  const out = applyConsolidations(content, [{ aStart: 2, aEnd: 2, bStart: 3, bEnd: 3, mergedText: "- merged alpha+bravo" }]);
+  assert.ok(out.includes("- merged alpha+bravo"), "merged entry present");
+  assert.ok(!out.includes("entry alpha") && !out.includes("entry bravo"), "both duplicates removed");
+  assert.ok(out.includes("- unrelated keep me"), "unrelated entry preserved");
+  assert.ok(out.includes("## Key Learnings"), "heading preserved");
+  // multi-line merged text + two independent merges, applied without index drift
+  const c2 = "- a1\n- a2\n- b1\n- b2\n- tail\n";
+  const out2 = applyConsolidations(c2, [
+    { aStart: 1, aEnd: 1, bStart: 2, bEnd: 2, mergedText: "- A" },
+    { aStart: 3, aEnd: 3, bStart: 4, bEnd: 4, mergedText: "- B\n  cont" },
+  ]);
+  assert.equal(out2, "- A\n- B\n  cont\n- tail\n");
+});
+
+// --- recall --all: cross-project search ---
+import { recallAcross } from "../dist/src/utils/recall.js";
+test("recallAcross: merges hits across projects, tags project, global top-N by score", () => {
+  const a = tmpWolf(); const b = tmpWolf();
+  fs.writeFileSync(path.join(a, "cerebrum.md"), "- the widget subsystem uses a ring buffer widget widget\n");
+  fs.writeFileSync(path.join(b, "cerebrum.md"), "- unrelated note about the widget once\n");
+  const hits = recallAcross([{ name: "alpha", wolfDir: a }, { name: "beta", wolfDir: b }], "widget", { limit: 5, includeNative: false });
+  assert.ok(hits.length >= 2, "finds hits in both projects");
+  assert.equal(hits[0].project, "alpha", "higher term-frequency project ranks first");
+  assert.ok(hits.every((h) => h.wolfDir && h.project), "each hit tagged with project + wolfDir");
+  // respects the global limit
+  assert.ok(recallAcross([{ name: "alpha", wolfDir: a }, { name: "beta", wolfDir: b }], "widget", { limit: 1, includeNative: false }).length === 1);
+});
+
 // --- citations + progressive disclosure (entryId / blocksFor / resolveId) ---
 import { entryId, blocksFor, resolveId } from "../dist/src/utils/recall.js";
 test("entryId: stable, whitespace/case-insensitive, category-prefixed, content-sensitive", () => {

@@ -6,6 +6,36 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.0] — 2026-07-11
+
+Three requested features that build on the recent work: LLM-assisted memory consolidation, cross-project
+recall, and a dashboard view for the Bash capture — plus a README reworked for discoverability.
+
+### Added
+- **`openwolf consolidate` — LLM-merge near-duplicate cerebrum entries.** `doctor` only *hints* at
+  duplicate learnings; this command actually merges them using the configured provider (the same
+  Anthropic/OpenAI-compatible abstraction as cron AI tasks — so it can run on a free provider). It finds
+  near-duplicate pairs (Jaccard over content words), asks the model to merge each pair into one entry
+  preserving every unique fact, then rewrites `cerebrum.md` (backup at `cerebrum.md.bak-pre-consolidate`).
+  `--dry-run` previews, `--threshold`/`--max` tune it. Non-overlapping pairs only; implausible merge
+  output is skipped. The apply step is a pure, unit-tested function.
+- **`openwolf recall --all` — search across all registered projects.** Cross-project keyword search;
+  hits are tagged `project:file:line` and ranked globally by BM25 score. `--id … --all` resolves a
+  citation across projects too.
+- **Dashboard "Command Log" panel.** Browses `.wolf/activity.log` (the opt-in Bash capture): per-command
+  rows with timestamps, a failures-only filter and search, and an empty state that explains how to enable
+  capture. Read-only.
+
+### Changed
+- The LLM call is now a shared `callLlm()` helper (with the 1.15.1 hardening: base-url validation, hard
+  timeout, no redirect-following), used by both the cron engine and `consolidate`.
+
+### Documentation
+- README (en + de) reworked for discoverability and onboarding: a "works with Claude Code / Codex / Gemini /
+  OpenCode" lead, a contents nav, and a **FAQ** (privacy, how it differs from upstream, multi-agent support,
+  API-key needs, performance). Requirements updated for multi-agent. Broadened npm `keywords` and modernized
+  the package `description`.
+
 ## [1.15.1] — 2026-07-11
 
 Security hardening of the 1.14/1.15 surfaces, from an adversarial review. No feature changes.

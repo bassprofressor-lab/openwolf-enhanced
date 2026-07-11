@@ -22,6 +22,10 @@
 > **begrenzt, selbstwartend und einschränkbar**. Der CLI-Befehl ist weiterhin `openwolf`, also ein
 > Drop-in-Ersatz. Siehe [Was ist verbessert](#was-ist-verbessert) und das [CHANGELOG](../../CHANGELOG.md).
 
+**Funktioniert mit [Claude Code](https://claude.com/claude-code), [OpenAI Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) und [OpenCode](https://github.com/sst/opencode)** — plus Claude Desktop und jedem MCP-Client. Persistentes Projekt-Gedächtnis, zitierbare Suche und Kontext-Injektion über unsichtbare Hooks. Git-nativ, ohne Datenbank, ohne Cloud.
+
+**Inhalt:** [Warum](#warum-openwolf-existiert) · [Was ist verbessert](#was-ist-verbessert) · [Schnellstart](#schnellstart) · [Befehle](#befehle) · [Claude Desktop / MCP](#nutzung-in-claude-desktop-mcp) · [FAQ](#faq)
+
 ## Warum OpenWolf existiert
 
 Claude Code ist mächtig, arbeitet aber blind. Es weiß nicht, was eine Datei enthält, bis es sie öffnet. Es kann eine 50-Token-Config nicht von einem 2.000-Token-Modul unterscheiden. Es liest dieselbe Datei mehrmals in einer Session, ohne es zu merken. Es hat keinen Index deines Projekts, keine Erinnerung an deine Korrekturen und kein Bewusstsein dafür, was es bereits versucht hat.
@@ -34,11 +38,11 @@ Alles, was Upstream tut, plus — gruppiert nach dem, was es dir bringt:
 
 | Bereich | Verbesserung |
 |---------|--------------|
-| 🩺 **Selbstwartung** | `openwolf doctor` meldet den `.wolf/`-Footprint und kompaktiert alles (Ledger, Memory, Bug-Log, Backups, Logs, tmp), erkennt projektübergreifende Registry-Probleme, schlägt `.wolfignore`-Einträge für rauschende Verzeichnisse vor und weist auf near-duplicate cerebrum-Einträge zum Zusammenführen hin. `--dry-run` zeigt eine Vorschau. |
+| 🩺 **Selbstwartung** | `openwolf doctor` meldet den `.wolf/`-Footprint und kompaktiert alles (Ledger, Memory, Bug-Log, Backups, Logs, tmp), erkennt projektübergreifende Registry-Probleme, schlägt `.wolfignore`-Einträge für rauschende Verzeichnisse vor und weist auf near-duplicate cerebrum-Einträge hin — und `openwolf consolidate` führt sie per LLM zusammen. `--dry-run` zeigt eine Vorschau. |
 | 📦 **Begrenzter, einstellbarer Speicher** | Ledger, Bug-Log, Cron-Queues und Waste-Flags sind alle gedeckelt — keine ausufernden Multi-MB-Dateien. Jedes Limit steht in `openwolf.retention` und übersteht Updates (Config wird tief gemerged, nicht überschrieben). |
 | 🧭 **Intelligenter Session-Resume** | Beim Session-Start wird ein kompakter, token-begrenzter Digest injiziert — STATUS + Do-Not-Repeat inline, jüngste Aktivität als Ein-Zeilen-Headline, der Rest als *„Available on demand"*-Index — damit das Modell weiterarbeitet, ohne neu zu lesen. |
 | 📓 **Passives Activity-Capture** *(opt-in)* | Datei-Edits werden immer journaled; mit aktiviertem `openwolf.capture` hängt ein `PostToolUse:Bash`-Hook zusätzlich nennenswerte Kommandos (Commits, Installs, Tests, Builds, Deploys) **und Fehler** an ein größen-gecapptes `.wolf/activity.log`, das in den Resume-Digest der nächsten Session einfließt. Secrets werden redigiert, triviale Read-only-Kommandos verworfen. Standardmäßig aus. |
-| 🔎 **Durchsuchbares Gedächtnis + Zitate** | `openwolf recall <query>` durchsucht STATUS / cerebrum / memory / buglog **und Claudes native Auto Memory** per Keyword, **BM25-gerankt** (seltene Terme höher gewichtet, längen-normalisiert), und liefert einen kompakten Index, in dem jeder Treffer eine stabile Zitat-ID wie `[c-3f9a]` trägt. Einen Eintrag mit `recall --id <id>` (oder alle inline mit `--full`) expandieren — Progressive Disclosure, ohne Datenbank. IDs in Notizen zitieren, um sie später wieder zu öffnen. |
+| 🔎 **Durchsuchbares Gedächtnis + Zitate** | `openwolf recall <query>` durchsucht STATUS / cerebrum / memory / buglog **und Claudes native Auto Memory** per Keyword, **BM25-gerankt** (seltene Terme höher gewichtet, längen-normalisiert), und liefert einen kompakten Index, in dem jeder Treffer eine stabile Zitat-ID wie `[c-3f9a]` trägt. Einen Eintrag mit `recall --id <id>` (oder alle inline mit `--full`) expandieren — Progressive Disclosure, ohne Datenbank. IDs in Notizen zitieren, um sie später wieder zu öffnen; `recall --all` durchsucht alle registrierten Projekte. |
 | 🧠 **Native-Memory-Interop** | Liest Claude Codes eigene Auto Memory (read-only): `doctor` deckt deren Blindstellen auf (Dateien, die der `MEMORY.md`-Index nie lädt, die 200-Zeilen-Grenze, tote Links), ein Dashboard-Panel durchstöbert sie, und ein **MCP-Server** (`openwolf mcp`) stellt recall/resume für **Claude Desktop** und andere MCP-Clients bereit — so wirkt OpenWolf über Claude Code hinaus. |
 | 🐝 **Über Claude Code hinaus** | `init`/`update` erkennen **Codex CLI**, **Gemini CLI** und **OpenCode** automatisch und registrieren OpenWolfs Hooks auch dort. Codex & Gemini teilen Claudes Hook-Modell → Session-Start-Resume-Digest wird injiziert + Aktivität erfasst; OpenCode bekommt einen JS-Plugin-Adapter (Injektion zur Compaction-Zeit). Claude bleibt primäres, unverändertes Ziel. |
 | 🔌 **Modell-agnostische AI-Tasks** | Die AI-Tasks des Hintergrund-Cron-Engines nutzen standardmäßig die Anthropic-API, lassen sich aber über `openwolf.cron`-Config auf **jeden OpenAI-kompatiblen Endpoint** richten (OpenAI, Groq, Cerebras, Mistral, Qwen, lokaler Server) — `llm_provider` / `llm_base_url` / `llm_model` / `api_key_env`. Kein Code-Change; bestehende Setups laufen unverändert auf Claude. |
@@ -47,7 +51,7 @@ Alles, was Upstream tut, plus — gruppiert nach dem, was es dir bringt:
 | 🗒 **Strukturierte Summaries** | Jede Session bekommt ein `Did / Learned / Next / Files`-Gerüst — konsistentes, grep-bares Gedächtnis. |
 | 📤 **Export** | `openwolf export <sessions\|bugs>` als JSON oder CSV (RFC 4180). |
 | 🎯 **`.wolfignore`** | gitignore-artiges Scoping fürs Anatomy-Scanning **und** Hook-Tracking; `doctor` schlägt vor, was hinein soll. |
-| 📊 **Dashboard** | Deep-linkbare Panels, eine projektübergreifende **All-Projects**-Ansicht, Jump-to-file aus den AI-Insights, ein Design-QC-Thumbnail-Grid + Lightbox und ein Daemon-down-Banner. |
+| 📊 **Dashboard** | Deep-linkbare Panels, eine projektübergreifende **All-Projects**-Ansicht, ein **Command Log** für das opt-in Bash-Capture, Jump-to-file aus den AI-Insights, ein Design-QC-Thumbnail-Grid + Lightbox und ein Daemon-down-Banner. |
 | 🔒 **Sicherheit & Korrektheit** | Dashboard an Loopback gebunden und token-geschützt, keine Command-Injection / kein Path-Traversal, Ausschluss von Secret-Dateien (`.pem`/`.key`/`id_rsa`…), plus ~15 übernommene Upstream-Security- und Bugfixes, die der inaktive Upstream nie gemerged hat. |
 | 🚀 **Vertrauenswürdige Releases** | Via GitHub OIDC auf npm veröffentlicht — kein langlebiges Token — mit SLSA-Provenance; CI baut und testet bei jedem Push. |
 
@@ -171,7 +175,8 @@ dist/
 openwolf init                 .wolf/ initialisieren und Hooks registrieren
 openwolf status               Health, Stats, .wolf/-Footprint, Größen-Warnungen anzeigen
 openwolf doctor               .wolf/ melden + kompaktieren, .wolfignore vorschlagen [--dry-run]
-openwolf recall <query>       .wolf + native Memory suchen; ID je Treffer [--limit N] [--full] [--json]
+openwolf consolidate          Near-duplicate cerebrum-Eintraege per LLM zusammenfuehren [--dry-run] [--threshold N]
+openwolf recall <query>       .wolf + native Memory suchen; ID je Treffer [--limit N] [--full] [--all] [--json]
 openwolf recall --id <id>     Zitat-ID zum vollen Eintrag expandieren (zweite Disclosure-Ebene)
 openwolf export <what>        sessions|bugs als JSON oder CSV exportieren [--format csv] [--out FILE]
 openwolf mcp                  MCP-Server (recall/resume/memory-health) starten [--project DIR]
@@ -225,12 +230,30 @@ Claudes native Auto Memory), `openwolf_resume` (der Resume-Digest) und `openwolf
 Die Hook-basierte Auto-Injektion/-Erfassung gilt nur in Claude Code; hier werden die Tools explizit
 aufgerufen. OpenWolf schreibt nie in Claudes native Memory — es liest und macht sie sichtbar.
 
+## FAQ
+
+**Sendet OpenWolf meinen Code oder mein Gedächtnis irgendwohin?**
+Nein. Alles liegt lokal in einem `.wolf/`-Verzeichnis im Projekt — reines Markdown/JSON, git-nativ, ohne Datenbank und ohne Cloud. Nichts verlässt deinen Rechner. (Die einzigen ausgehenden Calls sind optional: die Hintergrund-AI-Tasks und `openwolf consolidate`, die du auf einen Provider deiner Wahl richtest.)
+
+**Wie unterscheidet sich das vom originalen `openwolf`?**
+Dies ist ein gepflegter Fork. Das Original (npm `openwolf`, zuletzt März 2026) ist ungepflegt. Dieser Fork ergänzt begrenzten/selbstwartenden Speicher, BM25-Gedächtnissuche mit Zitaten, einen MCP-Server, modell-agnostische AI-Tasks, Multi-Agent-Support und ~15 Security-Fixes — bleibt aber Drop-in-Ersatz für denselben `openwolf`-Befehl.
+
+**Funktioniert es außer mit Claude Code auch mit anderen Tools?**
+Ja. `init`/`update` erkennen **Codex CLI**, **Gemini CLI** und **OpenCode** automatisch und registrieren dieselben Hooks. Der `openwolf mcp`-Server stellt recall/resume zudem für **Claude Desktop** und jeden MCP-Client bereit.
+
+**Brauche ich einen API-Key?**
+Für den Kern nicht — Hooks, Gedächtnis, `recall` und `doctor` sind deterministisch und laufen offline. Ein Key wird nur für die optionalen Hintergrund-AI-Tasks und `openwolf consolidate` gebraucht, und die laufen mit jedem Anthropic- oder OpenAI-kompatiblen Provider (auch freien).
+
+**Verlangsamt es meine Sessions?**
+Nein. Hooks sind kleine Node-Skripte mit kurzen Timeouts; sie aktualisieren Index und Gedächtnis im Hintergrund und injizieren beim Session-Start einen kompakten, token-begrenzten Digest.
+
 ## Voraussetzungen
 
 - Node.js 20+
-- Claude Code CLI
+- Eine Agent-CLI: **Claude Code**, **Codex CLI**, **Gemini CLI** oder **OpenCode** (Claude Code = primäres Ziel)
 - Windows, macOS oder Linux
-- Optional: PM2 für persistente Hintergrund-Tasks
+- Optional: PM2 für den persistenten Hintergrund-Daemon/Dashboard
+- Optional: ein Anthropic- oder OpenAI-kompatibler API-Key für Cron-AI-Tasks und `openwolf consolidate`
 - Optional: `puppeteer-core` für Design-QC-Screenshots
 
 ## Einschränkungen
