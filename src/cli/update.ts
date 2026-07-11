@@ -67,7 +67,7 @@ const USER_DATA_FILES = [
 // made each snapshot grow with the cap. restoreCommand() reads the backup dir directly,
 // so an excluded file is simply left untouched on restore — which is what we want here:
 // rolling a project back should not roll back its usage telemetry.
-const BACKUP_EXCLUDE = new Set(["token-ledger.json"]);
+const BACKUP_EXCLUDE = new Set(["token-ledger.json", "activity.log"]);
 
 // Files to include in backup
 const BACKUP_FILES = [
@@ -85,6 +85,7 @@ const HOOK_SETTINGS = {
     PostToolUse: [
       { matcher: "Read", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-read.js"', timeout: 5 }] },
       { matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-write.js"', timeout: 10 }] },
+      { matcher: "Bash", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-bash.js"', timeout: 5 }] },
     ],
     Stop: [{ matcher: "", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/stop.js"', timeout: 10 }] }],
   },

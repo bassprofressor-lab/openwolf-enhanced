@@ -14,6 +14,7 @@ import {
   aggregateProjects,
   projectSummary,
   nativeMemoryHealth,
+  findDuplicateEntries,
 } from "../dist/src/utils/maintenance.js";
 import {
   isSecretFile,
@@ -236,6 +237,23 @@ test("projectSummary: reads lifetime stats + bug count; missing .wolf → exists
   assert.equal(agg[0].name, "p1");
 });
 
+// --- findDuplicateEntries: near-duplicate consolidation hint ---
+test("findDuplicateEntries: flags similar cerebrum entries, ignores distinct + short ones", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "cerebrum.md"),
+    "## Key Learnings\n" +
+    "- always restart the backend container after changing python dependencies rebuild image first\n" +
+    "- remember to restart the backend container whenever python dependencies change rebuild the image\n" +
+    "- the dashboard listens on port eighteen thousand seven hundred ninety one by default always\n" +
+    "- short one\n");
+  const dupes = findDuplicateEntries(w, { threshold: 0.4 });
+  assert.equal(dupes.length, 1, "one near-duplicate pair");
+  assert.ok(dupes[0].similarity >= 0.4);
+  assert.ok(dupes[0].aLine === 2 && dupes[0].bLine === 3, "flags the two restart bullets");
+  // unrelated project → no cerebrum → empty, no throw
+  assert.deepEqual(findDuplicateEntries(tmpWolf()), []);
+});
+
 // --- recall: keyword search over knowledge files ---
 import { recall } from "../dist/src/utils/recall.js";
 test("recall: ranks multi-term matches, searches buglog entries, empty query → []", () => {
@@ -259,6 +277,97 @@ test("recall: ranks multi-term matches, searches buglog entries, empty query →
 
   assert.deepEqual(recall(w, "   ", {}), []);
   assert.deepEqual(recall(w, "zzznomatchzzz", {}), []);
+});
+
+test("recall: BM25 ranks a rare term above a common one; substring matching preserved", () => {
+  const w = tmpWolf();
+  // "restart" is common (3 units), "quokka" is rare (1 unit).
+  fs.writeFileSync(path.join(w, "memory.md"),
+    "| 1 | the daemon restart happened | a | ok | 1k |\n" +
+    "| 2 | another daemon restart today | b | ok | 1k |\n" +
+    "| 3 | daemon restart number three | c | ok | 1k |\n" +
+    "| 4 | quokka anomaly observed once | d | ok | 1k |\n");
+  const hits = recall(w, "restart quokka", { limit: 5, includeNative: false });
+  assert.ok(hits[0].text.toLowerCase().includes("quokka"), "rare term wins the top slot");
+  // substring matching still works: "restar" hits "restart"
+  assert.ok(recall(w, "restar", { includeNative: false }).length >= 3, "substring match preserved");
+});
+
+// --- citations + progressive disclosure (entryId / blocksFor / resolveId) ---
+import { entryId, blocksFor, resolveId } from "../dist/src/utils/recall.js";
+test("entryId: stable, whitespace/case-insensitive, category-prefixed, content-sensitive", () => {
+  const a = entryId("cerebrum.md", "  Never  force-push  MAIN ");
+  const b = entryId("cerebrum.md", "never force-push main");
+  assert.equal(a, b, "normalizes whitespace + case → same id");
+  assert.ok(/^c-[0-9a-f]{6}$/.test(a), "prefix c- + 6 hex");
+  assert.equal(entryId("memory.md", "x").slice(0, 2), "m-");
+  assert.equal(entryId("native/foo.md", "x").slice(0, 2), "n-");
+  assert.notEqual(entryId("cerebrum.md", "fact one"), entryId("cerebrum.md", "fact two"), "content edit → new id");
+});
+
+test("blocksFor: list items split, wrapped lines fold in, buglog → one block per bug", () => {
+  const md = "## Head\n- item one\n  wrapped continuation\n- item two\n\npara line a\npara line b\n";
+  const blocks = blocksFor("cerebrum.md", md);
+  const texts = blocks.map((b) => b.text);
+  assert.ok(texts.includes("## Head"));
+  assert.ok(texts.some((t) => t.startsWith("- item one") && t.includes("wrapped continuation")), "continuation folds in");
+  assert.ok(texts.includes("- item two"));
+  assert.ok(texts.some((t) => t.includes("para line a") && t.includes("para line b")), "paragraph is one block");
+
+  const buglog = JSON.stringify({ bugs: [{ id: "bug-1", error_message: "boom" }, { id: "bug-2", error_message: "bang" }] });
+  const bb = blocksFor("buglog.json", buglog);
+  assert.equal(bb.length, 2);
+});
+
+test("resolveId: recall hit id round-trips to its full block; unknown id → null", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "cerebrum.md"),
+    "## Do-Not-Repeat\n- never force-push the main branch under any circumstances\n- daemon port is 18791\n");
+  const hits = recall(w, "force-push main", { limit: 5, includeNative: false });
+  const hit = hits.find((h) => h.text.includes("force-push"));
+  assert.ok(hit && /^c-[0-9a-f]{6}$/.test(hit.id), "hit carries a citation id");
+  const entry = resolveId(w, hit.id, { includeNative: false });
+  assert.ok(entry, "id resolves");
+  assert.equal(entry.file, "cerebrum.md");
+  assert.ok(entry.text.includes("never force-push the main branch"), "full block returned");
+  // bare id (no prefix) also resolves
+  assert.ok(resolveId(w, hit.id.split("-")[1], { includeNative: false }));
+  assert.equal(resolveId(w, "c-000000", { includeNative: false }), null);
+});
+
+// --- Bash activity capture (opt-in) helpers ---
+import {
+  getCaptureConfig, redactSecrets, isNotableCommand, tailWithinBytes, activityTail,
+} from "../dist/hooks/shared.js";
+test("capture: opt-in config, secret redaction, notable-command filter, tail cap", () => {
+  const w = tmpWolf();
+  // default: no config → disabled, default cap
+  assert.deepEqual(getCaptureConfig(w), { enabled: false, logMaxBytes: 131072 });
+  fs.writeFileSync(path.join(w, "config.json"), JSON.stringify({ openwolf: { capture: { enabled: true, log_max_bytes: 4096 } } }));
+  assert.deepEqual(getCaptureConfig(w), { enabled: true, logMaxBytes: 4096 });
+
+  // redaction
+  assert.ok(!redactSecrets("git push https://ghp_ABCDEFGHIJKLMNOP0123@x").includes("ghp_ABCDEFGHIJKLMNOP0123"));
+  assert.ok(redactSecrets("export API_KEY=supersecretvalue").endsWith("API_KEY=***"));
+  assert.equal(redactSecrets("npm run build"), "npm run build"); // untouched
+
+  // notable filter
+  assert.ok(isNotableCommand("git commit -m 'x'"));
+  assert.ok(isNotableCommand("pnpm build && pnpm test"));
+  assert.ok(!isNotableCommand("ls -la"));
+  assert.ok(!isNotableCommand("git status"));
+  assert.ok(!isNotableCommand("cat package.json | grep name"));
+
+  // tail cap drops leading lines
+  const many = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n") + "\n";
+  const capped = tailWithinBytes(many, 40);
+  assert.ok(Buffer.byteLength(capped) <= 40);
+  assert.ok(capped.includes("line 99"), "keeps the newest tail");
+
+  // activityTail reads last N lines
+  fs.writeFileSync(path.join(w, "activity.log"), "10:00  a\n10:01  b\n10:02  c\n");
+  assert.equal(activityTail(w, 2), "10:01  b\n10:02  c");
+  assert.equal(activityTail(tmpWolf()), ""); // absent → empty
 });
 
 // --- <private> tag exclusion (recall + resume digest) ---
@@ -338,6 +447,35 @@ test("nativeMemoryFiles: lists topic files with correct indexed flag, excludes M
   assert.equal(byName["existing.md"].indexed, true);
   assert.equal(byName["orphan.md"].indexed, false);
   assert.ok(byName["existing.md"].bytes > 0 && byName["existing.md"].mtime);
+});
+
+// --- aggregateNativeMemory: cross-project rollup ---
+import { aggregateNativeMemory } from "../dist/src/utils/maintenance.js";
+test("aggregateNativeMemory: per-project health, missing memory → available:false", () => {
+  const nd = fs.mkdtempSync(path.join(os.tmpdir(), "ownm5-"));
+  fs.writeFileSync(path.join(nd, "MEMORY.md"), "# Index\n- [A](existing.md) — x\n");
+  fs.writeFileSync(path.join(nd, "existing.md"), "content\n");
+  fs.writeFileSync(path.join(nd, "orphan.md"), "not indexed\n");
+  // p1 resolves to a real native dir; p2 has none (resolver → null); p3 throws (swallowed).
+  const resolve = (root) => {
+    if (root === "/p1") return nd;
+    if (root === "/p3") throw new Error("boom");
+    return null;
+  };
+  const rows = aggregateNativeMemory(
+    [{ root: "/p1", name: "p1" }, { root: "/p2", name: "p2" }, { root: "/p3", name: "p3" }],
+    resolve
+  );
+  assert.equal(rows.length, 3);
+  const p1 = rows.find((r) => r.name === "p1");
+  assert.equal(p1.available, true);
+  assert.equal(p1.health.topicFiles, 2);
+  assert.equal(p1.health.orphanCount, 1);
+  const p2 = rows.find((r) => r.name === "p2");
+  assert.equal(p2.available, false);
+  assert.equal(p2.health, null);
+  const p3 = rows.find((r) => r.name === "p3");
+  assert.equal(p3.available, false); // resolver threw → treated as unavailable, no crash
 });
 
 // --- MCP server dispatch ---

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { recall } from "../utils/recall.js";
+import { recall, resolveId } from "../utils/recall.js";
 import { buildResumeDigest, nativeMemoryDir } from "../hooks/shared.js";
 import { nativeMemoryHealth } from "../utils/maintenance.js";
 
@@ -23,14 +23,14 @@ export const MCP_TOOLS = [
   {
     name: "openwolf_recall",
     description:
-      "Keyword-search this project's OpenWolf knowledge (STATUS.md, cerebrum.md, memory.md, buglog.json) AND Claude's native Auto Memory. Returns a ranked file:line index you can then open.",
+      "Keyword-search this project's OpenWolf knowledge (STATUS.md, cerebrum.md, memory.md, buglog.json) AND Claude's native Auto Memory. Returns a ranked list; each hit has a stable citation id like [c-3f9a]. Pass that id back (as `id`) to expand it to its full entry — cheap index first, full text on demand.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Search terms" },
+        query: { type: "string", description: "Search terms (omit when resolving an `id`)" },
         limit: { type: "number", description: "Max results (default 12)" },
+        id: { type: "string", description: "A citation id from a previous result — returns that entry's full block" },
       },
-      required: ["query"],
     },
   },
   {
@@ -57,12 +57,18 @@ function rpcError(id: JsonRpc["id"], code: number, message: string) {
 function callTool(name: string, args: Record<string, unknown>, projectDir: string): string {
   const wolfDir = path.join(projectDir, ".wolf");
   if (name === "openwolf_recall") {
+    // Targeted second layer: expand a citation id to its full entry.
+    const wantId = String(args.id ?? "").trim();
+    if (wantId) {
+      const entry = resolveId(wolfDir, wantId);
+      return entry ? `[${entry.id}] ${entry.file}:${entry.line}\n${entry.text}` : `No entry with id "${wantId}".`;
+    }
     const q = String(args.query ?? "").trim();
-    if (!q) return "Provide a `query`.";
+    if (!q) return "Provide a `query` (or an `id` to expand).";
     const hits = recall(wolfDir, q, { limit: Math.max(1, Number(args.limit) || 12) });
     if (hits.length === 0) return `No matches for "${q}".`;
-    const body = hits.map((h) => `[${h.score}] ${h.file}:${h.line}\n    ${h.text.slice(0, 160)}`).join("\n");
-    return `${hits.length} match(es) for "${q}":\n${body}`;
+    const body = hits.map((h) => `[${h.id}] (${h.score}) ${h.file}:${h.line}\n    ${h.text.slice(0, 160)}`).join("\n");
+    return `${hits.length} match(es) for "${q}" — pass an id back to expand it:\n${body}`;
   }
   if (name === "openwolf_resume") {
     return buildResumeDigest(wolfDir, 6000) ?? "No resume context available for this project.";

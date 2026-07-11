@@ -5,8 +5,8 @@
 <h1 align="center">OpenWolf Enhanced</h1>
 
 <p align="center">
-  <strong>A second brain for Claude Code — now with bounded storage and self-maintenance.</strong><br />
-  Project intelligence, token tracking, and invisible enforcement through 6 hook scripts. Zero workflow changes.
+  <strong>A second brain for Claude Code — bounded, self-maintaining, and now reachable from Claude Desktop.</strong><br />
+  Project intelligence, token tracking, and invisible enforcement through 7 hook scripts — plus a read-only MCP server that carries your knowledge into Claude Desktop and any MCP client. Zero workflow changes.
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 
 Claude Code is powerful but it works blind. It doesn't know what a file contains until it opens it. It can't tell a 50-token config from a 2,000-token module. It reads the same file multiple times in one session without noticing. It has no index of your project, no memory of your corrections, and no awareness of what it already tried.
 
-OpenWolf gives Claude a second brain: a file index so it knows what files contain before reading them, a learning memory that accumulates your preferences and past mistakes, and a token ledger that tracks everything. All through 6 invisible hook scripts that fire on every Claude action.
+OpenWolf gives Claude a second brain: a file index so it knows what files contain before reading them, a learning memory that accumulates your preferences and past mistakes, and a token ledger that tracks everything. All through 7 invisible hook scripts that fire on every Claude action.
 
 ## What's Enhanced
 
@@ -41,10 +41,11 @@ Everything upstream does, plus — grouped by what it gives you:
 
 | Area | Enhancement |
 |------|-------------|
-| 🩺 **Self-maintenance** | `openwolf doctor` reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), flags cross-project registry issues, and suggests `.wolfignore` entries for noisy dirs. `--dry-run` previews. |
+| 🩺 **Self-maintenance** | `openwolf doctor` reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), flags cross-project registry issues, suggests `.wolfignore` entries for noisy dirs, and hints at near-duplicate cerebrum entries to merge. `--dry-run` previews. |
 | 📦 **Bounded, tunable storage** | Ledger, bug log, cron queues and waste flags are all capped — no runaway multi-MB files. Every limit lives in `openwolf.retention` and survives updates (config is deep-merged, not overwritten). |
 | 🧭 **Smart session resume** | On session start a compact, token-bounded digest is injected — STATUS + Do-Not-Repeat inline, recent activity as a one-line headline, the rest as an *"Available on demand"* index — so the model continues without re-reading. |
-| 🔎 **Searchable memory** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog **and Claude's native Auto Memory**, returning a compact `file:line` index. A query interface with no database. |
+| 📓 **Passive activity capture** *(opt-in)* | File edits are always journaled; enable `openwolf.capture` and a `PostToolUse:Bash` hook also appends notable commands (commits, installs, tests, builds, deploys) **and failures** to a size-capped `.wolf/activity.log` that feeds the next session's resume digest. Secrets are redacted; trivial read-only commands are dropped. Off by default. |
+| 🔎 **Searchable memory + citations** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog **and Claude's native Auto Memory**, **BM25-ranked** (rare terms weighted, length-normalized), returning a compact index where each hit has a stable citation id like `[c-3f9a]`. Expand one with `recall --id <id>` (or all inline with `--full`) — progressive disclosure, no database. Cite ids in notes to re-open them later. |
 | 🧠 **Native-memory interop** | Reads Claude Code's own Auto Memory (read-only): `doctor` flags its blind spots (files the `MEMORY.md` index never loads, the 200-line cutoff, dead links), a dashboard panel browses it, and an **MCP server** (`openwolf mcp`) exposes recall/resume to **Claude Desktop** and other MCP clients — so OpenWolf works beyond Claude Code. |
 | 🔒 **Privacy** | `<private>…</private>` content in any `.wolf` file is kept out of the injected context and out of search. |
 | 🗒 **Structured summaries** | Each session gets a `Did / Learned / Next / Files` scaffold, keeping memory consistent and greppable. |
@@ -118,7 +119,7 @@ Two things to know before you re-run `pnpm build` on a copy you have already ins
 | `memory.md` | Chronological action log with token estimates |
 | `buglog.json` | Bug fix memory, searchable, prevents re-discovery |
 | `token-ledger.json` | Lifetime token tracking and session history |
-| `hooks/` | 6 Claude Code lifecycle hooks (pure Node.js) |
+| `hooks/` | 7 Claude Code lifecycle hooks (pure Node.js) |
 | `config.json` | Configuration with sensible defaults (incl. `retention`) |
 | `identity.md` | Agent persona for this project |
 | `OPENWOLF.md` | Instructions Claude follows every session |
@@ -192,7 +193,8 @@ dist/
 openwolf init                 Initialize .wolf/ and register hooks
 openwolf status               Show health, stats, .wolf/ footprint, size warnings
 openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dry-run]
-openwolf recall <query>       Keyword-search .wolf + Claude's native memory [--limit N] [--json]
+openwolf recall <query>       Keyword-search .wolf + native memory; ids per hit [--limit N] [--full] [--json]
+openwolf recall --id <id>     Expand a citation id to its full entry (second disclosure layer)
 openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
 openwolf mcp                  Run an MCP server (recall/resume/memory-health) [--project DIR]
 openwolf scan                 Refresh the project structure map [--check]
@@ -218,7 +220,16 @@ Auto-detects your dev server, captures viewport-height JPEG sections of every ro
 ## Use in Claude Desktop (MCP)
 
 OpenWolf's search and resume tools also run as an **MCP server**, so they work in the Claude Desktop
-app — and any MCP client — not just Claude Code. Add it to your `claude_desktop_config.json`:
+app — and any MCP client — not just Claude Code.
+
+**One-click install (Desktop Extension).** Download `openwolf.mcpb` from the
+[latest release](https://github.com/bassprofressor-lab/openwolf-enhanced/releases/latest) and open it —
+Claude Desktop installs the bundle and prompts you to pick your project directory. No Node install, no
+config editing; the bundle is self-contained (~8 KB). To build it yourself: `pnpm build && pnpm build:mcpb`
+→ `dist-mcpb/openwolf.mcpb`.
+
+**Manual (any MCP client).** Or, if you already have the `openwolf` CLI installed, register it by hand in
+`claude_desktop_config.json`:
 
 ```json
 {
@@ -231,7 +242,7 @@ app — and any MCP client — not just Claude Code. Add it to your `claude_desk
 }
 ```
 
-It exposes three **read-only** tools: `openwolf_recall` (keyword-search this project's knowledge **and**
+Either way it exposes three **read-only** tools: `openwolf_recall` (keyword-search this project's knowledge **and**
 Claude's native Auto Memory), `openwolf_resume` (the resume digest), and `openwolf_memory_health`.
 The hook-based auto-injection/auto-capture only applies inside Claude Code; here the tools are called
 explicitly. OpenWolf never writes to Claude's native memory — it reads and surfaces it.

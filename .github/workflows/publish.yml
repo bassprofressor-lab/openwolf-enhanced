@@ -47,7 +47,10 @@ jobs:
       # prepublishOnly runs scripts/prepublish-guard.mjs; provenance is automatic under OIDC.
       - run: npm publish
 
-      # Publish a GitHub Release for this tag, notes taken from the CHANGELOG section.
+      # Build the Claude Desktop Extension bundle (needs the fresh dist/ from `pnpm build` above).
+      - run: pnpm build:mcpb
+
+      # Publish a GitHub Release for this tag, notes from the CHANGELOG section, with the .mcpb attached.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,4 +64,4 @@ jobs:
             grab { print }
           ' CHANGELOG.md > notes.md
           [ -s notes.md ] || printf 'Release %s\n' "$TAG" > notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          gh release create "$TAG" dist-mcpb/openwolf.mcpb --title "$TAG" --notes-file notes.md --verify-tag

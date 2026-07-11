@@ -15,6 +15,7 @@ import {
   dirSize,
   suggestIgnores,
   nativeMemoryHealth,
+  findDuplicateEntries,
   type CompactResult,
 } from "../utils/maintenance.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
@@ -94,6 +95,19 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
         console.log(`  · ${h.staleCount} topic files untouched in 90+ days`);
     }
   } catch { /* native memory unreadable — skip */ }
+
+  // --- Near-duplicate cerebrum entries (read-only consolidation hint) ---
+  try {
+    const dupes = findDuplicateEntries(wolfDir);
+    if (dupes.length) {
+      console.log(`\nPossible duplicate entries in cerebrum.md (${dupes.length} — review & merge, not auto-fixed):`);
+      for (const d of dupes.slice(0, 5)) {
+        console.log(`  ${Math.round(d.similarity * 100)}%  lines ${d.aLine} ↔ ${d.bLine}`);
+        console.log(`       ${d.aPreview}…`);
+        console.log(`       ${d.bPreview}…`);
+      }
+    }
+  } catch { /* recall/blocks unavailable — skip */ }
 
   // --- .wolfignore suggestions: noisy project dirs the scanner reads but needn't ---
   try {

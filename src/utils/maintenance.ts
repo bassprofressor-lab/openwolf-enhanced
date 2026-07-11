@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJSON, writeJSON, readText, writeText } from "./fs-safe.js";
+import { nativeMemoryDir } from "../hooks/shared.js";
+import { blocksFor } from "./recall.js";
 
 // ---------------------------------------------------------------------------
 // Retention / size limits. Defaults here are the source of truth; a project's
@@ -57,9 +59,9 @@ export function makeIgnoreMatcher(patterns: string[]): (relPath: string) => bool
           "^" +
             pat
               .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replace(/\*\*/g, " ")
+              .replace(/\*\*/g, "\u0000")
               .replace(/\*/g, "[^/]*")
-              .replace(/ /g, ".*") +
+              .replace(/\u0000/g, ".*") +
             "$"
         );
         if (re.test(norm) || re.test(base)) return true;
@@ -281,6 +283,33 @@ export function nativeMemoryHealth(dir: string, opts: { staleDays?: number } = {
     staleCount: stale,
     footprintBytes: footprint,
   };
+}
+
+export interface NativeMemoryProjectSummary {
+  name: string;
+  root: string;
+  available: boolean;             // native Auto Memory dir exists for this project
+  health: NativeMemoryHealth | null;
+}
+
+// Cross-project rollup of native Auto Memory health — one row per registered project. A project
+// with no native memory (or a vanished .wolf/) comes back available:false / health:null rather
+// than throwing, so one bad project never sinks the whole view. `resolveDir` is injectable for
+// tests; by default it maps a project root to ~/.claude/projects/<slug>/memory.
+export function aggregateNativeMemory(
+  projects: Array<{ root: string; name: string }>,
+  resolveDir: (root: string) => string | null = nativeMemoryDir
+): NativeMemoryProjectSummary[] {
+  return projects.map((p) => {
+    let dir: string | null = null;
+    try { dir = resolveDir(p.root); } catch { dir = null; }
+    if (!dir) return { name: p.name, root: p.root, available: false, health: null };
+    try {
+      return { name: p.name, root: p.root, available: true, health: nativeMemoryHealth(dir) };
+    } catch {
+      return { name: p.name, root: p.root, available: false, health: null };
+    }
+  });
 }
 
 export interface NativeMemoryFile {
@@ -651,4 +680,75 @@ export function rotateDaemonLog(wolfDir: string, maxBytes: number): CompactResul
   }
   const after = fileSize(p);
   return { changed: true, before, after, detail: `daemon.log: rotated ${humanBytes(before)} → ${humanBytes(after)}` };
+}
+
+// ---------------------------------------------------------------------------
+// Near-duplicate detection — a read-only consolidation *hint*. cerebrum.md
+// accretes learnings over many sessions and has no automatic consolidation
+// (unlike the memory log), so two entries can drift into saying the same
+// thing. This flags likely pairs for a human to merge; it never edits.
+// ---------------------------------------------------------------------------
+
+export interface DuplicatePair {
+  file: string;
+  aLine: number;
+  bLine: number;
+  similarity: number; // 0..1 Jaccard over content-word sets
+  aPreview: string;
+  bPreview: string;
+}
+
+// Content words for similarity: lowercase alphanumerics (incl. German umlauts) of length ≥ 4,
+// which drops most stopwords/articles ("the", "und", "der") without a stopword list.
+function contentWords(text: string): Set<string> {
+  const set = new Set<string>();
+  for (const w of text.toLowerCase().match(/[a-z0-9äöüß]{4,}/gi) ?? []) set.add(w.toLowerCase());
+  return set;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+// Flag likely near-duplicate entries within each source (default: cerebrum.md). Compares logical
+// blocks pairwise by Jaccard over content words; only blocks with enough content words are
+// considered (short bullets/headings are skipped to avoid noise). O(blocks²) per file — fine for
+// the few-hundred-entry knowledge files. Never writes.
+export function findDuplicateEntries(
+  wolfDir: string,
+  opts: { sources?: string[]; threshold?: number; minWords?: number; limit?: number } = {}
+): DuplicatePair[] {
+  const sources = opts.sources ?? ["cerebrum.md"];
+  const threshold = opts.threshold ?? 0.5;
+  const minWords = opts.minWords ?? 6;
+  const limit = opts.limit ?? 8;
+
+  const pairs: DuplicatePair[] = [];
+  for (const src of sources) {
+    let content: string;
+    try { content = fs.readFileSync(path.join(wolfDir, src), "utf-8"); } catch { continue; }
+    const entries = blocksFor(src, content)
+      .map((b) => ({ line: b.start, text: b.text, words: contentWords(b.text) }))
+      .filter((e) => e.words.size >= minWords);
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        const sim = jaccard(entries[i].words, entries[j].words);
+        if (sim >= threshold) {
+          pairs.push({
+            file: src,
+            aLine: entries[i].line,
+            bLine: entries[j].line,
+            similarity: Math.round(sim * 100) / 100,
+            aPreview: entries[i].text.replace(/\s+/g, " ").slice(0, 80),
+            bPreview: entries[j].text.replace(/\s+/g, " ").slice(0, 80),
+          });
+        }
+      }
+    }
+  }
+  pairs.sort((a, b) => b.similarity - a.similarity);
+  return pairs.slice(0, limit);
 }

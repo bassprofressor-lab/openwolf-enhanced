@@ -186,11 +186,13 @@ export function createProgram(): Command {
 
   // --- Recall command ---
   program
-    .command("recall <query...>")
-    .description("Keyword-search the .wolf knowledge files (STATUS, cerebrum, memory, buglog)")
+    .command("recall [query...]")
+    .description("Keyword-search the .wolf knowledge files (STATUS, cerebrum, memory, buglog) + native memory")
     .option("--limit <n>", "Max results", "12")
+    .option("--full", "Expand each hit to its full logical block (second disclosure layer)")
+    .option("--id <id>", "Resolve a citation id to its full entry (no query needed)")
     .option("--json", "Output JSON")
-    .action(async (query: string[], opts: { limit?: string; json?: boolean }) => {
+    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string }) => {
       const { recallCommand } = await import("./recall-cmd.js");
       recallCommand(query, opts);
     });

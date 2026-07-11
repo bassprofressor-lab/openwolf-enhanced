@@ -12,7 +12,7 @@ import { startFileWatcher } from "./file-watcher.js";
 import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
-import { aggregateProjects, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
+import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -184,6 +184,11 @@ app.get("/api/native-memory", (_req, res) => {
   } catch {
     res.json({ available: false });
   }
+});
+
+// Cross-project native-memory health rollup — one row per registered project.
+app.get("/api/native-memory/aggregate", (_req, res) => {
+  res.json({ projects: aggregateNativeMemory(getRegisteredProjects(true)) });
 });
 
 // Read one native-memory topic file. Name must be a plain .md basename that actually exists in

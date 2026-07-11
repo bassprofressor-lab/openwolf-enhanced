@@ -110,6 +110,17 @@ const HOOK_SETTINGS = {
           },
         ],
       },
+      {
+        matcher: "Bash",
+        hooks: [
+          {
+            type: "command",
+            _managedBy: "openwolf",
+            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-bash.js"',
+            timeout: 5,
+          },
+        ],
+      },
     ],
     Stop: [
       {

@@ -105,6 +105,13 @@ OpenWolf's value comes from learning across sessions. You MUST update `.wolf/cer
 - Prefer anatomy.md descriptions over full file reads when possible.
 - Prefer targeted Grep over full file reads when searching for specific code.
 - If appending to a file, do not read the entire file first.
+- To pull past knowledge, prefer `openwolf recall <query>` over reading whole `.wolf` files. It returns
+  a compact ranked index where **each hit has a stable citation id** like `[c-3f9a2b]`. Read only what
+  you need; expand one entry with `openwolf recall --id <id>` (or every hit inline with `--full`) instead
+  of opening the file. This is progressive disclosure — cheap index first, full text on demand.
+- **Cite ids when you reference a past decision, fact, or bug** — write `see [c-3f9a2b]` in memory.md /
+  cerebrum.md / a reply, so it can be re-opened later with `openwolf recall --id c-3f9a2b`. Ids are
+  content-addressed (stable across reordering; they change only when that entry's own text changes).
 
 ## Design QC
 

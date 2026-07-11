@@ -6,6 +6,64 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.14.0] — 2026-07-11
+
+Sharper, citable, self-filling memory — and OpenWolf reaches Claude Desktop. `recall` gains stable
+citation ids and BM25 ranking with a two-layer expand; a one-click `.mcpb` bundle installs the MCP
+server in Claude Desktop; the dashboard rolls up native-memory health across projects; `doctor` flags
+duplicate cerebrum entries; and an opt-in `PostToolUse:Bash` hook captures notable commands and failures
+into the resume digest. All within the zero-infra, git-native model — no database, no background worker.
+
+### Added
+- **Opt-in passive Bash activity capture.** File edits were already journaled; a new `PostToolUse:Bash`
+  hook (`post-bash.js`) now fills the gap — it appends notable commands (commits, package installs,
+  test/build/deploy runs) **and any failed command** to an append-only, size-capped `.wolf/activity.log`,
+  which the session-start resume digest surfaces as "Recent commands" so the next session sees what ran
+  and what broke. Off unless you set `openwolf.capture.enabled`; secrets are redacted before write,
+  trivial read-only commands (`ls`/`cat`/`grep`/`git status`…) are dropped, the log is capped in the
+  write path, and it's excluded from backups. Redaction/filter/cap are pure, unit-tested helpers.
+- **`recall` is now BM25-ranked.** Ranking upgraded from raw occurrence counts to Okapi BM25 — rare query
+  terms are weighted higher (IDF) and long entries no longer dominate by sheer length. Matching stays
+  substring-based, so `recall port` still finds `ports`; only the ordering got smarter. Zero infra (one
+  extra in-memory pass over the same files, no index, no DB).
+- **`openwolf doctor` hints at near-duplicate cerebrum entries.** cerebrum.md accretes learnings across
+  sessions with no automatic consolidation, so two entries can drift into saying the same thing. Doctor now
+  lists likely duplicate pairs (Jaccard over content words, above a threshold) for you to merge — read-only,
+  it never edits. Reuses `recall`'s block splitter, so an "entry" is the same logical unit a citation points at.
+- **Citations + two-layer `recall`.** Every `openwolf recall` hit now carries a stable, content-addressed
+  citation id (e.g. `c-3f9a2b` — one-letter store prefix + hash of the entry's normalized text). It's the
+  handle for progressive disclosure: `recall <query>` stays a compact index; `recall <query> --full`
+  expands every hit to its full logical block; `recall --id <id>` re-opens a single entry (no query
+  needed). Write `see [c-3f9a2b]` in a note to cite a fact and jump back to it later. Ids survive
+  reordering and unrelated edits; they change only when that entry's own text changes. The `openwolf mcp`
+  tool `openwolf_recall` surfaces ids and accepts an `id` arg too, so Claude Desktop gets citations as
+  well. OPENWOLF.md now instructs citing ids and preferring `recall` over whole-file reads.
+- **Cross-project Native Memory view.** The dashboard's Native Memory panel gains a
+  **This project / All projects** toggle. "All projects" is a health rollup across every registered
+  OpenWolf project — topic-file count, indexed vs. orphaned, MEMORY.md length with a 200-line-cutoff
+  badge, dead links, and footprint — so you can spot at a glance which projects have unindexed memory
+  that never loads at session start. "Open" switches the daemon to a project to browse its files.
+  Backed by a read-only `/api/native-memory/aggregate` endpoint and a testable `aggregateNativeMemory()`
+  helper (a project with no native memory or a vanished `.wolf/` degrades to `available:false`, never
+  throws).
+- **`openwolf.mcpb` — a one-click Claude Desktop Extension.** `pnpm build:mcpb` bundles the dependency-free
+  `openwolf mcp` server (esbuild, ~8 KB, no `node_modules`) plus an MCPB `manifest.json` into a single
+  `dist-mcpb/openwolf.mcpb`. Users download it from the release and open it — Claude Desktop installs the
+  bundle and prompts for the project directory, no CLI install or `claude_desktop_config.json` editing.
+  The manifest's tool list is derived from the server's `MCP_TOOLS` so it can't drift.
+
+### Fixed
+- **`.wolfignore` matcher source is grep-able again.** `makeIgnoreMatcher` used a literal NUL byte as its
+  glob→regex sentinel (in `hooks/shared.ts` and its `utils/maintenance.ts` twin), which made both files
+  register as *binary* to `grep`/`ripgrep` and silently hid every text match. Replaced with the `\u0000`
+  escape — byte-identical at runtime, pure-ASCII on disk. No behavior change (matcher unit test still green).
+
+### Documentation
+- **Hero tagline widened** — OpenWolf's recall/resume now reach beyond Claude Code into Claude Desktop
+  (and any MCP client), reflected in both the English and German README taglines.
+- **README (en + de): one-click `.mcpb` install** documented alongside the manual `claude_desktop_config.json`
+  registration.
+
 ## [1.13.0] — 2026-07-10
 
 Interop with Claude Code's native Auto Memory (`~/.claude/projects/<slug>/memory/`) — OpenWolf reads
