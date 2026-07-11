@@ -18,8 +18,10 @@ export function nativeMemoryDir(projectRoot?: string): string | null {
 }
 
 export function getWolfDir(): string {
-  // Prefer CLAUDE_PROJECT_DIR so hooks work even if CWD changes during a session
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // Prefer an explicit project dir so hooks work even if CWD changes during a session.
+  // CLAUDE_PROJECT_DIR is set by Claude Code; OPENWOLF_PROJECT_DIR is what our own hook
+  // commands set for other agents (Codex/Gemini/OpenCode) that don't export that variable.
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.env.OPENWOLF_PROJECT_DIR || process.cwd();
   return path.join(projectDir, ".wolf");
 }
 
@@ -1012,7 +1014,48 @@ export function activityTail(wolfDir: string, maxLines = 8): string {
   return lines.slice(-maxLines).join("\n");
 }
 
+// --- Localization for the injected resume digest (en default, de) ---------------------------
+// The digest is the one substantial block OpenWolf writes into the model's context, so it's worth
+// localizing. Language = OPENWOLF_LANG env (de*/en*) → config openwolf.lang → "en".
+export type DigestLang = "en" | "de";
+
+export function resumeLang(wolfDir: string): DigestLang {
+  const env = (process.env.OPENWOLF_LANG || "").toLowerCase();
+  if (env.startsWith("de")) return "de";
+  if (env.startsWith("en")) return "en";
+  const cfg = readJSON<{ openwolf?: { lang?: string } }>(path.join(wolfDir, "config.json"), {});
+  return (cfg.openwolf?.lang || "").toLowerCase().startsWith("de") ? "de" : "en";
+}
+
+const DIGEST_I18N: Record<DigestLang, {
+  statusPoint: string; doNotRepeat: string; recentActivity: string; recentCommands: string; availableOnDemand: string; preamble: string;
+}> = {
+  en: {
+    statusPoint: "STATUS.md — resume point",
+    doNotRepeat: "Do-Not-Repeat (cerebrum.md",
+    recentActivity: "Recent activity (memory.md)",
+    recentCommands: "Recent commands (activity.log)",
+    availableOnDemand: "📇 Available on demand",
+    preamble:
+      "🐺 OpenWolf resume context — the project's own handoff notes, injected so you can continue " +
+      "without re-reading these files. Curated context is inline; pull anything under “Available on " +
+      "demand” with Read or `openwolf recall <query>`.",
+  },
+  de: {
+    statusPoint: "STATUS.md — Wiedereinstiegspunkt",
+    doNotRepeat: "Do-Not-Repeat (cerebrum.md",
+    recentActivity: "Jüngste Aktivität (memory.md)",
+    recentCommands: "Jüngste Kommandos (activity.log)",
+    availableOnDemand: "📇 Auf Abruf verfügbar",
+    preamble:
+      "🐺 OpenWolf-Wiedereinstiegs-Kontext — die Handoff-Notizen des Projekts, injiziert, damit du " +
+      "weiterarbeiten kannst, ohne diese Dateien neu zu lesen. Kuratierter Kontext ist inline; alles unter " +
+      "„Auf Abruf verfügbar“ per Read oder `openwolf recall <query>` nachladen.",
+  },
+};
+
 export function buildResumeDigest(wolfDir: string, maxChars = 6000): string | null {
+  const L = DIGEST_I18N[resumeLang(wolfDir)];
   const read = (f: string): string => {
     try { return stripPrivate(fs.readFileSync(path.join(wolfDir, f), "utf-8")); } catch { return ""; }
   };
@@ -1023,31 +1066,27 @@ export function buildResumeDigest(wolfDir: string, maxChars = 6000): string | nu
   const status = read("STATUS.md").trim();
   if (status && !isStatusStub(status)) {
     const clipped = clipText(status, Math.floor(maxChars * 0.5));
-    parts.push(`### STATUS.md — resume point (~${tok(clipped)} tok)\n${clipped}`);
+    parts.push(`### ${L.statusPoint} (~${tok(clipped)} tok)\n${clipped}`);
   }
   const cerebrum = read("cerebrum.md");
   const dnr = extractMarkdownSection(cerebrum, /^#{2,3}\s*Do[-\s]?Not[-\s]?Repeat/i);
   if (dnr) {
     const clipped = clipText(dnr, Math.floor(maxChars * 0.28));
-    parts.push(`### Do-Not-Repeat (cerebrum.md, ~${tok(clipped)} tok)\n${clipped}`);
+    parts.push(`### ${L.doNotRepeat}, ~${tok(clipped)} tok)\n${clipped}`);
   }
 
   // Recent activity → compact headline, not every row.
   const head = memoryHeadline(read("memory.md"));
-  if (head) parts.push(`### Recent activity (memory.md)\n${head}`);
+  if (head) parts.push(`### ${L.recentActivity}\n${head}`);
 
   // Recent shell commands + failures, if capture is enabled (opt-in).
   const cmds = activityTail(wolfDir, 8);
-  if (cmds) parts.push(`### Recent commands (activity.log)\n${cmds}`);
+  if (cmds) parts.push(`### ${L.recentCommands}\n${cmds}`);
 
   // Everything else → an index to pull on demand (incl. Claude's native Auto Memory).
   const index = availabilityIndex(read, cerebrum, nativeMemoryDir(path.dirname(wolfDir)));
-  if (index) parts.push(`### 📇 Available on demand\n${index}`);
+  if (index) parts.push(`### ${L.availableOnDemand}\n${index}`);
 
   if (parts.length === 0) return null;
-  const preamble =
-    "🐺 OpenWolf resume context — the project's own handoff notes, injected so you can continue " +
-    "without re-reading these files. Curated context is inline; pull anything under “Available on " +
-    "demand” with Read or `openwolf recall <query>`.";
-  return clipText(preamble + "\n\n" + parts.join("\n\n"), maxChars);
+  return clipText(L.preamble + "\n\n" + parts.join("\n\n"), maxChars);
 }

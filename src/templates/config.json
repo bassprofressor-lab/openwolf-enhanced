@@ -2,6 +2,7 @@
   "version": 1,
   "openwolf": {
     "enabled": true,
+    "lang": "en",
     "anatomy": {
       "auto_scan_on_init": true,
       "rescan_interval_hours": 6,
@@ -42,7 +43,10 @@
       "dead_letter_enabled": true,
       "heartbeat_interval_minutes": 30,
       "use_claude_p": true,
-      "api_key_env": null
+      "api_key_env": null,
+      "llm_provider": "anthropic",
+      "llm_base_url": null,
+      "llm_model": null
     },
     "memory": {
       "consolidation_after_days": 7,

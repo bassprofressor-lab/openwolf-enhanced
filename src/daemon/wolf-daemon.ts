@@ -13,6 +13,7 @@ import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
 import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
+import { resolveLlmConfig } from "./llm-provider.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -163,7 +164,8 @@ let projectMeta = detectProjectMeta();
 
 // API routes
 app.get("/api/config", (_req, res) => {
-  res.json({ hasApiKey: !!process.env.ANTHROPIC_API_KEY });
+  const llm = resolveLlmConfig(path.join(projectRoot, ".wolf"));
+  res.json({ hasApiKey: !!process.env[llm.apiKeyEnv], llmProvider: llm.provider, llmModel: llm.model });
 });
 
 app.get("/api/projects", (_req, res) => {

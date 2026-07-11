@@ -15,6 +15,7 @@ import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils
 import { ensureDir } from "../utils/paths.js";
 import { getRetention, pruneBackups } from "../utils/maintenance.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
+import { deployAgentHooks } from "../utils/agent-hooks.js";
 import { seedMissingUserData } from "../utils/seed.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,21 +76,6 @@ const BACKUP_FILES = [
   ...USER_DATA_FILES,
 ].filter((f) => !BACKUP_EXCLUDE.has(f));
 
-const HOOK_SETTINGS = {
-  hooks: {
-    SessionStart: [{ matcher: "", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"', timeout: 5 }] }],
-    PreToolUse: [
-      { matcher: "Read", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-read.js"', timeout: 5 }] },
-      { matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-write.js"', timeout: 5 }] },
-    ],
-    PostToolUse: [
-      { matcher: "Read", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-read.js"', timeout: 5 }] },
-      { matcher: "Write|Edit|MultiEdit", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-write.js"', timeout: 10 }] },
-      { matcher: "Bash", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-bash.js"', timeout: 5 }] },
-    ],
-    Stop: [{ matcher: "", hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/stop.js"', timeout: 10 }] }],
-  },
-};
 
 interface UpdateResult {
   project: RegisteredProject;
@@ -238,18 +224,13 @@ async function updateProject(
     copyHookScripts(wolfDir);
     console.log(`    ✓ Hook scripts updated`);
 
-    // 4. Update .claude/settings.json hooks
+    // 4. Register hooks with Claude (always) + any detected agent (Codex/Gemini/OpenCode).
     const claudeDir = path.join(root, ".claude");
-    ensureDir(claudeDir);
-    const settingsPath = path.join(claudeDir, "settings.json");
-    if (fs.existsSync(settingsPath)) {
-      const existing = readJSON<Record<string, unknown>>(settingsPath, {});
-      const merged = replaceOpenWolfHooks(existing, HOOK_SETTINGS);
-      writeJSON(settingsPath, merged);
-    } else {
-      writeJSON(settingsPath, HOOK_SETTINGS);
+    for (const r of deployAgentHooks(root)) {
+      if (r.agent === "claude") console.log(`    ✓ Claude settings updated`);
+      else if (r.deployed) console.log(`    ✓ ${r.agent}: hooks registered (${r.detail})`);
+      else console.log(`    ⚠ ${r.agent}: ${r.detail}`);
     }
-    console.log(`    ✓ Claude settings updated`);
 
     // 5. Update .claude/rules/openwolf.md
     const rulesDir = path.join(claudeDir, "rules");
@@ -372,34 +353,6 @@ function readTemplateContent(filename: string, templatesDir: string): string {
     "claude-rules-openwolf.md": `---\ndescription: OpenWolf protocol enforcement — active on all files\nglobs: **/*\n---\n\n- Check .wolf/anatomy.md before reading any project file\n- Check .wolf/cerebrum.md Do-Not-Repeat list before generating code\n- After writing or editing files, update .wolf/anatomy.md and append to .wolf/memory.md\n- After receiving a user correction, update .wolf/cerebrum.md immediately (Preferences, Learnings, or Do-Not-Repeat)\n- LEARN from every interaction: if you discover a convention, user preference, or project pattern, add it to .wolf/cerebrum.md. Low threshold — when in doubt, log it.\n- BEFORE fixing any bug or error: read .wolf/buglog.json for known fixes\n- AFTER fixing any bug, error, failed test, failed build, or user-reported problem: ALWAYS log to .wolf/buglog.json with error_message, root_cause, fix, and tags\n- If you edit a file more than twice in a session, that likely indicates a bug — log it to .wolf/buglog.json\n- When the user asks to check/evaluate UI design: run \`openwolf designqc\` to capture screenshots, then read them from .wolf/designqc-captures/\n- When the user asks to change/pick/migrate UI framework: read .wolf/reframe-frameworks.md, ask decision questions, recommend a framework, then execute with the framework's prompt`,
   };
   return templates[filename] ?? "";
-}
-
-function replaceOpenWolfHooks(
-  existing: Record<string, unknown>,
-  hookSettings: typeof HOOK_SETTINGS
-): Record<string, unknown> {
-  const merged = { ...existing };
-  if (!merged.hooks) merged.hooks = {};
-  const hooks = merged.hooks as Record<string, Array<{ matcher: string; hooks: Array<{ command?: string; type: string }> }>>;
-
-  for (const [event, newMatchers] of Object.entries(hookSettings.hooks)) {
-    if (!hooks[event]) hooks[event] = [];
-
-    // Remove existing OpenWolf hook entries
-    hooks[event] = hooks[event].filter((entry) => {
-      const isOpenWolfHook = entry.hooks?.some(
-        (h) => (h.command && h.command.includes(".wolf/hooks/")) || (h as { _managedBy?: string })._managedBy === "openwolf"
-      );
-      return !isOpenWolfHook;
-    });
-
-    // Add new OpenWolf hooks
-    for (const matcher of newMatchers) {
-      hooks[event].push(matcher);
-    }
-  }
-
-  return merged;
 }
 
 /**

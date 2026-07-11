@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
+import { deployAgentHooks } from "../utils/agent-hooks.js";
 import { ensureDir } from "../utils/paths.js";
 import { isWindows } from "../utils/platform.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
@@ -48,95 +49,6 @@ const CREATE_IF_MISSING = [
 ];
 
 // Use $CLAUDE_PROJECT_DIR so hooks resolve correctly even if CWD changes during a session
-const HOOK_SETTINGS = {
-  hooks: {
-    SessionStart: [
-      {
-        matcher: "",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"',
-            timeout: 5,
-          },
-        ],
-      },
-    ],
-    PreToolUse: [
-      {
-        matcher: "Read",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-read.js"',
-            timeout: 5,
-          },
-        ],
-      },
-      {
-        matcher: "Write|Edit|MultiEdit",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/pre-write.js"',
-            timeout: 5,
-          },
-        ],
-      },
-    ],
-    PostToolUse: [
-      {
-        matcher: "Read",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-read.js"',
-            timeout: 5,
-          },
-        ],
-      },
-      {
-        matcher: "Write|Edit|MultiEdit",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-write.js"',
-            timeout: 10,
-          },
-        ],
-      },
-      {
-        matcher: "Bash",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/post-bash.js"',
-            timeout: 5,
-          },
-        ],
-      },
-    ],
-    Stop: [
-      {
-        matcher: "",
-        hooks: [
-          {
-            type: "command",
-            _managedBy: "openwolf",
-            command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/stop.js"',
-            timeout: 10,
-          },
-        ],
-      },
-    ],
-  },
-};
 
 export async function initCommand(): Promise<void> {
   // Check Node.js version
@@ -209,18 +121,9 @@ export async function initCommand(): Promise<void> {
   // --- Hook scripts: always update (bug fixes, new features) ---
   copyHookScripts(wolfDir);
 
-  // --- Claude settings: replace OpenWolf hooks (upgrade old paths) ---
+  // --- Register hooks with Claude (always) + any detected agent (Codex/Gemini/OpenCode) ---
+  deployAgentHooks(projectRoot);
   const claudeDir = path.join(projectRoot, ".claude");
-  ensureDir(claudeDir);
-
-  const settingsPath = path.join(claudeDir, "settings.json");
-  if (fs.existsSync(settingsPath)) {
-    const existing = readJSON<Record<string, unknown>>(settingsPath, {});
-    const merged = replaceOpenWolfHooks(existing, HOOK_SETTINGS);
-    writeJSON(settingsPath, merged);
-  } else {
-    writeJSON(settingsPath, HOOK_SETTINGS);
-  }
 
   // --- Claude rules: always update ---
   const rulesDir = path.join(claudeDir, "rules");
@@ -413,9 +316,10 @@ function generateTemplate(destPath: string, file: string): void {
       version: 1,
       openwolf: {
         enabled: true,
+        lang: "en",
         anatomy: { auto_scan_on_init: true, rescan_interval_hours: 6, max_description_length: 100, max_files: 500, exclude_patterns: ["node_modules", ".git", "dist", "build", ".wolf", ".next", ".nuxt", "coverage", "__pycache__", ".cache", "target", ".vscode", ".idea", ".turbo", ".vercel", ".netlify", ".output", "*.min.js", "*.min.css"] },
         token_audit: { enabled: true, report_frequency: "weekly", waste_threshold_percent: 15, chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
-        cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null },
+        cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null, llm_provider: "anthropic", llm_base_url: null, llm_model: null },
         memory: { consolidation_after_days: 7, max_entries_before_consolidation: 200 },
         retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288 },
         cerebrum: { max_tokens: 2000, reflection_frequency: "weekly" },
@@ -487,37 +391,6 @@ function seedIdentity(wolfDir: string, projectRoot: string): void {
  * Removes old-style relative-path hooks and inserts the new $CLAUDE_PROJECT_DIR hooks.
  * Preserves any non-OpenWolf hooks the user may have added.
  */
-function replaceOpenWolfHooks(
-  existing: Record<string, unknown>,
-  hookSettings: typeof HOOK_SETTINGS
-): Record<string, unknown> {
-  const merged = { ...existing };
-  if (!merged.hooks) {
-    merged.hooks = {};
-  }
-  const hooks = merged.hooks as Record<string, Array<{ matcher: string; hooks: Array<{ command?: string; type: string }> }>>;
-
-  for (const [event, newMatchers] of Object.entries(hookSettings.hooks)) {
-    if (!hooks[event]) {
-      hooks[event] = [];
-    }
-
-    // Remove any existing OpenWolf hook entries (match by .wolf/hooks/ in command)
-    hooks[event] = hooks[event].filter((entry) => {
-      const isOpenWolfHook = entry.hooks?.some(
-        (h) => (h.command && h.command.includes(".wolf/hooks/")) || (h as { _managedBy?: string })._managedBy === "openwolf"
-      );
-      return !isOpenWolfHook;
-    });
-
-    // Add the new OpenWolf hooks
-    for (const matcher of newMatchers) {
-      hooks[event].push(matcher);
-    }
-  }
-
-  return merged;
-}
 
 function detectProjectDescription(projectRoot: string): string {
   // Try package.json

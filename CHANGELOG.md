@@ -6,6 +6,41 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.15.0] — 2026-07-11
+
+OpenWolf reaches beyond Claude, in two directions. **Models:** the cron engine's AI tasks now speak any
+OpenAI-compatible endpoint (OpenAI, Groq, Cerebras, Mistral, Qwen, local) as well as Anthropic. **Agents:**
+`init`/`update` auto-detect and register OpenWolf's hooks with Codex CLI, Gemini CLI and OpenCode alongside
+Claude. Plus a German-localizable resume digest. Defaults are unchanged, so nothing shifts unless you opt in.
+
+### Added
+- **Beyond Claude Code: Codex CLI, Gemini CLI & OpenCode.** `openwolf init`/`update` now auto-detect which
+  agents a project uses (their config dir exists) and register OpenWolf's hooks with each, alongside Claude:
+  - **Codex CLI** (`.codex/hooks.json`) and **Gemini CLI** (`.gemini/settings.json`) share Claude's hook
+    convention — command hooks, JSON stdin, `hookSpecificOutput.additionalContext` — so the same Node hook
+    scripts run there unchanged; only event names (Gemini: `AfterTool`/`SessionEnd`) and tool matchers
+    (Codex `apply_patch`/`Bash`; Gemini `write_file|replace`/`run_shell_command`) are mapped. The
+    **session-start resume digest is injected** into both, and file/shell activity is captured.
+  - **OpenCode** (`.opencode/plugin/openwolf.js`) gets a generated JS plugin adapter. OpenCode has no
+    session-start injection hook, so the digest is injected at compaction and edits/shell are captured
+    after each tool run — a documented, narrower integration.
+  - Claude is always targeted and its config is byte-for-byte unchanged; the deploy merges into existing
+    settings, preserving your own hooks. Hooks resolve the project via `OPENWOLF_PROJECT_DIR`, set in the
+    generated commands, so they find the right `.wolf/` under any agent. New `src/utils/agent-hooks.ts`
+    with unit-tested per-agent config generation. (Codex re-prompts to trust changed hook commands.)
+- **Localized resume digest (`OPENWOLF_LANG`).** The session-start resume digest — the one substantial
+  block OpenWolf injects into the model's context — can now render in German. Language resolves from
+  `OPENWOLF_LANG` (`de*`/`en*`) → `openwolf.lang` in config → `en` default. Preamble and section headers
+  are translated; English stays the default so nothing changes unless you opt in.
+- **Model-agnostic cron AI tasks.** The background cron engine hard-coded the Anthropic Messages API; it
+  now resolves an LLM provider from `openwolf.cron` config (`llm_provider`, `llm_base_url`, `llm_model`,
+  `api_key_env`) and speaks either the **Anthropic** or an **OpenAI-compatible** API — so scheduled AI
+  tasks can run on OpenAI, Groq, Cerebras, Mistral, or a local server, not just Claude. Substring/format
+  handling and the 120s timeout are unchanged; defaults reproduce the previous Anthropic behaviour exactly,
+  so existing projects keep running on Claude with no config change. Request/response building and config
+  resolution are pure, unit-tested helpers (`src/daemon/llm-provider.ts`); verified end-to-end against a
+  live non-Claude model.
+
 ## [1.14.0] — 2026-07-11
 
 Sharper, citable, self-filling memory — and OpenWolf reaches Claude Desktop. `recall` gains stable

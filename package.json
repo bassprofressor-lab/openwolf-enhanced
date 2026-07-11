@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "Token-conscious AI brain for Claude Code projects — enhanced fork with bounded storage, self-maintenance (openwolf doctor), .wolfignore scoping, and tunable retention.",
   "type": "module",
   "bin": {

@@ -335,6 +335,111 @@ test("resolveId: recall hit id round-trips to its full block; unknown id → nul
   assert.equal(resolveId(w, "c-000000", { includeNative: false }), null);
 });
 
+// --- multi-agent hook deployment (Claude + Codex/Gemini/OpenCode) ---
+import { deployAgentHooks, detectAgents, _internal } from "../dist/src/utils/agent-hooks.js";
+test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-detect + deploy", () => {
+  const claude = _internal.claudeSettings();
+  assert.equal(claude.hooks.SessionStart.length, 1);
+  assert.equal(claude.hooks.PostToolUse.length, 3); // Read, Write|Edit, Bash
+  assert.ok(claude.hooks.SessionStart[0].hooks[0].command.includes("$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"));
+
+  const codex = _internal.codexSettings("/abs/proj");
+  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^apply_patch$"));
+  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^Bash$"));
+  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes('OPENWOLF_PROJECT_DIR="/abs/proj"'));
+  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("/abs/proj/.wolf/hooks/session-start.js"));
+
+  const gem = _internal.geminiSettings();
+  assert.ok(gem.hooks.AfterTool.some((e) => e.matcher === "run_shell_command"));
+  assert.ok(gem.hooks.SessionEnd, "Stop maps to SessionEnd");
+  assert.ok(gem.hooks.SessionStart[0].hooks[0].command.includes("$GEMINI_PROJECT_DIR"));
+
+  const plugin = _internal.opencodePlugin("/abs/proj");
+  assert.ok(plugin.includes("tool.execute.after") && plugin.includes("experimental.session.compacting"));
+  assert.ok(plugin.includes('"/abs/proj"'));
+
+  // merge: keep a user hook, replace the previous openwolf entry
+  const existing = { hooks: { SessionStart: [
+    { hooks: [{ type: "command", command: "echo user-hook" }] },
+    { hooks: [{ type: "command", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"' }] },
+  ] } };
+  const merged = _internal.mergeManagedHooks(existing, _internal.claudeSettings());
+  const ss = merged.hooks.SessionStart;
+  assert.ok(ss.some((e) => e.hooks[0].command === "echo user-hook"), "user hook preserved");
+  assert.equal(ss.filter((e) => e.hooks.some((h) => h.command.includes(".wolf/hooks/session-start.js"))).length, 1, "exactly one managed entry (no dup)");
+
+  // auto-detect + deploy into a temp project
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "owagent-"));
+  fs.mkdirSync(path.join(root, ".codex"));
+  fs.mkdirSync(path.join(root, ".gemini"));
+  fs.mkdirSync(path.join(root, ".opencode"));
+  assert.deepEqual(detectAgents(root).sort(), ["codex", "gemini", "opencode"]);
+  const results = deployAgentHooks(root);
+  assert.ok(results.find((r) => r.agent === "claude").deployed);
+  assert.ok(fs.existsSync(path.join(root, ".claude", "settings.json")));
+  assert.ok(fs.existsSync(path.join(root, ".codex", "hooks.json")));
+  assert.ok(fs.existsSync(path.join(root, ".gemini", "settings.json")));
+  assert.ok(fs.existsSync(path.join(root, ".opencode", "plugin", "openwolf.js")));
+});
+
+// --- resume digest i18n (en default, de) ---
+import { resumeLang } from "../dist/hooks/shared.js";
+test("resume digest i18n: config lang + OPENWOLF_LANG env; localizes headers/preamble", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "STATUS.md"), "# STATUS\nWe are mid-migration; next step is the auth cutover.\n");
+
+  // default → English
+  assert.equal(resumeLang(w), "en");
+  const en = buildResumeDigest(w);
+  assert.ok(en.includes("resume point") && en.includes("resume context"), "English labels");
+
+  // config lang: de → German
+  fs.writeFileSync(path.join(w, "config.json"), JSON.stringify({ openwolf: { lang: "de" } }));
+  assert.equal(resumeLang(w), "de");
+  const de = buildResumeDigest(w);
+  assert.ok(de.includes("Wiedereinstiegspunkt") && de.includes("Wiedereinstiegs-Kontext"), "German labels");
+  assert.ok(!de.includes("resume point"), "no English leakage");
+
+  // env overrides config
+  process.env.OPENWOLF_LANG = "en-US";
+  try { assert.equal(resumeLang(w), "en"); } finally { delete process.env.OPENWOLF_LANG; }
+});
+
+// --- LLM provider abstraction (cron AI tasks) ---
+import { llmConfigFrom, buildLlmRequest, parseLlmResponse } from "../dist/src/daemon/llm-provider.js";
+test("llm-provider: defaults to Anthropic; openai override; request/response shapes", () => {
+  // default (no cron config) → Anthropic, historical model + key env
+  const def = llmConfigFrom(undefined);
+  assert.equal(def.provider, "anthropic");
+  assert.equal(def.apiKeyEnv, "ANTHROPIC_API_KEY");
+  assert.match(def.baseUrl, /api\.anthropic\.com/);
+
+  // OpenAI-compatible provider (e.g. Groq) via config
+  const groq = llmConfigFrom({ llm_provider: "openai", llm_base_url: "https://api.groq.com/openai/v1/", llm_model: "llama-3.3-70b-versatile", api_key_env: "GROQ_API_KEY" });
+  assert.equal(groq.provider, "openai");
+  assert.equal(groq.baseUrl, "https://api.groq.com/openai/v1"); // trailing slash trimmed
+  assert.equal(groq.model, "llama-3.3-70b-versatile");
+  assert.equal(groq.apiKeyEnv, "GROQ_API_KEY");
+
+  // Anthropic request shape
+  const ar = buildLlmRequest(def, "sk-ant", "hello");
+  assert.ok(ar.url.endsWith("/messages"));
+  assert.equal(ar.headers["x-api-key"], "sk-ant");
+  assert.ok(ar.headers["anthropic-version"]);
+  assert.ok(!("authorization" in ar.headers));
+
+  // OpenAI request shape
+  const or = buildLlmRequest(groq, "gsk_x", "hello");
+  assert.ok(or.url.endsWith("/chat/completions"));
+  assert.equal(or.headers.authorization, "Bearer gsk_x");
+  assert.equal(JSON.parse(or.body).stream, false);
+
+  // Response parsing for both
+  assert.equal(parseLlmResponse("anthropic", { content: [{ type: "text", text: " hi " }] }), "hi");
+  assert.equal(parseLlmResponse("openai", { choices: [{ message: { content: " yo " } }] }), "yo");
+  assert.equal(parseLlmResponse("openai", {}), ""); // malformed → empty, no throw
+});
+
 // --- Bash activity capture (opt-in) helpers ---
 import {
   getCaptureConfig, redactSecrets, isNotableCommand, tailWithinBytes, activityTail,

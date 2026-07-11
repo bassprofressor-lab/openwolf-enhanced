@@ -4,6 +4,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
+import { resolveLlmConfig, buildLlmRequest, parseLlmResponse, type LlmConfig } from "./llm-provider.js";
 import type { Logger } from "../utils/logger.js";
 
 interface CronAction {
@@ -335,13 +336,16 @@ export class CronEngine {
     // A background daemon can't drive the interactive `claude` CLI (it delegates auth to the
     // desktop app and fails headless). Use a direct API key instead, with a clear error if it's
     // missing — the dashboard then shows a copy-able prompt to run inside a session (upstream #4, bug 2).
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // The provider/model/endpoint are config-driven (openwolf.cron.llm_*), defaulting to Anthropic.
+    const llm = resolveLlmConfig(this.wolfDir);
+    const apiKey = process.env[llm.apiKeyEnv];
+    if (!apiKey) {
       throw new Error(
-        "ANTHROPIC_API_KEY is not set. AI tasks require a direct API key when running as a background daemon. " +
-        "Set it in your shell profile: export ANTHROPIC_API_KEY=sk-ant-api03-…"
+        `${llm.apiKeyEnv} is not set. AI tasks require a direct API key when running as a background daemon. ` +
+        `Set it in your shell profile: export ${llm.apiKeyEnv}=…`
       );
     }
-    let result = await this.runViaApi(fullPrompt, process.env.ANTHROPIC_API_KEY);
+    let result = await this.runViaApi(fullPrompt, llm, apiKey);
 
     const fenceMatch = result.match(/```[\w]*\n([\s\S]*?)\n```/);
     if (fenceMatch) result = fenceMatch[1].trim();
@@ -357,38 +361,25 @@ export class CronEngine {
     }
   }
 
-  private async runViaApi(prompt: string, apiKey: string): Promise<string> {
+  private async runViaApi(prompt: string, cfg: LlmConfig, apiKey: string): Promise<string> {
     // Abort after 120s so a hung request can't leave the cron task stuck forever
     // (the previous spawnSync path had a 120s timeout; fetch has none by default).
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120_000);
+    const req = buildLlmRequest(cfg, apiKey, prompt);
     let response: Response;
     try {
-      response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 2048,
-          messages: [{ role: "user", content: prompt }],
-        }),
-        signal: controller.signal,
-      });
+      response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal });
     } catch (err) {
-      if ((err as Error).name === "AbortError") throw new Error("Anthropic API request timed out after 120s");
+      if ((err as Error).name === "AbortError") throw new Error(`${cfg.provider} API request timed out after 120s`);
       throw err;
     } finally {
       clearTimeout(timer);
     }
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Anthropic API error ${response.status}: ${body.slice(0, 200)}`);
+      throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
     }
-    const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
-    return data.content.find((b) => b.type === "text")?.text?.trim() ?? "";
+    return parseLlmResponse(cfg.provider, await response.json());
   }
 }
