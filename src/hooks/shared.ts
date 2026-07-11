@@ -981,13 +981,21 @@ export function redactSecrets(cmd: string): string {
   return cmd
     .replace(/\bgh[posru]_[A-Za-z0-9]{16,}\b/g, "***")
     .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "***")
-    .replace(/\b(?:sk|pk|rk)-[A-Za-z0-9]{16,}\b/g, "***")
+    .replace(/\b(?:sk|pk|rk)-[A-Za-z0-9-]{16,}/g, "***") // sk-ant-…, sk-proj-… (keys contain dashes)
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "***")
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "***")
     .replace(/\beyJ[A-Za-z0-9._-]{20,}\b/g, "***") // JWTs
-    .replace(/(--?(?:otp|token|password|passwd|pwd|secret|api[-_]?key|apikey|auth)[= ])\S+/gi, "$1***")
-    .replace(/\b([A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|KEY))=\S+/g, "$1=***")
-    .replace(/(Authorization:\s*Bearer\s+)\S+/gi, "$1***");
+    // password embedded in a URL: scheme://user:pass@host
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)[^\s@/]+@/gi, "$1***@")
+    // curl basic auth: -u user:pass  /  --user user:pass
+    .replace(/(-u\s+|--user[= ])[^\s:]+:\S+/g, "$1***")
+    // header/kv forms: x-api-key: …, api_key=…, authorization: bearer …
+    .replace(/((?:x-)?api[-_]?key\s*[:=]\s*)\S+/gi, "$1***")
+    .replace(/(authorization\s*:\s*(?:bearer\s+)?)\S+/gi, "$1***")
+    // flags: --token X, --password X, --secret X, --otp X …
+    .replace(/(--?(?:otp|token|password|passwd|pwd|pass|secret|api[-_]?key|apikey|auth|credential)s?[= ])\S+/gi, "$1***")
+    // env assignments: FOO_TOKEN=…, DB_PASS=…, X_PWD=…, *_PASSPHRASE=…
+    .replace(/\b([A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|APIKEY|API_KEY|CREDENTIAL|CRED|PWD|PASS|KEY))=\S+/gi, "$1=***");
 }
 
 // A command worth capturing on success: state-changing actions (commits, installs, builds, tests,

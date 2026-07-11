@@ -346,8 +346,14 @@ test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-det
   const codex = _internal.codexSettings("/abs/proj");
   assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^apply_patch$"));
   assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^Bash$"));
-  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes('OPENWOLF_PROJECT_DIR="/abs/proj"'));
-  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("/abs/proj/.wolf/hooks/session-start.js"));
+  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("OPENWOLF_PROJECT_DIR='/abs/proj'"), "codex path single-quoted");
+  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("'/abs/proj/.wolf/hooks/session-start.js'"));
+  // command injection: a malicious project path is fully single-quoted → inert to the shell
+  const evil = _internal.codexSettings(`/tmp/x";$(touch /tmp/pwned)`).hooks.SessionStart[0].hooks[0].command;
+  assert.ok(evil.startsWith(`OPENWOLF_PROJECT_DIR='/tmp/x";$(touch /tmp/pwned)'`), "payload wrapped in single quotes");
+  // an embedded single-quote is escaped with the POSIX '\'' idiom (no break-out)
+  const q = _internal.codexSettings(`/a'b`).hooks.SessionStart[0].hooks[0].command;
+  assert.ok(q.includes(`'/a'\\''b'`), "embedded single-quote escaped");
 
   const gem = _internal.geminiSettings();
   assert.ok(gem.hooks.AfterTool.some((e) => e.matcher === "run_shell_command"));
@@ -358,15 +364,18 @@ test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-det
   assert.ok(plugin.includes("tool.execute.after") && plugin.includes("experimental.session.compacting"));
   assert.ok(plugin.includes('"/abs/proj"'));
 
-  // merge: keep a user hook, replace the previous openwolf entry
+  // merge: replace the previous managed entry, preserve BOTH a normal user hook and a user hook that
+  // happens to invoke a .wolf/hooks/ script (L3 — only _managedBy entries are ours).
   const existing = { hooks: { SessionStart: [
     { hooks: [{ type: "command", command: "echo user-hook" }] },
-    { hooks: [{ type: "command", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"' }] },
+    { hooks: [{ type: "command", command: 'node "$X/.wolf/hooks/my-own.js"' }] }, // user's own — must survive
+    { hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"' }] },
   ] } };
   const merged = _internal.mergeManagedHooks(existing, _internal.claudeSettings());
   const ss = merged.hooks.SessionStart;
   assert.ok(ss.some((e) => e.hooks[0].command === "echo user-hook"), "user hook preserved");
-  assert.equal(ss.filter((e) => e.hooks.some((h) => h.command.includes(".wolf/hooks/session-start.js"))).length, 1, "exactly one managed entry (no dup)");
+  assert.ok(ss.some((e) => e.hooks[0].command.includes("my-own.js")), "user's own .wolf/hooks hook preserved (L3)");
+  assert.equal(ss.filter((e) => e.hooks.some((h) => h._managedBy === "openwolf")).length, 1, "exactly one managed entry (no dup)");
 
   // auto-detect + deploy into a temp project
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "owagent-"));
@@ -406,7 +415,18 @@ test("resume digest i18n: config lang + OPENWOLF_LANG env; localizes headers/pre
 });
 
 // --- LLM provider abstraction (cron AI tasks) ---
-import { llmConfigFrom, buildLlmRequest, parseLlmResponse } from "../dist/src/daemon/llm-provider.js";
+import { llmConfigFrom, buildLlmRequest, parseLlmResponse, assertSafeBaseUrl } from "../dist/src/daemon/llm-provider.js";
+test("llm-provider: assertSafeBaseUrl blocks SSRF / cleartext key exfil", () => {
+  assertSafeBaseUrl("https://api.groq.com/openai/v1"); // ok
+  assertSafeBaseUrl("http://localhost:11434/v1");       // ok: local model
+  assertSafeBaseUrl("http://127.0.0.1:1234/v1");        // ok: loopback
+  assert.throws(() => assertSafeBaseUrl("http://attacker.tld/collect"), /https/, "remote http rejected");
+  assert.throws(() => assertSafeBaseUrl("http://169.254.169.254/latest"), /https|private/, "cloud metadata rejected");
+  assert.throws(() => assertSafeBaseUrl("https://10.0.0.5/v1"), /private/, "private ip rejected");
+  assert.throws(() => assertSafeBaseUrl("ftp://x/y"), /http/, "non-http scheme rejected");
+  // buildLlmRequest enforces it
+  assert.throws(() => buildLlmRequest(llmConfigFrom({ llm_provider: "openai", llm_base_url: "http://evil.tld", api_key_env: "X" }), "k", "hi"));
+});
 test("llm-provider: defaults to Anthropic; openai override; request/response shapes", () => {
   // default (no cron config) → Anthropic, historical model + key env
   const def = llmConfigFrom(undefined);
@@ -451,10 +471,18 @@ test("capture: opt-in config, secret redaction, notable-command filter, tail cap
   fs.writeFileSync(path.join(w, "config.json"), JSON.stringify({ openwolf: { capture: { enabled: true, log_max_bytes: 4096 } } }));
   assert.deepEqual(getCaptureConfig(w), { enabled: true, logMaxBytes: 4096 });
 
-  // redaction
-  assert.ok(!redactSecrets("git push https://ghp_ABCDEFGHIJKLMNOP0123@x").includes("ghp_ABCDEFGHIJKLMNOP0123"));
-  assert.ok(redactSecrets("export API_KEY=supersecretvalue").endsWith("API_KEY=***"));
-  assert.equal(redactSecrets("npm run build"), "npm run build"); // untouched
+  // redaction — including the bypasses the security review flagged
+  const R = redactSecrets;
+  assert.ok(!R("git push https://ghp_ABCDEFGHIJKLMNOP0123@x").includes("ghp_ABCDEFGHIJKLMNOP0123"));
+  assert.ok(R("export API_KEY=supersecretvalue").endsWith("API_KEY=***"));
+  assert.ok(!R("anthropic --key sk-ant-api03-abcdefghijklmnop").includes("api03-abcdefghijklmnop"), "sk-ant (dashes)");
+  assert.ok(!R("export DB_PASS=hunter2hunter2").includes("hunter2"), "PASS suffix");
+  assert.ok(!R("psql postgres://admin:Sup3rSecret@db/prod").includes("Sup3rSecret"), "url creds");
+  assert.ok(!R('curl -H "x-api-key: sk-XYZ1234567890abcd"').includes("XYZ1234567890abcd"), "header form");
+  assert.ok(!R("curl -u alice:topsecretpw https://x").includes("topsecretpw"), "basic auth");
+  assert.equal(R("npm run build"), "npm run build"); // untouched
+  // no catastrophic backtracking on a long adversarial input
+  const t0 = Date.now(); R("A".repeat(100000) + "=x"); assert.ok(Date.now() - t0 < 500, "redaction stays linear");
 
   // notable filter
   assert.ok(isNotableCommand("git commit -m 'x'"));

@@ -369,7 +369,8 @@ export class CronEngine {
     const req = buildLlmRequest(cfg, apiKey, prompt);
     let response: Response;
     try {
-      response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal });
+      // redirect:"error" — never follow a 3xx to another host (the API key header would ride along).
+      response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal, redirect: "error" });
     } catch (err) {
       if ((err as Error).name === "AbortError") throw new Error(`${cfg.provider} API request timed out after 120s`);
       throw err;

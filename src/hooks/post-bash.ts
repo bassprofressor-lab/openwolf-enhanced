@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, getCaptureConfig, redactSecrets,
-  isNotableCommand, tailWithinBytes, timeShort, readStdin,
+  isNotableCommand, tailWithinBytes, timeShort, readStdin, withLock,
 } from "./shared.js";
 
 // PostToolUse:Bash — opt-in passive capture of notable shell activity into .wolf/activity.log.
@@ -50,12 +50,15 @@ async function main(): Promise<void> {
   const safe = redactSecrets(cmd.replace(/\s+/g, " ")).slice(0, 200);
   const line = `${timeShort()}  ${safe}${failed ? "  → error" : ""}`;
 
-  // Append + cap in the write path (a cap only enforced by `doctor` isn't a cap).
+  // Append + cap in the write path (a cap only enforced by `doctor` isn't a cap). Locked so
+  // concurrent Bash hooks don't clobber each other's read-modify-write.
   try {
     const logPath = path.join(wolfDir, "activity.log");
-    let existing = "";
-    try { existing = fs.readFileSync(logPath, "utf8"); } catch { /* first write */ }
-    fs.writeFileSync(logPath, tailWithinBytes(existing + line + "\n", cap.logMaxBytes), "utf8");
+    withLock(logPath, () => {
+      let existing = "";
+      try { existing = fs.readFileSync(logPath, "utf8"); } catch { /* first write */ }
+      fs.writeFileSync(logPath, tailWithinBytes(existing + line + "\n", cap.logMaxBytes), "utf8");
+    });
   } catch { /* best-effort; never block the tool */ }
 
   process.exit(0);

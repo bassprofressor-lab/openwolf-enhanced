@@ -36,11 +36,21 @@ const HOOKS: HookDef[] = [
   { script: "stop.js", claudeEvent: "Stop", matcher: "" },
 ];
 
-function cmd(projectDirExpr: string, script: string, exportProjectDir: boolean): string {
-  const node = `node "${projectDirExpr}/.wolf/hooks/${script}"`;
-  // Non-Claude agents don't export CLAUDE_PROJECT_DIR; set OPENWOLF_PROJECT_DIR so getWolfDir()
-  // resolves the right .wolf/ regardless of the hook's cwd.
-  return exportProjectDir ? `OPENWOLF_PROJECT_DIR="${projectDirExpr}" ${node}` : node;
+// POSIX single-quote a literal so shell metacharacters in a project path (spaces, ", $, `, ;, …)
+// can't break out of / inject into the generated command. Env-var expressions ($X) must stay in
+// double quotes instead so the shell still expands them.
+function shSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// Build the hook command. `literal` = projectDir is a real path (single-quote-escaped, security);
+// otherwise it's a shell variable expression kept in double quotes for expansion. Non-Claude agents
+// also export OPENWOLF_PROJECT_DIR so getWolfDir() resolves the right .wolf/ regardless of cwd.
+function cmd(projectDir: string, script: string, opts: { literal?: boolean; exportVar?: boolean } = {}): string {
+  const dir = opts.literal ? shSingleQuote(projectDir) : `"${projectDir}"`;
+  const scriptArg = opts.literal ? shSingleQuote(`${projectDir}/.wolf/hooks/${script}`) : `"${projectDir}/.wolf/hooks/${script}"`;
+  const node = `node ${scriptArg}`;
+  return opts.exportVar ? `OPENWOLF_PROJECT_DIR=${dir} ${node}` : node;
 }
 
 // ---- Claude: exactly the historical settings (7 hooks, $CLAUDE_PROJECT_DIR) ----
@@ -50,7 +60,7 @@ function claudeSettings(): HookSettings {
     const timeout = h.script === "post-write.js" || h.script === "stop.js" ? 10 : 5;
     hooks[h.claudeEvent].push({
       ...(h.matcher !== undefined ? { matcher: h.matcher } : {}),
-      hooks: [{ type: "command", _managedBy: "openwolf", command: cmd("$CLAUDE_PROJECT_DIR", h.script, false), timeout }],
+      hooks: [{ type: "command", _managedBy: "openwolf", command: cmd("$CLAUDE_PROJECT_DIR", h.script), timeout }],
     });
   }
   return { hooks };
@@ -60,15 +70,15 @@ function claudeSettings(): HookSettings {
 // Env var for the project dir is unconfirmed upstream, so we bake in the absolute path (stable per
 // machine → the trust-hash stays put until the next `openwolf update`). ----
 function codexSettings(projectRoot: string): HookSettings {
-  const P = projectRoot;
+  const c = (script: string) => ({ type: "command" as const, _managedBy: "openwolf", command: cmd(projectRoot, script, { literal: true, exportVar: true }), timeout: 15 });
   return {
     hooks: {
-      SessionStart: [{ hooks: [{ type: "command", command: cmd(P, "session-start.js", true), timeout: 15 }] }],
+      SessionStart: [{ hooks: [c("session-start.js")] }],
       PostToolUse: [
-        { matcher: "^apply_patch$", hooks: [{ type: "command", command: cmd(P, "post-write.js", true), timeout: 15 }] },
-        { matcher: "^Bash$", hooks: [{ type: "command", command: cmd(P, "post-bash.js", true), timeout: 15 }] },
+        { matcher: "^apply_patch$", hooks: [c("post-write.js")] },
+        { matcher: "^Bash$", hooks: [c("post-bash.js")] },
       ],
-      Stop: [{ hooks: [{ type: "command", command: cmd(P, "stop.js", true), timeout: 15 }] }],
+      Stop: [{ hooks: [c("stop.js")] }],
     },
   };
 }
@@ -77,20 +87,22 @@ function codexSettings(projectRoot: string): HookSettings {
 // $GEMINI_PROJECT_DIR is documented. Timeouts are milliseconds here. ----
 function geminiSettings(): HookSettings {
   const P = "$GEMINI_PROJECT_DIR";
+  const g = (name: string, script: string) => ({ type: "command" as const, name, _managedBy: "openwolf", command: cmd(P, script, { exportVar: true }), timeout: 15000 });
   return {
     hooks: {
-      SessionStart: [{ hooks: [{ type: "command", name: "openwolf-session-start", command: cmd(P, "session-start.js", true), timeout: 10000 }] }],
+      SessionStart: [{ hooks: [g("openwolf-session-start", "session-start.js")] }],
       AfterTool: [
-        { matcher: "write_file|replace", hooks: [{ type: "command", name: "openwolf-post-write", command: cmd(P, "post-write.js", true), timeout: 15000 }] },
-        { matcher: "run_shell_command", hooks: [{ type: "command", name: "openwolf-post-bash", command: cmd(P, "post-bash.js", true), timeout: 15000 }] },
+        { matcher: "write_file|replace", hooks: [g("openwolf-post-write", "post-write.js")] },
+        { matcher: "run_shell_command", hooks: [g("openwolf-post-bash", "post-bash.js")] },
       ],
-      SessionEnd: [{ hooks: [{ type: "command", name: "openwolf-stop", command: cmd(P, "stop.js", true), timeout: 15000 }] }],
+      SessionEnd: [{ hooks: [g("openwolf-stop", "stop.js")] }],
     },
   };
 }
 
 // Merge managed OpenWolf hook entries into an existing settings object, preserving the user's own
-// hooks. An entry is "ours" if any of its commands references `.wolf/hooks/` (or is _managedBy us).
+// hooks. An entry is "ours" ONLY if it carries `_managedBy: "openwolf"` — so a user's own hook that
+// happens to invoke a `.wolf/hooks/` script is never silently removed. Every entry we emit sets it.
 export function mergeManagedHooks(existing: Record<string, unknown>, settings: HookSettings): Record<string, unknown> {
   const merged = { ...existing };
   if (!merged.hooks || typeof merged.hooks !== "object") merged.hooks = {};
@@ -98,7 +110,7 @@ export function mergeManagedHooks(existing: Record<string, unknown>, settings: H
   for (const [event, entries] of Object.entries(settings.hooks)) {
     if (!Array.isArray(hooks[event])) hooks[event] = [];
     hooks[event] = hooks[event].filter(
-      (e) => !e.hooks?.some((h) => (h.command && h.command.includes(".wolf/hooks/")) || (h as { _managedBy?: string })._managedBy === "openwolf")
+      (e) => !e.hooks?.some((h) => (h as { _managedBy?: string })._managedBy === "openwolf")
     );
     hooks[event].push(...entries);
   }

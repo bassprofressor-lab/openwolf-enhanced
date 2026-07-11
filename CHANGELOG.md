@@ -6,6 +6,28 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.15.1] — 2026-07-11
+
+Security hardening of the 1.14/1.15 surfaces, from an adversarial review. No feature changes.
+
+### Security
+- **SSRF / API-key exfiltration via `llm_base_url` (High).** A project's `config.json` (which an untrusted
+  repo can carry) could point the cron engine's AI-task endpoint at any host and leak the API key. Base URLs
+  are now validated: `https` required except for loopback (local models), and private/link-local/cloud-metadata
+  addresses are refused. The request no longer follows redirects (`redirect: "error"`), so the key can't ride a
+  3xx to another host.
+- **Command injection in generated Codex hook commands (High).** The absolute project path was interpolated
+  raw into the shell command written to `.codex/hooks.json`; a path with shell metacharacters could inject.
+  Literal paths are now POSIX single-quote-escaped.
+- **Wider secret redaction in Bash activity capture (Medium).** `redactSecrets` now also catches dash-bearing
+  keys (`sk-ant-…`, `sk-proj-…`), `…PWD`/`…PASS`/`…PASSPHRASE`/`…CRED` env assignments, `user:pass@` URLs,
+  `x-api-key:` headers, and `-u user:pass` — forms that previously reached `.wolf/activity.log` in cleartext.
+
+### Fixed
+- `openwolf update` no longer removes a user's own hook that happens to invoke a `.wolf/hooks/` script — only
+  entries marked `_managedBy: "openwolf"` are replaced (all agents now set it).
+- `.wolf/activity.log` writes are locked, so concurrent Bash hooks can't clobber each other.
+
 ## [1.15.0] — 2026-07-11
 
 OpenWolf reaches beyond Claude, in two directions. **Models:** the cron engine's AI tasks now speak any
