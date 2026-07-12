@@ -27,6 +27,9 @@ interface SessionData {
   cerebrum_warnings: number;
   stop_count: number;
   reminders_shown?: string[];
+  /** Writes outside the project root — counted, never named. A session working in an additional
+   *  working directory produces these and nothing else. */
+  external_writes?: number;
 }
 
 interface SessionEntry {
@@ -74,8 +77,12 @@ async function main(): Promise<void> {
   // Only write to ledger if there's been activity
   const readCount = Object.keys(session.files_read).length;
   const writeCount = session.files_written.length;
+  // Writes that landed in another working directory. Kept SEPARATE from writeCount: the ledger and
+  // the memory.md line name the files they counted, and these have no names by design (#56).
+  const externalWrites = session.external_writes ?? 0;
+  const totalWrites = writeCount + externalWrites;
 
-  if (readCount === 0 && writeCount === 0) {
+  if (readCount === 0 && totalWrites === 0) {
     writeJSON(sessionFile, session);
     process.exit(0);
     return;
@@ -87,7 +94,7 @@ async function main(): Promise<void> {
   const candidates = [
     { key: "buglog", msg: checkForMissingBugLogs(wolfDir, session) },
     { key: "cerebrum", msg: checkCerebrumFreshness(wolfDir, session) },
-    { key: "summary", msg: checkSemanticSummaries(wolfDir, writeCount) },
+    { key: "summary", msg: checkSemanticSummaries(wolfDir, totalWrites) },
     { key: "status", msg: checkStatusFreshness(wolfDir, session) },
   ].filter((c): c is { key: string; msg: string } => c.msg !== null);
   const alreadyShown = new Set(session.reminders_shown ?? []);
@@ -190,11 +197,20 @@ async function main(): Promise<void> {
   });
 
   // Write a session summary line to memory.md if there was meaningful activity
+  const memoryPath = path.join(wolfDir, "memory.md");
+
+  // A session that did all its work elsewhere still happened. Without this, memory.md shows a gap
+  // exactly where the work was — which is how someone later concludes the day was quiet.
+  if (writeCount === 0 && externalWrites > 0) {
+    try {
+      appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${externalWrites} writes outside this project root | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
+    } catch { /* memory.md is a nicety, not a dependency */ }
+  }
+
   if (writeCount > 0) {
     try {
       const uniqueFiles = new Set(session.files_written.map(w => path.basename(w.file)));
       const fileList = [...uniqueFiles].slice(0, 5).join(", ");
-      const memoryPath = path.join(wolfDir, "memory.md");
       appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${writeCount} writes across ${uniqueFiles.size} files (${fileList}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
     } catch {}
   }
@@ -267,13 +283,18 @@ function checkStatusFreshness(wolfDir: string, session: SessionData): string | n
   const codeWrites = session.files_written.filter(
     (w) => !w.file.includes("/.wolf/") && !w.file.endsWith(".tmp")
   );
-  if (codeWrites.length < 3) return null;
+  // Work done in an additional working directory counts too. It is the only thing some sessions do,
+  // and a reminder that stays silent through eleven slices of it is worse than no reminder at all:
+  // it looks like the handoff doc is fine.
+  const writes = codeWrites.length + (session.external_writes ?? 0);
+  if (writes < 3) return null;
 
   try {
     const stat = fs.statSync(statusPath);
     const sessionStartMs = session.started ? Date.parse(session.started) : 0;
     if (sessionStartMs && stat.mtimeMs < sessionStartMs) {
-      return `STATUS.md wasn't updated this session despite ${codeWrites.length} code writes. Update .wolf/STATUS.md (✅ done / 🚀 next quest) before /clear so the next session resumes in one read.`;
+      const where = codeWrites.length === 0 ? " (all of them outside this project root)" : "";
+      return `STATUS.md wasn't updated this session despite ${writes} code writes${where}. Update .wolf/STATUS.md (✅ done / 🚀 next quest) before /clear so the next session resumes in one read.`;
     }
   } catch {
     return `.wolf/STATUS.md is missing. Create it with the current quest summary + next steps so /clear stays cheap.`;

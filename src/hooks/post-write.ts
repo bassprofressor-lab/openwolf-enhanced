@@ -10,6 +10,8 @@ import {
 interface SessionData {
   files_written: Array<{ file: string; action: string; tokens: number; at: string }>;
   edit_counts: Record<string, number>;
+  /** Writes that landed outside the project root: counted, never named (upstream #56). */
+  external_writes?: number;
   [key: string]: unknown;
 }
 
@@ -59,7 +61,19 @@ async function main(): Promise<void> {
 
   // Never track files outside the project root — an absolute path elsewhere (or ../foo)
   // must not leak into anatomy/memory (upstream #56).
-  if (relPath === "" || relPath.startsWith("..")) { process.exit(0); return; }
+  //
+  // But COUNT it. Claude Code has additional working directories, and a session can legitimately do
+  // all of its work in another repo — in which case files_written stays empty, the Stop hook decides
+  // nothing happened, and the STATUS.md reminder never fires. That is exactly how a handoff doc goes
+  // stale for eleven slices without anyone noticing. The counter is a number only: no path, no name,
+  // so #56 still holds.
+  if (relPath === "" || relPath.startsWith("..")) {
+    const session = readJSON<SessionData>(sessionFile, { files_written: [], edit_counts: {} });
+    session.external_writes = (session.external_writes ?? 0) + 1;
+    writeJSON(sessionFile, session);
+    process.exit(0);
+    return;
+  }
 
   // Skip anything matched by .gitignore / .wolfignore — scopes anatomy + session tracking.
   if (loadIgnore(projectRoot)(relPath)) { process.exit(0); return; }

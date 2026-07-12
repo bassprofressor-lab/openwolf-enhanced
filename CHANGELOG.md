@@ -6,6 +6,23 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.1] — 2026-07-12
+
+### Fixed
+
+- **The STATUS.md reminder was blind to work done in another working directory.** `post-write` drops
+  any path outside the project root so foreign paths cannot leak into anatomy/memory (#56) — but it
+  also dropped the *fact* that a write happened. In a session whose work lives in an additional
+  working directory (Claude Code supports several), `files_written` therefore stayed empty, the Stop
+  hook concluded nothing had happened, and neither the STATUS.md nor the memory.md reminder ever
+  fired. Found the hard way: a handoff doc that sat eleven slices out of date while the hook designed
+  to prevent exactly that stayed silent.
+
+  External writes are now **counted, never named** — a bare integer (`external_writes`), no path, no
+  filename — so #56 still holds while the reminders work again. The nudge says where the writes were
+  ("all of them outside this project root"), and a session that wrote only elsewhere now leaves a
+  line in memory.md instead of a gap exactly where the work was.
+
 ## [1.16.0] — 2026-07-11
 
 Three requested features that build on the recent work: LLM-assisted memory consolidation, cross-project
