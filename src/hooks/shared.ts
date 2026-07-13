@@ -1006,6 +1006,50 @@ export function isNotableCommand(cmd: string): boolean {
     .test(cmd.trim());
 }
 
+// Throwaway write targets: scratch space and device files. Editing /tmp is not project work, and
+// counting it would make every `foo > /tmp/out` look like an authored change.
+function isThrowawayTarget(target: string): boolean {
+  const t = target.replace(/^['"]|['"]$/g, "");
+  return t.startsWith("/dev/") || t.startsWith("/tmp/") || t.startsWith("/var/tmp/") || t === "/dev/null";
+}
+
+// Does this shell command modify a file?
+//
+// post-write.ts only sees the Write|Edit|MultiEdit tools. Everything done through the shell —
+// heredocs, `>` redirection, `sed -i`, `cp` — bypasses it entirely, so a session that edits via Bash
+// reports zero writes and every end-of-turn reminder (STATUS.md, memory.md summary) stays silent.
+// That is the half of bug-148 that 1.16.1 did not close. [bug-149]
+//
+// Deliberately answers only "did this write a file", never "which file": no path is extracted or
+// stored, so nothing can leak into anatomy/memory (upstream #56). Conservative by design — a missed
+// write costs a reminder, a false one cries wolf.
+export function isFileWritingCommand(cmd: string): boolean {
+  const c = cmd.trim();
+  if (!c) return false;
+
+  // Redirection into a real file: `> f`, `>> f`, `cat <<EOF > f`. The lookbehind drops fd-prefixed
+  // forms (`2>`), the `(?!&)` drops fd-dups (`>&2`, `2>&1`) — neither writes a file.
+  for (const m of c.matchAll(/(?<![0-9<>])>>?\s*(?!&)([^\s;&|<>()]+)/g)) {
+    if (!isThrowawayTarget(m[1])) return true;
+  }
+
+  // In-place editors.
+  if (/\bsed\s+(?:-[a-zA-Z]*i|--in-place)/.test(c)) return true;
+  if (/\b(?:perl|ruby)\s+-[a-zA-Z]*i\b/.test(c)) return true;
+
+  // Writers that take the path as an argument. `tee` alone is a write; `tee /dev/null` is not.
+  if (/\btee\b/.test(c) && !/\btee\s+(?:-\w+\s+)*\/dev\/null\b/.test(c)) return true;
+  if (/\b(?:cp|mv|rsync|patch|truncate)\s/.test(c)) return true;
+  if (/\bgit\s+apply\b/.test(c)) return true;
+
+  // Inline interpreters that write files (python -c, node -e, and their heredoc forms) — the way
+  // bulk edits usually get made when the shell is already open.
+  if (/\b(?:writeFileSync|appendFileSync|write_text|writelines|json\.dump|shutil\.(?:copy|move|copyfile))\b/.test(c)) return true;
+  if (/\bopen\s*\([^)]*,\s*['"][wax]/.test(c)) return true;
+
+  return false;
+}
+
 // Trim log content to at most maxBytes by dropping whole leading lines (keeps the newest tail).
 export function tailWithinBytes(content: string, maxBytes: number): string {
   if (Buffer.byteLength(content, "utf8") <= maxBytes) return content;

@@ -674,3 +674,33 @@ test("handleMcpMessage: initialize, tools/list, tools/call, notifications, unkno
   const unk = handleMcpMessage({ jsonrpc: "2.0", id: 5, method: "foo/bar" }, opts);
   assert.equal(unk.error.code, -32601);
 });
+
+// --- Shell writes: the edits post-write.ts can never see (bug-149) ---
+import { isFileWritingCommand } from "../dist/hooks/shared.js";
+test("bash writes: heredocs/redirects/in-place edits count, inspection and scratch do not", () => {
+  const W = isFileWritingCommand;
+
+  // writes
+  assert.ok(W("cat > src/app.ts <<'EOF'\nconst x = 1\nEOF"), "heredoc into file");
+  assert.ok(W("echo 'x' >> .env.example"), "append redirect");
+  assert.ok(W("sed -i 's/foo/bar/' src/a.ts"), "sed -i");
+  assert.ok(W("sed --in-place=.bak 's/a/b/' f.md"), "sed --in-place");
+  assert.ok(W("perl -pi -e 's/a/b/' f.md"), "perl -i");
+  assert.ok(W("cp dist/x.js dist/y.js"), "cp");
+  assert.ok(W("mv old.ts new.ts"), "mv");
+  assert.ok(W("git apply patch.diff"), "git apply");
+  assert.ok(W("echo hi | tee -a CHANGELOG.md"), "tee");
+  assert.ok(W("node -e \"fs.writeFileSync('a.json', '{}')\""), "node -e writeFileSync");
+  assert.ok(W("python3 -c \"open('out.txt', 'w').write('x')\""), "python open(...,'w')");
+
+  // not writes — inspection, and scratch/device targets
+  assert.ok(!W("ls -la"), "ls");
+  assert.ok(!W("grep -rn foo src/"), "grep");
+  assert.ok(!W("git status && git log --oneline -3"), "git read-only");
+  assert.ok(!W("pnpm build && pnpm test"), "build/test write dist, but are not authored edits");
+  assert.ok(!W("curl -s localhost:3000/api/health 2>/dev/null"), "fd-prefixed redirect to /dev/null");
+  assert.ok(!W("node script.js > /dev/null 2>&1"), "/dev/null + fd-dup");
+  assert.ok(!W("echo x > /tmp/scratch.txt"), "scratch dir is not project work");
+  assert.ok(!W("python3 -c \"print(open('a.json').read())\""), "open() for reading");
+  assert.ok(!W("cat pkg.json | tee /dev/null"), "tee /dev/null");
+});

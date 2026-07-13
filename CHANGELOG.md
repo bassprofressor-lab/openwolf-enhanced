@@ -6,6 +6,24 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.2] — 2026-07-13
+
+### Fixed
+
+- **The other half of the blind spot: edits made through the shell were never counted.** 1.16.1 taught
+  the Stop hook about writes in another working directory, but `post-write` only ever runs on
+  `Write|Edit|MultiEdit`. A heredoc (`cat > f <<EOF`), a redirect, a `sed -i`, a `cp` — none of them
+  reach it, so a session that edits through Bash still reported zero writes and every end-of-turn
+  reminder stayed silent.
+
+  `post-bash` now counts file-writing commands (`bash_writes`), and the Stop hook adds them to the
+  STATUS.md, memory.md and buglog reminders. Same discipline as #56: the counter answers *whether* a
+  file was written, never *which* — no path is parsed or stored. Commands that failed do not count
+  (they wrote nothing), and neither do read-only inspection or scratch targets (`/dev/null`, `/tmp`).
+
+  The counter runs **before** the `openwolf.capture.enabled` gate on purpose: `activity.log` is opt-in,
+  but the reminders are not, and gating it would have left every default install as blind as before.
+
 ## [1.16.1] — 2026-07-12
 
 ### Fixed

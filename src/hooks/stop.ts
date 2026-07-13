@@ -30,6 +30,9 @@ interface SessionData {
   /** Writes outside the project root — counted, never named. A session working in an additional
    *  working directory produces these and nothing else. */
   external_writes?: number;
+  /** Writes made through the shell (heredoc, `>`, sed -i, cp) — counted, never named. post-write
+   *  never sees these: it only matches Write|Edit|MultiEdit. [bug-149] */
+  bash_writes?: number;
 }
 
 interface SessionEntry {
@@ -77,10 +80,13 @@ async function main(): Promise<void> {
   // Only write to ledger if there's been activity
   const readCount = Object.keys(session.files_read).length;
   const writeCount = session.files_written.length;
-  // Writes that landed in another working directory. Kept SEPARATE from writeCount: the ledger and
-  // the memory.md line name the files they counted, and these have no names by design (#56).
+  // Writes with no path attached: another working directory (#56) or the shell (no path is parsed).
+  // Kept SEPARATE from writeCount — the ledger and the memory.md line name the files they counted,
+  // and these have no names by design.
   const externalWrites = session.external_writes ?? 0;
-  const totalWrites = writeCount + externalWrites;
+  const bashWrites = session.bash_writes ?? 0;
+  const unnamedWrites = externalWrites + bashWrites;
+  const totalWrites = writeCount + unnamedWrites;
 
   if (readCount === 0 && totalWrites === 0) {
     writeJSON(sessionFile, session);
@@ -199,11 +205,16 @@ async function main(): Promise<void> {
   // Write a session summary line to memory.md if there was meaningful activity
   const memoryPath = path.join(wolfDir, "memory.md");
 
-  // A session that did all its work elsewhere still happened. Without this, memory.md shows a gap
-  // exactly where the work was — which is how someone later concludes the day was quiet.
-  if (writeCount === 0 && externalWrites > 0) {
+  // A session that wrote only through the shell, or only in another directory, still happened.
+  // Without this, memory.md shows a gap exactly where the work was — which is how someone later
+  // concludes the day was quiet.
+  if (writeCount === 0 && unnamedWrites > 0) {
     try {
-      appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${externalWrites} writes outside this project root | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
+      const via = [
+        externalWrites > 0 ? `${externalWrites} outside this project root` : "",
+        bashWrites > 0 ? `${bashWrites} through the shell` : "",
+      ].filter(Boolean).join(", ");
+      appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${unnamedWrites} untracked writes (${via}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
     } catch { /* memory.md is a nicety, not a dependency */ }
   }
 
@@ -283,17 +294,22 @@ function checkStatusFreshness(wolfDir: string, session: SessionData): string | n
   const codeWrites = session.files_written.filter(
     (w) => !w.file.includes("/.wolf/") && !w.file.endsWith(".tmp")
   );
-  // Work done in an additional working directory counts too. It is the only thing some sessions do,
-  // and a reminder that stays silent through eleven slices of it is worse than no reminder at all:
-  // it looks like the handoff doc is fine.
-  const writes = codeWrites.length + (session.external_writes ?? 0);
+  // Work done in an additional working directory, or through the shell, counts too. Either can be
+  // the only thing a session does, and a reminder that stays silent through eleven slices of it is
+  // worse than no reminder at all: it looks like the handoff doc is fine.
+  const external = session.external_writes ?? 0;
+  const bash = session.bash_writes ?? 0;
+  const writes = codeWrites.length + external + bash;
   if (writes < 3) return null;
 
   try {
     const stat = fs.statSync(statusPath);
     const sessionStartMs = session.started ? Date.parse(session.started) : 0;
     if (sessionStartMs && stat.mtimeMs < sessionStartMs) {
-      const where = codeWrites.length === 0 ? " (all of them outside this project root)" : "";
+      const where = codeWrites.length > 0 ? "" :
+        external > 0 && bash > 0 ? " (all of them outside this project root or through the shell)" :
+        external > 0 ? " (all of them outside this project root)" :
+        " (all of them through the shell)";
       return `STATUS.md wasn't updated this session despite ${writes} code writes${where}. Update .wolf/STATUS.md (✅ done / 🚀 next quest) before /clear so the next session resumes in one read.`;
     }
   } catch {
