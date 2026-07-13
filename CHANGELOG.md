@@ -6,6 +6,17 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.5] — 2026-07-13
+
+### Fixed
+
+- **The 1.16.4 fix was only half of one.** It told you the team workspace had no matches — but only
+  when the local files *did* have matches. In the case where nothing was found anywhere, an earlier
+  return still printed a bare "No matches", saying nothing about whether the workspace had even been
+  asked. That is the case where the ambiguity hurts most: an empty answer and an unasked question look
+  identical, and the user has no way to tell which one they are looking at. Both paths now say what
+  happened.
+
 ## [1.16.4] — 2026-07-13
 
 ### Fixed

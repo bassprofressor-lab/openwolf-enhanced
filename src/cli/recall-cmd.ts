@@ -128,7 +128,16 @@ export async function recallCommand(query: string[], opts: RecallCliOpts): Promi
     return;
   }
   if (hits.length === 0 && teamHits.length === 0) {
-    console.log(`No matches for "${q}"${opts.all ? " across all projects" : ""}${teamError ? ` (team: ${teamError})` : ""}.`);
+    // Say the workspace was asked. "No matches" alone leaves the user unable to tell whether the
+    // remote was queried and came back empty, or was never queried at all — the same ambiguity the
+    // branch further down exists to remove, and this is the case where it bites hardest.
+    const where = opts.all ? " across all projects" : "";
+    const team_ = teamError
+      ? ` Team workspace: ${teamError}.`
+      : opts.team
+        ? " The team workspace was searched too and had nothing. (Entries awaiting approval do not appear in recall.)"
+        : "";
+    console.log(`No matches for "${q}"${where}.${team_}`);
     return;
   }
   console.log(`${hits.length} match(es) for "${q}"${opts.all ? ` across ${searchTargets.length} projects` : ""}:\n`);
