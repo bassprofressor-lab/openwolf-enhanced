@@ -204,10 +204,36 @@ export function createProgram(): Command {
     .option("--full", "Expand each hit to its full logical block (second disclosure layer)")
     .option("--id <id>", "Resolve a citation id to its full entry (no query needed)")
     .option("--all", "Search across all registered projects, not just this one")
+    .option("--team", "Also search the linked remote workspace (see `openwolf link`)")
     .option("--json", "Output JSON")
-    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean }) => {
+    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean }) => {
       const { recallCommand } = await import("./recall-cmd.js");
-      recallCommand(query, opts);
+      await recallCommand(query, opts);
+    });
+
+  // --- Remote workspace: link + push ---
+  program
+    .command("link")
+    .description("Link this project to a remote OpenWolf workspace (opt-in; nothing is sent until you push)")
+    .option("--url <url>", "Workspace base URL, e.g. https://wolfpack.example.com")
+    .option("--token <token>", "Workspace connector token (owp_…)")
+    .option("--project <name>", "Project name to file entries under (default: this directory's name)")
+    .option("--status", "Show the current link and verify the token")
+    .option("--unlink", "Remove the token and disable the remote")
+    .action(async (opts: { url?: string; token?: string; project?: string; status?: boolean; unlink?: boolean }) => {
+      const { linkCommand } = await import("./link-cmd.js");
+      await linkCommand(opts);
+    });
+
+  program
+    .command("push")
+    .description("Offer this project's learnings, decisions and bugs to the linked workspace (needs approval there)")
+    .option("--dry-run", "Show what would be sent, send nothing")
+    .option("--limit <n>", "Send at most n entries this run")
+    .option("--with-preferences", "Also send User Preferences (skipped by default — they are personal)")
+    .action(async (opts: { dryRun?: boolean; limit?: string; withPreferences?: boolean }) => {
+      const { pushCommand } = await import("./push-cmd.js");
+      await pushCommand(opts);
     });
 
   // --- Bug command ---

@@ -10,6 +10,7 @@ import { ensureDir } from "../utils/paths.js";
 import { isWindows } from "../utils/platform.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { detectProjectName, applyTemplatePlaceholders } from "../utils/seed.js";
+import { ensureWolfGitignore } from "../utils/wolf-gitignore.js";
 import { registerProject, getRegisteredProjects } from "./registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -74,6 +75,7 @@ export async function initCommand(): Promise<void> {
   // Create .wolf/ directory
   ensureDir(wolfDir);
   ensureDir(path.join(wolfDir, "hooks"));
+  ensureWolfGitignore(wolfDir); // keep dashboard-token / remote-token out of git
 
   // Find templates directory
   const actualTemplatesDir = findTemplatesDir();

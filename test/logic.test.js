@@ -675,6 +675,105 @@ test("handleMcpMessage: initialize, tools/list, tools/call, notifications, unkno
   assert.equal(unk.error.code, -32601);
 });
 
+// --- Remote workspace bridge (link/push/recall --team) ---
+import {
+  cerebrumCandidates, buglogCandidates, titleFor, teamId, teamCiteFromId,
+  getRemoteConfig, setRemoteConfig, isLinked, writeRemoteToken, readRemoteToken,
+  readPushed, markPushed,
+} from "../dist/src/utils/remote.js";
+import { ensureWolfGitignore } from "../dist/src/utils/wolf-gitignore.js";
+
+test("remote: what gets offered to the team, and what never leaves the machine", () => {
+  const cerebrum = [
+    "## User Preferences",
+    "- The user prefers German and hates emoji in commit messages, always ask before deploying.",
+    "",
+    "## Key Learnings",
+    "- **Docker bind-mounts on a FILE break on atomic writes** — the container keeps the old inode, so a reload silently reads stale config.",
+    "- <private>The production root password is hunter2hunter2 and must never be shared with anyone.</private>",
+    "- short",
+    "",
+    "## Decision Log",
+    "- We chose Postgres over Mongo because every table is workspace-scoped and we need real joins.",
+    "",
+    "## Notes",
+    "- This section maps to nothing and must be ignored entirely by the pusher.",
+  ].join("\n");
+
+  const c = cerebrumCandidates(cerebrum);
+  const types = c.map((x) => x.type).sort();
+  assert.deepEqual(types, ["decision", "learning"], "only Key Learnings + Decision Log by default");
+
+  const blob = JSON.stringify(c);
+  assert.ok(!blob.includes("hunter2"), "<private> content must never reach a candidate");
+  assert.ok(!blob.includes("emoji"), "User Preferences are personal — skipped by default");
+  assert.ok(!blob.includes("This section maps to nothing"), "unmapped sections are ignored");
+  assert.ok(!c.some((x) => x.body === "short"), "one-liners are not worth a team entry");
+  assert.ok(c.every((x) => x.localId.startsWith("c-")), "candidates carry their local citation id");
+
+  // opt-in preferences
+  const withPrefs = cerebrumCandidates(cerebrum, { withPreferences: true });
+  assert.ok(withPrefs.some((x) => x.type === "note" && x.tags.includes("preference")));
+  assert.ok(!JSON.stringify(withPrefs).includes("hunter2"), "private stays private even with --with-preferences");
+
+  // buglog → type "bug"; auto-detected guesses are not knowledge
+  const bugs = buglogCandidates({ bugs: [
+    { id: "bug-1", error_message: "nginx reload read stale config", file: "nginx.conf", root_cause: "inode drift", fix: "docker restart", tags: ["nginx"] },
+    { id: "bug-2", error_message: "auto guess", fix: "changed x → y", tags: ["auto-detected"] },
+    { id: "bug-3", error_message: "no fix recorded" },
+  ]});
+  assert.equal(bugs.length, 1);
+  assert.equal(bugs[0].type, "bug");
+  assert.ok(bugs[0].body.includes("Root cause: inode drift"));
+
+  // titles are stripped of markdown noise
+  assert.equal(titleFor("- **Bold thing** happened"), "Bold thing happened");
+});
+
+test("remote: team citation ids cannot collide with local ones", () => {
+  // Both systems mint `c-3f9a2b`-shaped ids from different hashes over different text.
+  assert.equal(teamId("c-3f9a2b"), "t-3f9a2b");
+  assert.equal(teamCiteFromId("t-3f9a2b"), "c-3f9a2b");
+  assert.equal(teamCiteFromId(teamId("c-abc123")), "c-abc123", "round-trips");
+  assert.equal(teamId(null), "t-?");
+  // A cite pasted straight from the workspace web UI is already `c-…` — must not become `c-c-…`.
+  assert.equal(teamCiteFromId("c-8f06e6"), "c-8f06e6");
+});
+
+test("remote: link state, token never in config.json, gitignore protects it", () => {
+  const w = tmpWolf();
+
+  assert.equal(getRemoteConfig(w), null, "unlinked by default");
+  assert.equal(isLinked(w), false);
+
+  setRemoteConfig(w, { enabled: true, base_url: "https://wolfpack.example.com", project: "orderflow" });
+  writeRemoteToken(w, "owp_deadbeef");
+
+  const cfg = getRemoteConfig(w);
+  assert.equal(cfg.baseUrl, "https://wolfpack.example.com");
+  assert.equal(cfg.project, "orderflow");
+  assert.equal(isLinked(w), true);
+  assert.equal(readRemoteToken(w), "owp_deadbeef");
+
+  // The token must never be written into config.json — that file gets committed.
+  const raw = fs.readFileSync(path.join(w, "config.json"), "utf8");
+  assert.ok(!raw.includes("owp_deadbeef"), "token must not land in config.json");
+  assert.equal(fs.statSync(path.join(w, "remote-token")).mode & 0o777, 0o600, "token file is 0600");
+
+  // …and 0600 does nothing against `git add`, so it must be ignored too.
+  assert.equal(ensureWolfGitignore(w), "created");
+  const gi = fs.readFileSync(path.join(w, ".gitignore"), "utf8");
+  assert.ok(gi.includes("remote-token"));
+  assert.ok(gi.includes("dashboard-token"));
+  assert.equal(ensureWolfGitignore(w), "ok", "idempotent");
+
+  // push bookkeeping: an entry offered once is not offered again
+  assert.equal(readPushed(w).size, 0);
+  markPushed(w, ["c-aaa111", "c-bbb222"]);
+  markPushed(w, ["c-aaa111"]);
+  assert.deepEqual([...readPushed(w)].sort(), ["c-aaa111", "c-bbb222"]);
+});
+
 // --- Shell writes: the edits post-write.ts can never see (bug-149) ---
 import { isFileWritingCommand } from "../dist/hooks/shared.js";
 test("bash writes: heredocs/redirects/in-place edits count, inspection and scratch do not", () => {

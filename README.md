@@ -203,6 +203,8 @@ openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dr
 openwolf consolidate          LLM-merge near-duplicate cerebrum entries [--dry-run] [--threshold N]
 openwolf recall <query>       Keyword-search .wolf + native memory; ids per hit [--limit N] [--full] [--all] [--json]
 openwolf recall --id <id>     Expand a citation id to its full entry (second disclosure layer)
+openwolf link                 Link to a remote workspace [--url URL --token TOKEN] [--status] [--unlink]
+openwolf push                 Offer learnings, decisions and bugs to the linked workspace [--dry-run]
 openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
 openwolf mcp                  Run an MCP server (recall/resume/memory-health) [--project DIR]
 openwolf scan                 Refresh the project structure map [--check]
@@ -214,6 +216,38 @@ openwolf bug search <term>    Search bug memory for known fixes
 openwolf update               Update registered projects [--project NAME] [--dry-run] [--list]
 openwolf restore [backup]     Restore .wolf/ from a timestamped backup
 ```
+
+## Sharing a brain with a team (optional)
+
+OpenWolf is local-first and stays that way: `.wolf/` is yours, on your disk, and nothing is uploaded
+anywhere. If you *do* run a shared workspace — your own server, or a hosted one — a project can be
+linked to it explicitly.
+
+```bash
+openwolf link --url https://workspace.example.com --token <token>
+openwolf push --dry-run        # what would be offered
+openwolf push                  # offer it
+openwolf recall "csp" --team   # search your files AND the workspace
+```
+
+Ground rules, because a local-first tool that quietly ships your notes somewhere is not local-first:
+
+- **Opt-in and explicit.** No background sync, no hook-time upload, no telemetry. Nothing leaves
+  until you type `push`.
+- **`<private>` blocks never leave the machine.** They are stripped before a candidate is even built.
+- **Only durable knowledge is offered:** cerebrum Key Learnings, Decision Log, and `buglog.json`.
+  `memory.md` is not a source — it is mostly mechanical file-write rows. User Preferences are skipped
+  unless you pass `--with-preferences`; auto-detected bugs are skipped as pattern guesses.
+- **The workspace decides.** Pushed entries arrive as needs-approval. A machine may propose; a human
+  decides what enters the team's memory.
+- **The token lives in `.wolf/remote-token` (0600), never in `config.json`** — which is committed.
+  `init`/`update`/`link` keep `.wolf/.gitignore` in place so it cannot be committed by accident.
+- **Local and team hits are shown as two lists, not merged.** A workspace ranks differently than a
+  BM25 scan of markdown; interleaving the two under one invented score would be a fabricated
+  ordering, not relevance. Team citations carry a `t-` prefix so they can never be confused with
+  local ones.
+
+No endpoint is hardcoded. `--url` points wherever you want.
 
 ## Design QC
 

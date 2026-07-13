@@ -6,6 +6,48 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.3] — 2026-07-13
+
+### Added
+
+- **`openwolf link` / `openwolf push` / `openwolf recall --team` — an opt-in bridge to a remote
+  OpenWolf workspace.** No endpoint is hardcoded: `--url` points at whichever workspace you run or
+  subscribe to. A project can now offer what it has learned to a shared workspace and search
+  that workspace alongside its own files. Everything is explicit: no background sync, no hook-time
+  upload, no telemetry. Nothing is sent until someone types `push`.
+  - `link` verifies the token against the live API *before* storing it — a link command that happily
+    saves a typo and fails three days later at the first push is worse than no link command.
+  - The token lives in `.wolf/remote-token` (0600), never in `config.json`, which gets committed.
+  - `push` sends only durable knowledge: cerebrum Key Learnings → `learning`, Decision Log →
+    `decision`, `buglog.json` → `bug`. `memory.md` is deliberately not a source (it is mostly
+    mechanical file-write rows, and noise is what makes a shared brain go unread), and User
+    Preferences are skipped unless `--with-preferences` — they describe how one person wants to be
+    worked with, which is not the team's business by default. Auto-detected bugs are skipped too:
+    they are pattern guesses, not findings.
+  - Entries arrive as **needs-approval**. A machine may propose; a human decides what enters the
+    team's memory.
+  - `recall --team` prints local and workspace hits as **two lists**. The workspace ranks with a
+    hybrid (full-text + trigram + semantic, fused, boosted by confirmed use); local recall uses BM25
+    over markdown. Those numbers are not on the same scale, and interleaving them under one invented
+    score would be a fabricated ordering dressed up as relevance.
+  - Team citations are shown as `t-3f9a2b`. Both systems mint `c-…`-shaped ids from different hashes
+    over different text, so the two namespaces can collide; models already invent citation ids, and
+    handing them two colliding ones would make every citation unverifiable. `recall --id` resolves
+    `t-…` against the workspace, and falls back to it for a `c-…` that no local file knows (that is
+    someone pasting a citation from the web UI).
+  - Outbound requests reuse `assertSafeBaseUrl()` from the LLM provider, so the SSRF hardening from
+    1.15.1 (https-only unless loopback, no private/link-local/metadata hosts, `redirect: "error"`)
+    covers this path too.
+
+### Fixed
+
+- **`.wolf/` had no `.gitignore`, and `dashboard-token` was sitting in it.** Committing `.wolf/` is
+  the whole point of a shared brain, but the local dashboard token was never excluded — and a
+  workspace token (write access to the team's memory) would now be there too. `init`, `update` and
+  `link` all ensure `.wolf/.gitignore` now; it is written from code because npm silently drops files
+  named `.gitignore` from published packages. `0600` protects against other users on the machine and
+  does nothing whatsoever against `git add`.
+
 ## [1.16.2] — 2026-07-13
 
 ### Fixed

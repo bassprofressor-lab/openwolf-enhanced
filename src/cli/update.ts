@@ -17,6 +17,7 @@ import { getRetention, pruneBackups } from "../utils/maintenance.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { deployAgentHooks } from "../utils/agent-hooks.js";
 import { seedMissingUserData } from "../utils/seed.js";
+import { ensureWolfGitignore } from "../utils/wolf-gitignore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -196,6 +197,11 @@ async function updateProject(
       }
     }
     console.log(`    ✓ Templates updated (${ALWAYS_OVERWRITE.join(", ")})`);
+
+    // 2a. Secrets must not be committable. Existing projects predate .wolf/.gitignore, and one of
+    // them may already hold a workspace token — so this runs on update, not just on init.
+    const gi = ensureWolfGitignore(wolfDir);
+    if (gi !== "ok") console.log(`    ✓ .wolf/.gitignore ${gi} (dashboard-token, remote-token)`);
 
     // 2b. Deep-merge config.json: keep user values, add any new default keys.
     const cfgTemplate = path.join(templatesDir, "config.json");
