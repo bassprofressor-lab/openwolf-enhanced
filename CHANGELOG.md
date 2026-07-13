@@ -6,6 +6,15 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.16.4] — 2026-07-13
+
+### Fixed
+
+- **`recall --team` said nothing when the workspace had no matches.** Silence there is
+  indistinguishable from "the workspace was never asked" — and the most likely reason for an empty
+  answer is one the user can act on the moment they hear it: entries sitting in the approval queue do
+  not appear in recall. It now says so.
+
 ## [1.16.3] — 2026-07-13
 
 ### Added

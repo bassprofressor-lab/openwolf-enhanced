@@ -149,6 +149,11 @@ export async function recallCommand(query: string[], opts: RecallCliOpts): Promi
     printTeamHits(teamHits, opts.full);
   } else if (teamError) {
     console.log(`\nTeam workspace: ${teamError}`);
+  } else if (opts.team) {
+    // Say so. Silence here is indistinguishable from "the workspace was never asked", and the most
+    // likely reason for an empty answer — everything still sitting in the approval queue — is one the
+    // user can act on the moment they know about it.
+    console.log("\nTeam workspace: no matches. (Entries awaiting approval do not appear in recall.)");
   }
 
   console.log(opts.full
