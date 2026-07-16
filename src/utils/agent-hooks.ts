@@ -22,7 +22,7 @@ type HookSettings = { hooks: Record<string, JsonHookEntry[]> };
 // fires on (absent = a non-tool event like SessionStart/Stop).
 interface HookDef {
   script: string;
-  claudeEvent: "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop";
+  claudeEvent: "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop" | "PreCompact";
   matcher: string; // Claude tool matcher ("" for non-tool events)
 }
 
@@ -34,6 +34,7 @@ const HOOKS: HookDef[] = [
   { script: "post-write.js", claudeEvent: "PostToolUse", matcher: "Write|Edit|MultiEdit" },
   { script: "post-bash.js", claudeEvent: "PostToolUse", matcher: "Bash" },
   { script: "stop.js", claudeEvent: "Stop", matcher: "" },
+  { script: "precompact.js", claudeEvent: "PreCompact", matcher: "" },
 ];
 
 // POSIX single-quote a literal so shell metacharacters in a project path (spaces, ", $, `, ;, …)
@@ -55,7 +56,7 @@ function cmd(projectDir: string, script: string, opts: { literal?: boolean; expo
 
 // ---- Claude: exactly the historical settings (7 hooks, $CLAUDE_PROJECT_DIR) ----
 function claudeSettings(): HookSettings {
-  const hooks: Record<string, JsonHookEntry[]> = { SessionStart: [], PreToolUse: [], PostToolUse: [], Stop: [] };
+  const hooks: Record<string, JsonHookEntry[]> = { SessionStart: [], PreToolUse: [], PostToolUse: [], Stop: [], PreCompact: [] };
   for (const h of HOOKS) {
     const timeout = h.script === "post-write.js" || h.script === "stop.js" ? 10 : 5;
     hooks[h.claudeEvent].push({

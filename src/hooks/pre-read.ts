@@ -84,6 +84,10 @@ async function main(): Promise<void> {
   // Check anatomy.md for this file
   const anatomyContent = readMarkdown(path.join(wolfDir, "anatomy.md"));
   const sections = parseAnatomy(anatomyContent);
+  // Symbol-level hints (sidecar written by the scanner) — keyed by the same section+file relpath.
+  const symbolIndex = readJSON<{ files?: Record<string, Array<{ name: string; kind: string; startLine: number; endLine: number }>> }>(
+    path.join(wolfDir, "anatomy-symbols.json"), {}
+  ).files ?? {};
   let found = false;
 
   for (const [sectionKey, entries] of sections) {
@@ -94,6 +98,16 @@ async function main(): Promise<void> {
         process.stderr.write(
           `📋 OpenWolf anatomy: ${entry.file} — ${entry.description} (~${entry.tokens} tok)\n`
         );
+        // If we indexed this big file's symbols, offer line ranges so the agent can read one
+        // function with offset/limit instead of the whole file.
+        const syms = symbolIndex[entryRelPath];
+        if (syms && syms.length > 0) {
+          const shown = syms.slice(0, 10).map((s) => `${s.name} (${s.startLine}-${s.endLine})`).join(", ");
+          const more = syms.length > 10 ? `, +${syms.length - 10} more` : "";
+          process.stderr.write(
+            `   ↳ symbols: ${shown}${more} — read a slice with offset/limit instead of the whole file.\n`
+          );
+        }
         found = true;
         break;
       }

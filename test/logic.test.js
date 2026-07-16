@@ -905,3 +905,65 @@ test("recall: buglog.json = number/string is ignored, other sources still search
   assert.doesNotThrow(() => { hits = recall(wolf, "widget"); });
   assert.ok(hits.some((h) => h.file === "memory.md"), "markdown source still matched");
 });
+
+// --- readTranscriptUsage: sum real usage, dedupe by message id, skip garbage (F1) ---
+import { readTranscriptUsage } from "../dist/hooks/shared.js";
+test("readTranscriptUsage: sums usage, keeps last per id, counts distinct calls", () => {
+  const wolf = tmpWolf();
+  const tp = path.join(wolf, "transcript.jsonl");
+  fs.writeFileSync(tp, [
+    JSON.stringify({ message: { id: "m1", usage: { input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 8000, cache_creation_input_tokens: 500 } } }),
+    JSON.stringify({ message: { id: "m1", usage: { input_tokens: 1200, output_tokens: 450, cache_read_input_tokens: 8000, cache_creation_input_tokens: 500 } } }), // same id → replaces
+    JSON.stringify({ message: { id: "m2", usage: { input_tokens: 50, output_tokens: 120, cache_read_input_tokens: 9700, cache_creation_input_tokens: 0 } } }),
+    "{ not valid json",
+    "",
+  ].join("\n"));
+  const u = readTranscriptUsage(tp);
+  assert.equal(u.api_calls, 2, "two distinct message ids");
+  assert.equal(u.input_tokens, 1250);
+  assert.equal(u.output_tokens, 570, "m1 deduped to its last output (450), not summed");
+  assert.equal(u.cache_read_input_tokens, 17700);
+  assert.equal(u.cache_creation_input_tokens, 500);
+});
+
+test("readTranscriptUsage: missing file or no usage → null", () => {
+  assert.equal(readTranscriptUsage("/no/such/transcript.jsonl"), null);
+  const wolf = tmpWolf();
+  const tp = path.join(wolf, "empty.jsonl");
+  fs.writeFileSync(tp, JSON.stringify({ message: { id: "x", role: "user" } }) + "\n");
+  assert.equal(readTranscriptUsage(tp), null, "no usage blocks → null");
+});
+
+// --- extractSymbols: top-level decls with line ranges (symbol-level anatomy) ---
+import { extractSymbols, symbolsSupported } from "../dist/src/scanner/symbol-extractor.js";
+test("extractSymbols: TS fn/class/const-arrow/interface with ranges", () => {
+  const src = [
+    "// header",                                   // 1
+    "export interface Config { a: number }",       // 2
+    "export function parse(x: string) {",          // 3
+    "  return x.trim();",                          // 4
+    "}",                                           // 5
+    "export const build = async (o) => {",         // 6
+    "  return o;",                                 // 7
+    "}",                                           // 8
+    "export class Engine {",                       // 9
+    "  run() { return 1; }",                       // 10
+    "}",                                           // 11
+  ].join("\n");
+  const syms = extractSymbols(src, ".ts");
+  const byName = Object.fromEntries(syms.map((s) => [s.name, s]));
+  assert.deepEqual(Object.keys(byName).sort(), ["Config", "Engine", "build", "parse"]);
+  assert.equal(byName.Config.kind, "section");
+  assert.equal(byName.parse.kind, "fn");
+  assert.equal(byName.build.kind, "fn");        // const arrow
+  assert.equal(byName.Engine.kind, "class");
+  assert.equal(byName.parse.startLine, 3);
+  assert.equal(byName.parse.endLine, 5);        // line before next symbol (build @6)
+  assert.equal(byName.Engine.endLine, 11);      // last symbol → end of file
+});
+
+test("extractSymbols: unsupported ext → [] and symbolsSupported reflects it", () => {
+  assert.equal(symbolsSupported(".ts"), true);
+  assert.equal(symbolsSupported(".md"), false);
+  assert.deepEqual(extractSymbols("anything\nhere", ".md"), []);
+});

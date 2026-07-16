@@ -810,6 +810,58 @@ export function estimateTokens(text: string, type: "code" | "prose" | "mixed" = 
   return Math.ceil(text.length / ratio);
 }
 
+// Which coding agent is driving this hook — labels ledger sessions so per-agent usage can be split.
+export function detectAgent(): string {
+  if (process.env.CLAUDE_PROJECT_DIR) return "claude";
+  if (process.env.CODEX_PROJECT_ROOT) return "codex";
+  if (process.env.GEMINI_CLI || process.env.GEMINI_PROJECT_DIR) return "gemini";
+  return process.env.OPENWOLF_AGENT || "default";
+}
+
+// Real API usage measured from a harness transcript — the verifiable numbers the estimated
+// ledger can be checked against, rather than trusting the char/token heuristic.
+export interface RealUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  api_calls: number;
+}
+
+// Parse a Claude Code / Codex transcript (JSONL) and sum the real token usage. Each API call emits
+// one `message.usage` block; streaming can repeat a message id across lines, so we keep the last
+// usage seen per id and count distinct ids as api_calls. Returns null if the file is unreadable or
+// carries no usage data (older harness, no transcript).
+export function readTranscriptUsage(transcriptPath: string): RealUsage | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(transcriptPath, "utf-8");
+  } catch {
+    return null;
+  }
+  const byId = new Map<string, { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }>();
+  let anon = 0;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      const usage = entry?.message?.usage;
+      if (usage && typeof usage === "object" && typeof usage.output_tokens === "number") {
+        byId.set(entry.message.id ?? `anon-${anon++}`, usage);
+      }
+    } catch {}
+  }
+  if (byId.size === 0) return null;
+  const total: RealUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, api_calls: byId.size };
+  for (const u of byId.values()) {
+    total.input_tokens += u.input_tokens ?? 0;
+    total.output_tokens += u.output_tokens ?? 0;
+    total.cache_read_input_tokens += u.cache_read_input_tokens ?? 0;
+    total.cache_creation_input_tokens += u.cache_creation_input_tokens ?? 0;
+  }
+  return total;
+}
+
 export function timestamp(): string {
   return new Date().toISOString();
 }

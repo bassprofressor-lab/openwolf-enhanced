@@ -27,6 +27,7 @@ export const HOOK_FILES = [
   "post-write.js",
   "post-bash.js",
   "stop.js",
+  "precompact.js",
   "shared.js",
 ];
 

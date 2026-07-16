@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, readStdin, readTranscriptUsage, detectAgent, type RealUsage } from "./shared.js";
 
 interface FileRead {
   count: number;
@@ -37,8 +37,10 @@ interface SessionData {
 
 interface SessionEntry {
   id: string;
+  agent?: string;
   started: string;
   ended: string;
+  real_usage?: RealUsage;
   reads: Array<{
     file: string;
     tokens_estimated: number;
@@ -61,6 +63,12 @@ async function main(): Promise<void> {
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");
   const sessionFile = path.join(hooksDir, "_session.json");
+
+  // Stop payload carries the harness transcript path — the source of real, measured token usage.
+  let hookInput: { transcript_path?: string } = {};
+  try {
+    hookInput = JSON.parse(await readStdin());
+  } catch {}
 
   const session = readJSON<SessionData>(sessionFile, {
     session_id: "",
@@ -126,10 +134,16 @@ async function main(): Promise<void> {
   const inputTokens = reads.reduce((sum, r) => sum + r.tokens_estimated, 0);
   const outputTokens = writes.reduce((sum, w) => sum + w.tokens_estimated, 0);
 
+  // Measure real API usage from the transcript when the harness provides a path (F1). Done outside
+  // the ledger lock — it's a plain file read; only the accumulation below runs under the lock.
+  const realUsage = hookInput.transcript_path ? readTranscriptUsage(hookInput.transcript_path) : null;
+
   const sessionEntry: SessionEntry = {
     id: session.session_id,
+    agent: detectAgent(),
     started: session.started,
     ended: new Date().toISOString(),
+    ...(realUsage ? { real_usage: realUsage } : {}),
     reads,
     writes,
     totals: {
@@ -191,6 +205,17 @@ async function main(): Promise<void> {
   ledger.lifetime.anatomy_hits += session.anatomy_hits;
   ledger.lifetime.anatomy_misses += session.anatomy_misses;
   ledger.lifetime.repeated_reads_blocked += session.repeated_reads_warned;
+
+  // Accumulate measured usage alongside the estimates, so the ledger carries both a heuristic and
+  // a verifiable ground truth (F1).
+  if (realUsage) {
+    const lt = ledger.lifetime;
+    lt.real_input_tokens = (lt.real_input_tokens ?? 0) + realUsage.input_tokens;
+    lt.real_output_tokens = (lt.real_output_tokens ?? 0) + realUsage.output_tokens;
+    lt.real_cache_read_tokens = (lt.real_cache_read_tokens ?? 0) + realUsage.cache_read_input_tokens;
+    lt.real_cache_creation_tokens = (lt.real_cache_creation_tokens ?? 0) + realUsage.cache_creation_input_tokens;
+    lt.real_api_calls = (lt.real_api_calls ?? 0) + realUsage.api_calls;
+  }
 
   // Estimate savings: anatomy hits save ~200 tokens each, repeated reads blocked save their token count
   const savedFromAnatomy = session.anatomy_hits * 200;

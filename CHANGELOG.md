@@ -6,6 +6,33 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.18.0] — 2026-07-16
+
+> Upgrades ported from upstream `cytostack/openwolf` 2.0 (AGPL-3.0), adapted to this fork.
+
+### Added
+
+- **Compaction survival (PreCompact hook).** When Claude Code / Codex compacts the context window,
+  the live session state on disk survives but nothing in the compacted context tells the model what
+  already happened. A new `precompact.js` hook snapshots `_session.json`, and SessionStart — which
+  fires with `source: "compact"` afterwards — now re-injects a digest that lists the files already
+  modified this session, so the model doesn't re-read them from scratch. SessionStart also no longer
+  resets the session on `compact`/`resume` (it only resets for a genuinely new session), which used to
+  wipe read/write tracking and append a spurious memory.md header on every compaction.
+- **Measured token usage (`openwolf report`).** The ledger was estimate-only (a char/token ratio). The
+  Stop hook now reads the harness transcript (`transcript_path` in its payload) and sums the real
+  `message.usage` — input, output, cache-read, cache-creation tokens, and API calls — deduped per
+  message id. Numbers land per-session (`real_usage`) and in `lifetime.real_*`, tagged with the driving
+  agent (`detectAgent`). `openwolf report` shows the estimate and the measured ground truth side by
+  side. Sessions without a transcript (older harness, other agents) simply record no measured usage.
+- **Symbol-level anatomy hints.** `openwolf scan` now extracts top-level symbols (functions, classes,
+  interfaces) with 1-based line ranges for big files (≥500 est. tokens, TS/JS/PY/GO/RS) into a
+  `anatomy-symbols.json` sidecar. When the agent is about to read such a file, the pre-read hook lists
+  the symbols and their ranges — `parse (23-45), Engine (69-91)` — so it can read one function with
+  `offset`/`limit` instead of the whole file. Heuristic (line-anchored regexes, symbol end = line
+  before the next), which is enough for slice reads. This is the lightweight take on upstream's
+  durable anatomy index: a sidecar, so our markdown `anatomy.md` pipeline is untouched.
+
 ## [1.17.0] — 2026-07-16
 
 ### Added

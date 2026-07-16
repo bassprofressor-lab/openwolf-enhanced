@@ -196,6 +196,15 @@ export function createProgram(): Command {
       exportCommand(what, opts);
     });
 
+  // --- Report command (estimated vs measured token usage) ---
+  program
+    .command("report")
+    .description("Show token usage: estimated (heuristic) vs measured (from harness transcripts)")
+    .action(async () => {
+      const { reportCommand } = await import("./report-cmd.js");
+      reportCommand();
+    });
+
   // --- MCP server ---
   program
     .command("mcp")

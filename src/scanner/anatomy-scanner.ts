@@ -5,6 +5,7 @@ import { readJSON } from "../utils/fs-safe.js";
 import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
 import { loadIgnore } from "../utils/maintenance.js";
+import { extractSymbols, symbolsSupported, SYMBOL_MIN_TOKENS, type SymbolEntry } from "./symbol-extractor.js";
 
 interface AnatomyEntry {
   file: string;
@@ -99,7 +100,8 @@ function walkDir(
   excludePatterns: string[],
   maxFiles: number,
   entries: Map<string, AnatomyEntry[]>,
-  ignore: (relPath: string) => boolean
+  ignore: (relPath: string) => boolean,
+  symbols: Record<string, SymbolEntry[]>
 ): void {
   let totalFiles = 0;
   for (const [, list] of entries) totalFiles += list.length;
@@ -122,7 +124,7 @@ function walkDir(
     if (ignore(relPath)) continue; // .wolfignore
 
     if (item.isDirectory()) {
-      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore);
+      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols);
     } else if (item.isFile()) {
       const ext = path.extname(item.name).toLowerCase();
       if (BINARY_EXTENSIONS.has(ext)) continue;
@@ -157,6 +159,16 @@ function walkDir(
         description: desc,
         tokens,
       });
+
+      // Symbol-level hints for big files: record top-level declarations with line ranges so a
+      // pre-read hint can send the agent to one function via offset/limit. Keyed the same way
+      // pre-read resolves a file (section + name) so lookups match.
+      if (tokens >= SYMBOL_MIN_TOKENS && symbolsSupported(ext)) {
+        const syms = extractSymbols(content, ext);
+        if (syms.length > 0) {
+          symbols[normalizePath(path.join(sectionKey, item.name))] = syms;
+        }
+      }
 
       totalFiles++;
       if (totalFiles >= maxFiles) return;
@@ -226,7 +238,7 @@ export function parseAnatomy(content: string): Map<string, AnatomyEntry[]> {
 /**
  * Scan the project and return the anatomy content and file count WITHOUT writing to disk.
  */
-export function buildAnatomy(wolfDir: string, projectRoot: string): { content: string; fileCount: number } {
+export function buildAnatomy(wolfDir: string, projectRoot: string): { content: string; fileCount: number; symbols: Record<string, SymbolEntry[]> } {
   const configPath = path.join(wolfDir, "config.json");
   const config = readJSON<WolfConfig>(configPath, {
     version: 1,
@@ -241,6 +253,7 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
   });
 
   const entries = new Map<string, AnatomyEntry[]>();
+  const symbols: Record<string, SymbolEntry[]> = {};
   const ignore = loadIgnore(projectRoot);
   walkDir(
     projectRoot,
@@ -248,7 +261,8 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
     config.openwolf.anatomy.exclude_patterns,
     config.openwolf.anatomy.max_files,
     entries,
-    ignore
+    ignore,
+    symbols
   );
 
   let fileCount = 0;
@@ -261,13 +275,16 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
     misses: 0,
   });
 
-  return { content: serialized, fileCount };
+  return { content: serialized, fileCount, symbols };
 }
 
 export function scanProject(wolfDir: string, projectRoot: string): number {
-  const { content, fileCount } = buildAnatomy(wolfDir, projectRoot);
+  const { content, fileCount, symbols } = buildAnatomy(wolfDir, projectRoot);
   const anatomyPath = path.join(wolfDir, "anatomy.md");
   writeText(anatomyPath, content);
+  // Sidecar: symbol-level line ranges for big files (see symbol-extractor). Written next to
+  // anatomy.md; pre-read reads it to point the agent at a slice instead of the whole file.
+  writeText(path.join(wolfDir, "anatomy-symbols.json"), JSON.stringify({ version: 1, files: symbols }, null, 2));
   return fileCount;
 }
 
