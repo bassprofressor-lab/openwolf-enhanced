@@ -7,12 +7,16 @@ export function TokenUsage({ data }: { data: WolfData }) {
   const { tokenLedger } = data;
   const lt = tokenLedger.lifetime;
 
-  // Build chart data from sessions (show date + time, not just the date — upstream #4, bug 3)
+  // Build chart data from sessions. Prefer the MEASURED tokens from the harness transcript
+  // (real_usage) — the char-ratio estimate only counts Read/Edit tool use and reads 0 for
+  // shell-heavy work. X-axis uses the turn's `ended` time (distinct per turn) so a long single
+  // session doesn't collapse onto one point.
   const chartData = tokenLedger.sessions.map((s: any) => ({
-    date: s.started ? s.started.slice(0, 16).replace("T", " ") : "",
-    input: s.totals?.input_tokens_estimated || 0,
-    output: s.totals?.output_tokens_estimated || 0,
+    date: (s.ended || s.started || "").slice(0, 16).replace("T", " "),
+    input: s.real_usage?.input_tokens ?? s.totals?.input_tokens_estimated ?? 0,
+    output: s.real_usage?.output_tokens ?? s.totals?.output_tokens_estimated ?? 0,
   }));
+  const anyMeasured = tokenLedger.sessions.some((s: any) => s.real_usage);
 
   // Comparison data — only real tracked numbers, no fabricated estimates (upstream #4, bug 5)
   const totalTracked = lt.total_tokens_estimated;
@@ -41,11 +45,16 @@ export function TokenUsage({ data }: { data: WolfData }) {
               <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickFormatter={(v) => formatTokens(v)} />
               <Tooltip contentStyle={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)" }}
                 itemStyle={{ color: "var(--text-primary)" }} labelStyle={{ color: "var(--text-secondary)" }} />
-              <Area type="monotone" dataKey="input" name="Input (reads)" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
-              <Area type="monotone" dataKey="output" name="Output (writes)" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3} />
+              <Area type="monotone" dataKey="input" name="Input tokens" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
+              <Area type="monotone" dataKey="output" name="Output tokens" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.3} />
             </AreaChart>
           </ResponsiveContainer>
         )}
+        <p className="text-xs mt-3" style={{ color: "var(--text-faint)" }}>
+          {anyMeasured
+            ? "Measured from harness transcripts where available, otherwise char-ratio estimate."
+            : "Char-ratio estimate (counts Read/Edit tool use; shell-only work reads 0). Measured numbers appear once sessions record transcript usage."}
+        </p>
       </div>
 
       {/* Comparison */}

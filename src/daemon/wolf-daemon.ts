@@ -394,7 +394,16 @@ wss.on("connection", (ws) => {
     wsClients.delete(ws);
   });
 
-  // Send initial state
+  // Send the current full state to THIS newly-connected client. Without this, a fresh page load or
+  // an auto-reconnect after a daemon restart never re-fetches the files — the dashboard keeps showing
+  // stale pre-restart data until some .wolf file happens to change. (The frontend doesn't request it.)
+  try {
+    const files: Record<string, string> = {};
+    for (const file of WOLF_BROADCAST_FILES) files[file] = readWolfFileForDashboard(file);
+    ws.send(JSON.stringify({ type: "full_state", files, timestamp: new Date().toISOString() }));
+  } catch (err) {
+    logger.error(`Initial full_state failed: ${err}`);
+  }
   broadcast({ type: "daemon_started", timestamp: new Date().toISOString() });
 });
 

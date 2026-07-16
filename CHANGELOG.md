@@ -6,6 +6,24 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.18.2] — 2026-07-16
+
+### Fixed
+
+- **Dashboard showed stale data after a daemon restart.** On a WebSocket (re)connect the daemon only
+  sent `daemon_started`, never the current `full_state` — and the frontend never requests it — so a
+  page that reconnected after the daemon restarted kept showing pre-restart data until some `.wolf`
+  file happened to change. The daemon now sends the full state to each newly-connected client.
+- **"Recent Activity" showed the day's oldest entries instead of the newest.** Sessions were newest-
+  first but entries within a session stayed oldest→newest, and the panel took the first few — so a
+  long single-session day surfaced the morning's entries. It now takes the most recent entries.
+- **"Usage Over Time" chart plots measured tokens.** It used the char-ratio estimate, which only
+  counts Read/Edit tool use and reads 0 for shell-heavy work — leaving the chart empty. It now
+  prefers the measured `real_usage` from the harness transcript (estimate as fallback) and keys the
+  x-axis on each turn's end time so a single long session no longer collapses onto one point.
+- **Docs link pointed at the upstream project.** The dashboard's "Docs" link now points to this
+  fork's repo instead of openwolf.com.
+
 ## [1.18.1] — 2026-07-16
 
 ### Fixed

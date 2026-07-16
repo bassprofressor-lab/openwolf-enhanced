@@ -55,7 +55,9 @@ export function ProjectOverview({ data }: { data: WolfData }) {
         ) : (
           <div className="space-y-2">
             {memory.slice(0, 3).flatMap((session) =>
-              session.entries.slice(0, 5).map((entry, i) => (
+              // newest entries first: entries within a session are stored oldest→newest, so take the
+              // last few and reverse (otherwise "Recent Activity" shows the day's OLDEST entries).
+              session.entries.slice(-5).reverse().map((entry, i) => (
                 <div key={`${session.date}-${i}`} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
                   <span className="text-xs font-mono w-12" style={{ color: "var(--text-faint)" }}>{entry.time}</span>
                   <span className="text-sm flex-1" style={{ color: "var(--text-secondary)" }}>{entry.action}</span>
