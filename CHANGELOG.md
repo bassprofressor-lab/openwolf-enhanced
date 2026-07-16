@@ -6,6 +6,19 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.18.1] — 2026-07-16
+
+### Fixed
+
+- **Multi-project dashboard port collisions.** Every project shipped the same default dashboard/daemon
+  ports (18791/18790), so running several daemons meant only the first bound — a second project's
+  `openwolf dashboard` saw the port "in use" and opened the *first* project's data. Now: `openwolf
+  update` gives every registered project a unique port pair (reassigning only the ones that collide,
+  written to their config.json); `openwolf dashboard` checks an unauthenticated `/api/whoami` and, if
+  the configured port is held by a *different* project's daemon, relocates itself to a free port and
+  persists it; and the daemon honours an `OPENWOLF_DASHBOARD_PORT` override so the dashboard can place
+  it there. Ported from upstream cytostack/openwolf 2.0.1, adapted to this fork.
+
 ## [1.18.0] — 2026-07-16
 
 > Upgrades ported from upstream `cytostack/openwolf` 2.0 (AGPL-3.0), adapted to this fork.

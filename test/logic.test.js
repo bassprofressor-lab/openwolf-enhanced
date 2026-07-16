@@ -967,3 +967,38 @@ test("extractSymbols: unsupported ext → [] and symbolsSupported reflects it", 
   assert.equal(symbolsSupported(".md"), false);
   assert.deepEqual(extractSymbols("anything\nhere", ".md"), []);
 });
+
+// --- reconcileProjectPorts: unique dashboard/daemon port pair per registered project ---
+import { reconcileProjectPorts } from "../dist/src/utils/ports.js";
+test("reconcileProjectPorts: reassigns a colliding project, leaves the first + non-colliders", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "owports-"));
+  const mk = (name, port) => {
+    const root = path.join(home, name);
+    fs.mkdirSync(path.join(root, ".wolf"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".wolf", "config.json"),
+      JSON.stringify({ openwolf: { daemon: { port: port - 1 }, dashboard: { port, host: "127.0.0.1" } } }));
+    return root;
+  };
+  const a = mk("a", 18791), b = mk("b", 18791), c = mk("c", 18795); // a & b collide, c is unique
+  fs.mkdirSync(path.join(home, ".openwolf"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".openwolf", "registry.json"), JSON.stringify({
+    version: 1, projects: [a, b, c].map((root, i) => ({ root, name: "abc"[i], registered_at: "x", last_updated: "x", version: "1" })),
+  }));
+
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const changes = reconcileProjectPorts(false);
+    const port = (root) => JSON.parse(fs.readFileSync(path.join(root, ".wolf", "config.json"), "utf8")).openwolf.dashboard.port;
+    assert.equal(port(a), 18791, "first keeps its port");
+    assert.notEqual(port(b), 18791, "collider b was moved");
+    assert.equal(port(b) % 2, 1, "b's new dashboard port stays odd");
+    assert.equal(port(c), 18795, "non-collider c unchanged");
+    assert.ok(changes.some((x) => x.name === "b"), "b reported as changed");
+    assert.ok(!changes.some((x) => x.name === "a" || x.name === "c"), "a/c not reported");
+    // config structure preserved (host still there)
+    assert.equal(JSON.parse(fs.readFileSync(path.join(b, ".wolf", "config.json"), "utf8")).openwolf.dashboard.host, "127.0.0.1");
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+  }
+});

@@ -98,6 +98,13 @@ if (fs.existsSync(dashboardDir)) {
   app.use(express.static(dashboardDir));
 }
 
+// Unauthenticated identity probe: lets `openwolf dashboard` tell whether the daemon already on this
+// port belongs to THIS project (connect) or another one (move to a free port). Only exposes the
+// project root — no secrets, and the server binds to localhost.
+app.get("/api/whoami", (_req, res) => {
+  res.json({ project: projectRoot });
+});
+
 // Require the dashboard token on every /api/* call (header or ?token=). Blocks drive-by
 // requests from a page in the user's browser or another local user (upstream #30/#34).
 app.use("/api", (req, res, next) => {
@@ -349,7 +356,9 @@ app.get("/{*path}", (_req, res) => {
 });
 
 // Start HTTP server
-const port = config.openwolf.dashboard.port;
+// OPENWOLF_DASHBOARD_PORT lets `openwolf dashboard` place this daemon on a free port when the
+// configured one is taken by another project's daemon (multi-project port handling).
+const port = Number(process.env.OPENWOLF_DASHBOARD_PORT) || config.openwolf.dashboard.port;
 // Bind to loopback by default so the dashboard isn't exposed on the network (upstream #30).
 const host = config.openwolf.dashboard.host || "127.0.0.1";
 const server = app.listen(port, host, () => {

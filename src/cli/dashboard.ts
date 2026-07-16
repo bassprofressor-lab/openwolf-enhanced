@@ -4,8 +4,9 @@ import * as net from "node:net";
 import { fileURLToPath } from "node:url";
 import { fork } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON } from "../utils/fs-safe.js";
+import { readJSON, writeJSON } from "../utils/fs-safe.js";
 import { ensureDashboardToken } from "../utils/dashboard-auth.js";
+import { findFreePort } from "../utils/ports.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +14,21 @@ const __dirname = path.dirname(__filename);
 interface WolfConfig {
   openwolf: {
     dashboard: { port: number };
+    daemon?: { port: number };
   };
+}
+
+/** Ask the daemon on `port` which project it serves (unauthenticated /api/whoami). null if not an
+ *  OpenWolf daemon or unreachable. */
+async function whoami(port: number): Promise<string | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/whoami`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { project?: string };
+    return j.project ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isPortOpen(port: number): Promise<boolean> {
@@ -49,14 +64,32 @@ export async function dashboardCommand(): Promise<void> {
     openwolf: { dashboard: { port: 18791 } },
   });
 
-  const port = config.openwolf.dashboard.port;
+  let port = config.openwolf.dashboard.port;
+  const configPath = path.join(wolfDir, "config.json");
+
+  // If something already listens on the configured port, check whether it's THIS project's daemon
+  // (connect to it) or another project's / a foreign server (relocate to a free port and persist
+  // it) — so a second project's dashboard never opens the first project's data.
+  let running = await isPortOpen(port);
+  if (running) {
+    const owner = await whoami(port);
+    const ours = owner && path.resolve(owner) === path.resolve(projectRoot);
+    if (!ours) {
+      const free = await findFreePort(port + 2);
+      console.log(`  Port ${port} is held by another daemon — moving this dashboard to ${free}.`);
+      port = free;
+      config.openwolf.dashboard.port = free;
+      config.openwolf.daemon = config.openwolf.daemon ?? { port: free - 1 };
+      config.openwolf.daemon.port = free - 1;
+      writeJSON(configPath, config);
+      running = false; // start our own daemon on the new port
+    }
+  }
+
   // The dashboard requires a token; pass it via the URL so the SPA can pick it up.
   const token = ensureDashboardToken(wolfDir);
   const baseUrl = `http://localhost:${port}`;
   const url = `${baseUrl}/?token=${token}`;
-
-  // Check if daemon is already running on that port
-  const running = await isPortOpen(port);
 
   if (!running) {
     console.log("  Daemon not running. Starting dashboard server...");
@@ -72,7 +105,7 @@ export async function dashboardCommand(): Promise<void> {
     // Fork the daemon as a child process, passing project root explicitly
     const child = fork(daemonScript, [], {
       cwd: projectRoot,
-      env: { ...process.env, OPENWOLF_PROJECT_ROOT: projectRoot },
+      env: { ...process.env, OPENWOLF_PROJECT_ROOT: projectRoot, OPENWOLF_DASHBOARD_PORT: String(port) },
       detached: true,
       stdio: "ignore",
     });

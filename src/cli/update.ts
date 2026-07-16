@@ -16,6 +16,7 @@ import { ensureDir } from "../utils/paths.js";
 import { getRetention, pruneBackups } from "../utils/maintenance.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { deployAgentHooks } from "../utils/agent-hooks.js";
+import { reconcileProjectPorts } from "../utils/ports.js";
 import { seedMissingUserData } from "../utils/seed.js";
 import { ensureWolfGitignore } from "../utils/wolf-gitignore.js";
 
@@ -122,6 +123,10 @@ export async function updateCommand(options: { dryRun?: boolean; force?: boolean
     results.push(result);
   }
 
+  // Give every project a unique dashboard/daemon port pair, so running several daemons no longer
+  // makes the second project's dashboard open the first project's data.
+  const portChanges = reconcileProjectPorts(options.dryRun ?? false);
+
   // Summary
   console.log("\n─── Update Summary ───");
   const updated = results.filter(r => r.status === "updated");
@@ -145,6 +150,13 @@ export async function updateCommand(options: { dryRun?: boolean; force?: boolean
     for (const r of errors) {
       console.log(`    ${r.project.name} — ${r.message}`);
     }
+  }
+  if (portChanges.length > 0) {
+    console.log(`\n  ${options.dryRun ? "○ Would reassign" : "✓ Reassigned"} colliding ports (${portChanges.length}):`);
+    for (const c of portChanges) {
+      console.log(`    ${c.name} — dashboard ${c.oldPort} → ${c.newPort} (daemon ${c.newPort - 1})`);
+    }
+    if (!options.dryRun) console.log("    Restart daemons for the new ports to take effect.");
   }
   console.log("");
 }
