@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { findDuplicateEntries } from "../utils/maintenance.js";
 import { blocksFor } from "../utils/recall.js";
-import { resolveLlmConfig, callLlm } from "../daemon/llm-provider.js";
+import { resolveLlmConfig, callLlm, requiresApiKey } from "../daemon/llm-provider.js";
 
 interface Merge { aStart: number; aEnd: number; bStart: number; bEnd: number; mergedText: string }
 
@@ -51,9 +51,9 @@ export async function consolidateCommand(opts: ConsolidateOpts): Promise<void> {
 
   // Resolve the LLM once (consolidation needs it). Clear guidance if unconfigured.
   const llm = resolveLlmConfig(wolfDir);
-  const apiKey = process.env[llm.apiKeyEnv];
-  if (!apiKey) {
-    console.error(`${llm.apiKeyEnv} is not set — consolidation needs an LLM. Set it, or point openwolf.cron.llm_* at a provider (e.g. a free OpenAI-compatible one). Provider: ${llm.provider}/${llm.model}.`);
+  const apiKey = process.env[llm.apiKeyEnv] ?? "";
+  if (!apiKey && requiresApiKey(llm)) {
+    console.error(`${llm.apiKeyEnv} is not set — consolidation needs an LLM. Set it, or point openwolf.cron.llm_* at a provider (a free OpenAI-compatible one, or a local model server — LM Studio on http://localhost:1234/v1, Ollama on http://localhost:11434/v1 — which needs no key). Provider: ${llm.provider}/${llm.model}.`);
     process.exitCode = 1;
     return;
   }
@@ -67,7 +67,9 @@ export async function consolidateCommand(opts: ConsolidateOpts): Promise<void> {
     process.stdout.write(`  ${Math.round(p.similarity * 100)}%  lines ${p.aLine} ↔ ${p.bLine} … `);
     let merged = "";
     try {
-      merged = (await callLlm(llm, apiKey, MERGE_PROMPT(a.text, b.text), { maxTokens: 900, timeoutMs: 60000 })).trim();
+      // 3000, not 900: the merge itself is short, but a reasoning model bills its thinking to the same
+      // budget and would otherwise return nothing — every merge then looked "implausible" and was skipped.
+      merged = (await callLlm(llm, apiKey, MERGE_PROMPT(a.text, b.text), { maxTokens: 3000, timeoutMs: 120000 })).trim();
       merged = merged.replace(/^```[\w]*\n?|\n?```$/g, "").trim(); // strip stray fences
     } catch (e) {
       console.log(`skipped (LLM error: ${(e as Error).message.slice(0, 60)})`);
@@ -91,8 +93,15 @@ export async function consolidateCommand(opts: ConsolidateOpts): Promise<void> {
     return;
   }
 
-  // Back up, then rewrite.
-  try { fs.copyFileSync(cerebrumPath, cerebrumPath + ".bak-pre-consolidate"); } catch { /* best-effort */ }
+  // Back up, then rewrite. A failed backup is a HARD STOP, not best-effort: same failure class as
+  // bug-157 — if the safety net silently fails, the dangerous step must not proceed. No backup, no rewrite.
+  try {
+    fs.copyFileSync(cerebrumPath, cerebrumPath + ".bak-pre-consolidate");
+  } catch (e) {
+    console.error(`\nAborting: could not write backup cerebrum.md.bak-pre-consolidate (${(e as Error).message}). cerebrum.md left untouched.`);
+    process.exitCode = 1;
+    return;
+  }
   fs.writeFileSync(cerebrumPath, applyConsolidations(content, merges), "utf-8");
   console.log(`\nDone. Merged ${merges.length} pair(s) → cerebrum.md (backup: cerebrum.md.bak-pre-consolidate). Review the diff.`);
 }

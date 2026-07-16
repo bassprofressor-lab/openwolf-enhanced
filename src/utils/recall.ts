@@ -89,6 +89,9 @@ function unitsFor(src: string, content: string): Unit[] {
   if (src.endsWith(".json")) {
     let raw: unknown;
     try { raw = JSON.parse(content); } catch { return []; }
+    // JSON.parse yields null for "null", a number for "5", etc. The `.bugs` access below would then
+    // throw a TypeError OUTSIDE the try — guard for a real object first (bug: recall crashed on null buglog).
+    if (!raw || typeof raw !== "object") return [];
     const bugs = Array.isArray(raw)
       ? raw
       : Array.isArray((raw as { bugs?: unknown[] }).bugs) ? (raw as { bugs: Array<Record<string, unknown>> }).bugs : [];

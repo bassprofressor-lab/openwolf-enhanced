@@ -62,6 +62,21 @@ function isPrivateHost(host: string): boolean {
   return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+// A loopback endpoint is a local model server (Ollama, llama.cpp, LM Studio). Two consequences:
+// it may be reached over cleartext http, and it needs no API key — so there is no secret to leak.
+export function isLocalEndpoint(baseUrl: string): boolean {
+  let u: URL;
+  try { u = new URL(baseUrl); } catch { return false; }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+}
+
+// Local model servers accept (and ignore) any bearer token, so an unset key must not block the task.
+// Remote providers still require one — a keyless request there is a guaranteed 401.
+export function requiresApiKey(cfg: LlmConfig): boolean {
+  return !isLocalEndpoint(cfg.baseUrl);
+}
+
 // Refuse an llm_base_url that would exfiltrate the API key or reach internal services. Since the URL
 // comes from a project's config.json (which a cloned/untrusted repo can carry), require https except
 // for explicit loopback (local models), and block private/link-local/metadata addresses.
@@ -69,7 +84,7 @@ export function assertSafeBaseUrl(baseUrl: string): void {
   let u: URL;
   try { u = new URL(baseUrl); } catch { throw new Error(`invalid llm_base_url: ${baseUrl}`); }
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+  const isLoopback = isLocalEndpoint(baseUrl);
   if (u.protocol === "http:") {
     if (!isLoopback) throw new Error(`llm_base_url must use https:// for non-loopback hosts (got http://${host})`);
   } else if (u.protocol !== "https:") {
@@ -87,19 +102,23 @@ export interface LlmRequest {
 }
 
 // Build the HTTP request for a single-prompt completion — pure, so it's unit-testable offline.
-export function buildLlmRequest(cfg: LlmConfig, apiKey: string, prompt: string, maxTokens = 2048): LlmRequest {
+// An empty apiKey emits no auth header at all (local servers reject nothing; sending "Bearer "
+// with an empty value trips stricter ones).
+// maxTokens defaults high because reasoning models charge their hidden reasoning against the same
+// budget — 2048 was enough for a plain model's answer but can be spent entirely before Qwen3 says a word.
+export function buildLlmRequest(cfg: LlmConfig, apiKey: string, prompt: string, maxTokens = 4096): LlmRequest {
   assertSafeBaseUrl(cfg.baseUrl);
   const messages = [{ role: "user", content: prompt }];
   if (cfg.provider === "openai") {
     return {
       url: `${cfg.baseUrl}/chat/completions`,
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      headers: { ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), "content-type": "application/json" },
       body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages, stream: false }),
     };
   }
   return {
     url: `${cfg.baseUrl}/messages`,
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    headers: { ...(apiKey ? { "x-api-key": apiKey } : {}), "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages }),
   };
 }
@@ -108,7 +127,21 @@ export function buildLlmRequest(cfg: LlmConfig, apiKey: string, prompt: string, 
 // base-url validation (via buildLlmRequest), a hard timeout, and redirect:"error" so the API key
 // never follows a 3xx to another host. Used by the cron engine and `openwolf consolidate`.
 export async function callLlm(cfg: LlmConfig, apiKey: string, prompt: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
-  const req = buildLlmRequest(cfg, apiKey, prompt, opts.maxTokens ?? 2048);
+  return (await callLlmDetailed(cfg, apiKey, prompt, opts)).text;
+}
+
+/**
+ * Same call, but it also reports whether the model ran out of budget MID-ANSWER.
+ *
+ * `callLlm` cannot express that: it throws when a reasoning model produced nothing at all, but a
+ * response cut off *after* some text is returned as a normal string. That is fine for a summary and
+ * catastrophic for anything that overwrites a file — half a cerebrum.md still contains "# Cerebrum"
+ * and would be persisted over the whole one. Callers that write files must check `truncated`.
+ */
+export async function callLlmDetailed(
+  cfg: LlmConfig, apiKey: string, prompt: string, opts: { maxTokens?: number; timeoutMs?: number } = {},
+): Promise<{ text: string; truncated: boolean }> {
+  const req = buildLlmRequest(cfg, apiKey, prompt, opts.maxTokens ?? 4096);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 120_000);
   let response: Response;
@@ -124,15 +157,39 @@ export async function callLlm(cfg: LlmConfig, apiKey: string, prompt: string, op
     const body = await response.text();
     throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
   }
-  return parseLlmResponse(cfg.provider, await response.json());
+  const data = await response.json();
+  return { text: parseLlmResponse(cfg.provider, data), truncated: wasTruncated(cfg.provider, data) };
 }
 
+/** Did the model stop because it hit max_tokens (rather than finishing its thought)? — pure. */
+export function wasTruncated(provider: LlmProvider, data: unknown): boolean {
+  if (provider === "openai") {
+    return (data as { choices?: Array<{ finish_reason?: string }> }).choices?.[0]?.finish_reason === "length";
+  }
+  return (data as { stop_reason?: string }).stop_reason === "max_tokens";
+}
+
+export const TRUNCATED_BEFORE_ANSWER =
+  "the model hit max_tokens before emitting any answer. Reasoning models (Qwen3, o-series, …) spend the " +
+  "budget on hidden reasoning tokens first, so a small max_tokens yields an empty reply. Raise maxTokens.";
+
 // Extract the assistant text from either API's response shape — pure.
+//
+// A reasoning model can burn the entire max_tokens budget on reasoning tokens and return HTTP 200 with
+// EMPTY content (finish_reason "length"). Returning "" for that looked like a successful empty answer:
+// `consolidate` skipped every merge as "implausible output" and `llm --test` printed a green ✓ on nothing.
+// A response truncated before it said anything is an error, not an empty string. A merely malformed body
+// still yields "" — only an explicit length/max_tokens stop is treated as failure.
 export function parseLlmResponse(provider: LlmProvider, data: unknown): string {
   if (provider === "openai") {
-    const d = data as { choices?: Array<{ message?: { content?: string } }> };
-    return d.choices?.[0]?.message?.content?.trim() ?? "";
+    const d = data as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+    const choice = d.choices?.[0];
+    const text = choice?.message?.content?.trim() ?? "";
+    if (!text && choice?.finish_reason === "length") throw new Error(TRUNCATED_BEFORE_ANSWER);
+    return text;
   }
-  const d = data as { content?: Array<{ type: string; text?: string }> };
-  return d.content?.find((b) => b.type === "text")?.text?.trim() ?? "";
+  const d = data as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
+  const text = d.content?.find((b) => b.type === "text")?.text?.trim() ?? "";
+  if (!text && d.stop_reason === "max_tokens") throw new Error(TRUNCATED_BEFORE_ANSWER);
+  return text;
 }

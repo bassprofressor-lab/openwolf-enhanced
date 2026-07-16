@@ -24,6 +24,7 @@ import {
   nativeMemoryDir,
 } from "../dist/hooks/shared.js";
 import { toCSV, collectRows } from "../dist/src/cli/export-cmd.js";
+import { splitForContext } from "../dist/src/daemon/cron-engine.js";
 
 function tmpWolf() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owtest-"));
@@ -448,7 +449,8 @@ test("resume digest i18n: config lang + OPENWOLF_LANG env; localizes headers/pre
 });
 
 // --- LLM provider abstraction (cron AI tasks) ---
-import { llmConfigFrom, buildLlmRequest, parseLlmResponse, assertSafeBaseUrl } from "../dist/src/daemon/llm-provider.js";
+import { llmConfigFrom, buildLlmRequest, parseLlmResponse, wasTruncated, assertSafeBaseUrl, requiresApiKey, isLocalEndpoint } from "../dist/src/daemon/llm-provider.js";
+import { explainLlmError } from "../dist/src/cli/llm-cmd.js";
 test("llm-provider: assertSafeBaseUrl blocks SSRF / cleartext key exfil", () => {
   assertSafeBaseUrl("https://api.groq.com/openai/v1"); // ok
   assertSafeBaseUrl("http://localhost:11434/v1");       // ok: local model
@@ -491,6 +493,88 @@ test("llm-provider: defaults to Anthropic; openai override; request/response sha
   assert.equal(parseLlmResponse("anthropic", { content: [{ type: "text", text: " hi " }] }), "hi");
   assert.equal(parseLlmResponse("openai", { choices: [{ message: { content: " yo " } }] }), "yo");
   assert.equal(parseLlmResponse("openai", {}), ""); // malformed → empty, no throw
+
+  // Reasoning models burn max_tokens on hidden reasoning and return HTTP 200 with EMPTY content.
+  // That must raise, not return "" — otherwise consolidate skips every merge and `llm --test` says ✓.
+  assert.throws(
+    () => parseLlmResponse("openai", { choices: [{ message: { content: "" }, finish_reason: "length" }] }),
+    /max_tokens/,
+    "openai: truncated before any answer → throw",
+  );
+  assert.throws(
+    () => parseLlmResponse("anthropic", { content: [], stop_reason: "max_tokens" }),
+    /max_tokens/,
+    "anthropic: truncated before any answer → throw",
+  );
+  // Truncated AFTER saying something is still usable — keep the text, do not throw.
+  assert.equal(
+    parseLlmResponse("openai", { choices: [{ message: { content: "partial " }, finish_reason: "length" }] }),
+    "partial",
+  );
+
+  // …but a caller that OVERWRITES A FILE must be able to see that it was cut off: half a cerebrum.md
+  // still contains "# Cerebrum" and would be written over the complete one. wasTruncated() says so.
+  assert.equal(wasTruncated("openai", { choices: [{ finish_reason: "length" }] }), true);
+  assert.equal(wasTruncated("openai", { choices: [{ finish_reason: "stop" }] }), false);
+  assert.equal(wasTruncated("anthropic", { stop_reason: "max_tokens" }), true);
+  assert.equal(wasTruncated("anthropic", { stop_reason: "end_turn" }), false);
+});
+test("llm-provider: local model server needs no API key, and sends no auth header", () => {
+  const ollama = llmConfigFrom({ llm_provider: "openai", llm_base_url: "http://localhost:11434/v1", llm_model: "qwen3:22b" });
+  assert.equal(isLocalEndpoint(ollama.baseUrl), true);
+  assert.equal(requiresApiKey(ollama), false, "loopback endpoint must not demand a key");
+
+  // Keyless request: no Authorization header at all (not an empty "Bearer ").
+  const r = buildLlmRequest(ollama, "", "hi");
+  assert.ok(!("authorization" in r.headers), "no auth header when key is empty");
+  assert.equal(r.headers["content-type"], "application/json");
+  assert.equal(JSON.parse(r.body).model, "qwen3:22b");
+
+  // A key is still sent if the user has one set (some local servers are configured to require it).
+  assert.equal(buildLlmRequest(ollama, "tok", "hi").headers.authorization, "Bearer tok");
+
+  // Remote providers still require a key — this must not have been loosened for everyone.
+  assert.equal(requiresApiKey(llmConfigFrom(undefined)), true, "anthropic still needs a key");
+  assert.equal(requiresApiKey(llmConfigFrom({ llm_provider: "openai", llm_base_url: "https://api.groq.com/openai/v1" })), true);
+  assert.equal(isLocalEndpoint("https://evil.tld/localhost"), false, "path, not host");
+  assert.equal(isLocalEndpoint("https://localhost.evil.tld/v1"), false, "suffix trick rejected");
+});
+test("splitForContext: keeps every byte — a big file is split, never truncated (bug-157)", () => {
+  // The bug: cerebrum.md (78 KB) was cut to its last 20 KB and the model was asked for "the cleaned
+  // file", which would have deleted the other 58 KB. Splitting must therefore be LOSSLESS.
+  const paras = Array.from({ length: 60 }, (_, i) => `## Section ${i}\n- fact ${i} that must survive`);
+  const text = paras.join("\n\n");
+  const chunks = splitForContext(text, 500);
+
+  assert.ok(chunks.length > 1, "oversized text is actually split");
+  for (const c of chunks) assert.ok(Buffer.byteLength(c, "utf-8") <= 500 || !c.includes("\n\n"), "chunks respect the cap");
+  // Every original fact still exists somewhere — nothing was dropped on the floor.
+  const joined = chunks.join("\n\n");
+  for (let i = 0; i < 60; i++) assert.ok(joined.includes(`fact ${i} that must survive`), `fact ${i} survived the split`);
+  assert.equal(joined, text, "round-trips exactly: split is lossless, not lossy");
+
+  // Small input is passed through untouched — no needless chunking.
+  assert.deepEqual(splitForContext("short", 500), ["short"]);
+});
+
+test("llm-cmd: errors name the actual fix", () => {
+  const ollama = llmConfigFrom({ llm_provider: "openai", llm_base_url: "http://localhost:11434/v1", llm_model: "qwen3:22b" });
+  const refused = Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+  assert.match(explainLlmError(ollama, refused), /ssh -N -R 11434:localhost:11434/, "local + refused → port-forward hint");
+  assert.match(explainLlmError(ollama, new Error("openai API error (qwen3:22b) 404: model not found")), /ollama pull qwen3:22b/);
+
+  // The forwarded port must come from the configured base_url, not a hard-coded 11434 — LM Studio is
+  // on 1234, and telling that user to forward 11434 forwards a port nothing listens on.
+  const lmstudio = llmConfigFrom({ llm_provider: "openai", llm_base_url: "http://127.0.0.1:1234/v1", llm_model: "qwen/qwen3.6-27b" });
+  assert.match(explainLlmError(lmstudio, refused), /ssh -N -R 1234:localhost:1234/, "port is read from base_url");
+  assert.doesNotMatch(explainLlmError(lmstudio, refused), /11434/, "no Ollama port leaks into an LM Studio hint");
+  // A 404 means "server up, model unknown" — do not tell an LM Studio user to run `ollama pull`.
+  const notFound = explainLlmError(lmstudio, new Error("openai API error (qwen/qwen3.6-27b) 404: model not found"));
+  assert.match(notFound, /curl http:\/\/127\.0\.0\.1:1234\/v1\/models/, "404 → show how to list the real ids");
+
+  const groq = llmConfigFrom({ llm_provider: "openai", llm_base_url: "https://api.groq.com/openai/v1", api_key_env: "GROQ_API_KEY" });
+  assert.match(explainLlmError(groq, refused), /Cannot reach https:\/\/api\.groq\.com/, "remote + refused → no ssh advice");
+  assert.match(explainLlmError(groq, new Error("... 401: invalid key")), /GROQ_API_KEY/);
 });
 
 // --- Bash activity capture (opt-in) helpers ---
@@ -802,4 +886,22 @@ test("bash writes: heredocs/redirects/in-place edits count, inspection and scrat
   assert.ok(!W("echo x > /tmp/scratch.txt"), "scratch dir is not project work");
   assert.ok(!W("python3 -c \"print(open('a.json').read())\""), "open() for reading");
   assert.ok(!W("cat pkg.json | tee /dev/null"), "tee /dev/null");
+});
+
+// --- recall: malformed buglog.json must not crash (bug: TypeError on `null` outside the try) ---
+test("recall: buglog.json = 'null' does not crash", () => {
+  const wolf = tmpWolf();
+  fs.writeFileSync(path.join(wolf, "buglog.json"), "null");
+  fs.writeFileSync(path.join(wolf, "memory.md"), "- fixed the port forwarding issue\n");
+  // Before the guard, unitsFor() did `(null).bugs` and threw a TypeError here.
+  assert.doesNotThrow(() => recall(wolf, "port"));
+});
+
+test("recall: buglog.json = number/string is ignored, other sources still searched", () => {
+  const wolf = tmpWolf();
+  fs.writeFileSync(path.join(wolf, "buglog.json"), "42");
+  fs.writeFileSync(path.join(wolf, "memory.md"), "- the widget alignment bug is fixed\n");
+  let hits;
+  assert.doesNotThrow(() => { hits = recall(wolf, "widget"); });
+  assert.ok(hits.some((h) => h.file === "memory.md"), "markdown source still matched");
 });

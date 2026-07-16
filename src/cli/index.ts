@@ -174,6 +174,17 @@ export function createProgram(): Command {
       await consolidateCommand(opts);
     });
 
+  // --- LLM command ---
+  program
+    .command("llm")
+    .description("Show (and test) the LLM the project's AI features call — incl. local models via Ollama/llama.cpp")
+    .option("--test", "Send a real prompt and time the round-trip")
+    .option("--prompt <text>", "Prompt to send with --test")
+    .action(async (opts: { test?: boolean; prompt?: string }) => {
+      const { llmCommand } = await import("./llm-cmd.js");
+      await llmCommand(opts);
+    });
+
   // --- Export command ---
   program
     .command("export <what>")

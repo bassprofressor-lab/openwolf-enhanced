@@ -13,7 +13,7 @@ import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
 import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
-import { resolveLlmConfig } from "./llm-provider.js";
+import { resolveLlmConfig, requiresApiKey } from "./llm-provider.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -165,7 +165,9 @@ let projectMeta = detectProjectMeta();
 // API routes
 app.get("/api/config", (_req, res) => {
   const llm = resolveLlmConfig(path.join(projectRoot, ".wolf"));
-  res.json({ hasApiKey: !!process.env[llm.apiKeyEnv], llmProvider: llm.provider, llmModel: llm.model });
+  // A local model server needs no key — the dashboard must not report AI tasks as unavailable there.
+  const usable = !!process.env[llm.apiKeyEnv] || !requiresApiKey(llm);
+  res.json({ hasApiKey: usable, llmProvider: llm.provider, llmModel: llm.model });
 });
 
 app.get("/api/projects", (_req, res) => {

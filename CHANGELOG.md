@@ -6,6 +6,84 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.17.0] — 2026-07-16
+
+### Added
+
+- **Local models (Ollama, llama.cpp, LM Studio) now actually work.** 1.15.0 made the provider
+  configurable and 1.15.1 deliberately allowed `http://` for loopback so a local model could be used —
+  but every call site still refused to run without an API key, which a local server does not have. The
+  key is now required only for remote endpoints (`requiresApiKey()`); a loopback endpoint runs keyless,
+  and a keyless request sends no `Authorization` header at all rather than an empty `Bearer `. Remote
+  providers are unchanged and still demand a key.
+- **`openwolf llm`** — shows which model the project's AI features (cron tasks, `consolidate`) will
+  call, and `--test` sends a real prompt and times the round-trip. A misconfigured endpoint used to
+  surface only as a cron task that failed hours later. Errors name the fix: a refused local connection
+  suggests the `ssh -R` port-forward (with the port taken from your `llm_base_url`), a 404 shows how to
+  list the ids the server actually serves.
+
+### Changed
+
+- **AI cron tasks now propose instead of overwrite.** The default output mode for `ai_task` is
+  `"proposal"`: the model reads the project's knowledge files and writes its answer to
+  `.wolf/proposals/<task>-<timestamp>.md`, touching nothing canonical. A human — or a stronger model in
+  a session — decides what is adopted. The local model does the legwork; authority over what is true
+  stays with the reader. `mode: "overwrite"` remains available, opt-in and guarded.
+- **Oversized context files are split, not truncated.** `splitForContext()` cuts at paragraph
+  boundaries and round-trips losslessly, so a model whose window is smaller than the file still reads
+  **all** of it — in several passes. The old behaviour kept the last 20 KB and discarded the rest, which
+  for a knowledge base is data loss with extra steps (it is exactly how the bug below happened).
+
+### Fixed
+
+- **An AI cron task could delete a project's entire knowledge base.** `runAiTask` caps each context file
+  at 20 KB. The shipped `cerebrum-reflection` task feeds it `cerebrum.md`, tells the model to "return the
+  cleaned file content only", and writes the answer straight back. On a project whose cerebrum had grown
+  to 78 KB, the model therefore saw only the last quarter — and its tidy 3.9 KB "cleaned file" would have
+  replaced all 78 KB, at 03:00 on a Sunday, with no backup: a 95% loss, silently. It had never fired only
+  because `ANTHROPIC_API_KEY` was unset; pointing the task at a keyless local model removes that accidental
+  safety net, so this became live the moment local models started working. Now: a file the model saw only
+  a **slice** of is never rewritten from that slice; every overwrite of `cerebrum.md` leaves a timestamped
+  backup beside it; and `callLlmDetailed()`/`wasTruncated()` reject an answer that was cut off mid-text —
+  half a cerebrum still contains `# Cerebrum` and would otherwise have been written over the whole one.
+  AI tasks also get a 16k token budget (a reasoning model spends thousands before the first character of
+  the file it is meant to produce).
+- **Reasoning models returned an empty answer that looked like a successful one.** Qwen3, o-series and
+  friends bill their hidden reasoning tokens against the *same* `max_tokens` budget, so a small budget
+  is spent before the model emits a single character — the server replies `HTTP 200` with
+  `finish_reason: "length"` and empty content. `parseLlmResponse()` handed that back as `""`, which is
+  indistinguishable from a legitimately empty answer: `consolidate` discarded every merge as
+  "implausible merge output" and `llm --test` printed a green ✓ on nothing. A response truncated
+  *before* it says anything is now an error that names the cause; truncated *after* some text is still
+  returned. Measured: a two-line merge prompt spends 1,935 reasoning tokens, so the old 900-token
+  budget could never have produced output.
+- **Token budgets raised for reasoning models** — default 2048 → 4096, `consolidate` 900 → 3000 (and
+  its timeout 60s → 120s), `llm --test` 256 → 2048.
+- **Error hints were hard-wired to Ollama.** A refused connection always suggested forwarding port
+  11434 and a 404 always suggested `ollama pull` — wrong for anyone on LM Studio (port 1234), who would
+  have tunnelled a port nothing listens on. The port is now read from the configured `llm_base_url`,
+  and the 404 hint is provider-neutral. A live tunnel with nothing behind it (LM Studio's server toggle
+  left off) is now called out explicitly, because it presents as a connection error but is not one.
+- **`openwolf recall` crashed on a malformed `buglog.json`.** `unitsFor()` wrapped only `JSON.parse` in
+  its `try`; the very next line read `(raw).bugs`. For a file containing `null` (or a number, or a bare
+  string) `raw` is not an object, so that access threw a `TypeError` *outside* the `try` and took the whole
+  command down — reproducible in ten seconds with `printf null > .wolf/buglog.json`. It now returns no
+  units for any non-object JSON, the same as an unparseable file. (Found by a local model, verified against
+  the code.)
+- **A consolidate whose backup failed still overwrote `cerebrum.md`.** The pre-write `copyFileSync` to
+  `cerebrum.md.bak-pre-consolidate` was wrapped in a swallow-everything `catch`, so a full disk, a
+  permission error, or a lock let the backup silently fail — and the rewrite proceeded anyway, leaving no
+  way back. Same failure class as the 95%-loss bug: if the safety net fails, the dangerous step must not
+  run. A failed backup is now a hard abort; `cerebrum.md` is left untouched.
+- **Retry timers outlived `stop()`.** Failed tasks reschedule themselves with `setTimeout`, but `stop()`
+  only cancelled the node-cron jobs — a pending retry fired after shutdown and ran against a daemon that
+  believed it had stopped. Retry timers are now tracked and cleared in `stop()`.
+- **Concurrent cron tasks could lose each other's execution logs.** The read-modify-write of
+  `cron-state.json` (read state → append this run's entry → write) was unlocked, so two tasks finishing
+  close together — or one process racing the stop hook — could each read the same snapshot and clobber the
+  other's entry, corrupting execution logs and failure counts. Both the success and failure paths now do
+  the read-modify-write under `withLock`, the same guard already used for the token ledger.
+
 ## [1.16.5] — 2026-07-13
 
 ### Fixed
