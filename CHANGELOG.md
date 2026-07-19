@@ -6,6 +6,32 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.19.0] — 2026-07-19
+
+### Fixed
+
+- **Maintenance operations now hold the file lock while they read-modify-write.** `compactLedger`,
+  `consolidateMemory` and `dedupeAndCapBuglog` (run by `openwolf doctor`) and `markPushed` (run by
+  `openwolf push`) wrote `token-ledger.json` / `memory.md` / `buglog.json` / `remote-pushed.json`
+  without a lock, while the daemon and stop-hook write the same files *with* `withLock`. Running a
+  compaction next to a live write could silently drop the concurrent update. All four now take the
+  same lock, so each read-modify-write is atomic.
+- **`writeCerebrumFromAi` no longer overwrites `cerebrum.md` when the backup write fails.** The
+  pre-write backup sat in a `try/catch` that swallowed *every* error and then overwrote anyway — a
+  failed backup (disk full, permissions) destroyed the original with no copy. The backup now runs
+  outside the catch: if it throws, the overwrite never happens. Same data-loss class as bug-157.
+- **`splitForContext` no longer cuts a multi-byte character in half.** The hard-cut path for an
+  oversized single paragraph sliced by UTF-16 code units against a *byte* budget — it could exceed the
+  budget and split a multi-byte char / surrogate pair into invalid UTF-8. It now accumulates whole code
+  points up to the byte budget.
+
+### Changed
+
+- **Recall matching is anchored at the start of a word (prefix) instead of anywhere in it (substring).**
+  A query `port` still matches `ports`/`portal` (prefix) but no longer spuriously matches `report`
+  mid-word, which was distorting BM25 term frequencies. Tokenisation is now Unicode-aware, so umlauts
+  stay inside a word.
+
 ## [1.18.2] — 2026-07-16
 
 ### Fixed

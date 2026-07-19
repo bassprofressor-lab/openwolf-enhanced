@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readJSON, writeJSON, readText, writeText } from "./fs-safe.js";
+import { readJSON, writeJSON, readText, writeText, withLock } from "./fs-safe.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 import { blocksFor } from "./recall.js";
 
@@ -478,6 +478,9 @@ const noop = (name: string): CompactResult => ({ changed: false, before: 0, afte
 export function compactLedger(wolfDir: string, ret: Retention): CompactResult {
   const p = path.join(wolfDir, "token-ledger.json");
   if (!fs.existsSync(p)) return noop("token-ledger");
+  // Hold the same file lock as the daemon/stop-hook ledger writers (withLock on the ledger path)
+  // so a doctor-compaction and a live write can't clobber each other → no lost updates.
+  return withLock(p, () => {
   const before = fileSize(p);
   const ledger = readJSON<{ sessions?: Array<{ reads?: unknown[]; writes?: unknown[] }> }>(p, {});
   if (!Array.isArray(ledger.sessions)) return noop("token-ledger");
@@ -501,12 +504,14 @@ export function compactLedger(wolfDir: string, ret: Retention): CompactResult {
   writeJSON(p, ledger);
   const after = fileSize(p);
   return { changed: true, before, after, detail: `token-ledger: ${ledger.sessions.length} sessions kept, ${humanBytes(before)} → ${humanBytes(after)}` };
+  });
 }
 
 // Summarize sessions older than `olderThanDays` down to a single line each.
 // Mirrors the daemon's consolidateMemory so it also runs without the daemon.
 export function consolidateMemory(wolfDir: string, olderThanDays: number): CompactResult {
   const p = path.join(wolfDir, "memory.md");
+  return withLock(p, () => {
   const content = readText(p);
   if (!content) return noop("memory");
   const before = Buffer.byteLength(content, "utf-8");
@@ -554,6 +559,7 @@ export function consolidateMemory(wolfDir: string, olderThanDays: number): Compa
   if (after >= before || consolidated === 0) return { changed: false, before, after: before, detail: `memory.md: no sessions older than ${olderThanDays}d` };
   writeText(p, result);
   return { changed: true, before, after, detail: `memory.md: ${consolidated} old sessions consolidated, ${humanBytes(before)} → ${humanBytes(after)}` };
+  });
 }
 
 interface Bug {
@@ -569,6 +575,7 @@ interface Bug {
 export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult {
   const p = path.join(wolfDir, "buglog.json");
   if (!fs.existsSync(p)) return noop("buglog");
+  return withLock(p, () => {
   const before = fileSize(p);
   // Tolerate legacy bare-array buglogs ([...]) as well as {version, bugs:[]}.
   const raw = readJSON<unknown>(p, { version: 1, bugs: [] as Bug[] });
@@ -608,6 +615,7 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
   const after = fileSize(p);
   const note = wasArray ? " (migrated legacy array → {version,bugs})" : "";
   return { changed: true, before, after, detail: `buglog: ${startCount} → ${result.length} entries${note}, ${humanBytes(before)} → ${humanBytes(after)}` };
+  });
 }
 
 export function pruneBackups(wolfDir: string, keep: number): CompactResult {

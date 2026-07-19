@@ -44,8 +44,21 @@ export function splitForContext(text: string, maxBytes: number): string[] {
   // case where anything is cut, and it is cut into pieces rather than thrown away.
   return chunks.flatMap((c) => {
     if (Buffer.byteLength(c, "utf-8") <= maxBytes) return [c];
+    // maxBytes is a BYTE budget, but a naive c.slice(i, i+maxBytes) slices by UTF-16 code units and
+    // would cut a multi-byte char (or surrogate pair) in half → invalid UTF-8. Iterate by code point
+    // (for…of yields whole code points) and flush whenever the next char would push the piece over
+    // the byte budget, so a char is never split across chunks.
     const out: string[] = [];
-    for (let i = 0; i < c.length; i += maxBytes) out.push(c.slice(i, i + maxBytes));
+    let piece = "";
+    for (const ch of c) {
+      if (piece && Buffer.byteLength(piece + ch, "utf-8") > maxBytes) {
+        out.push(piece);
+        piece = ch;
+      } else {
+        piece += ch;
+      }
+    }
+    if (piece) out.push(piece);
     return out;
   });
 }
@@ -500,13 +513,23 @@ export class CronEngine {
         `instead of a full-file rewrite.`
       );
     }
+    // Read the current file (if any). A missing file is fine — the first write has nothing to lose.
+    let existing: string | null = null;
     try {
-      const before = fs.readFileSync(cerebrumPath, "utf-8");
+      existing = fs.readFileSync(cerebrumPath, "utf-8");
+    } catch {
+      existing = null;
+    }
+    // If a file exists it MUST be backed up before we overwrite it. Crucially, a *failed* backup
+    // (disk full, permissions) must abort the overwrite — otherwise we'd destroy the original with
+    // no copy, the exact data-loss class bug-157 guarded against. So the backup is NOT in a try/catch:
+    // if it throws, the throw propagates and writeText below never runs.
+    if (existing !== null) {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const backupDir = path.join(this.wolfDir, "backups");
       fs.mkdirSync(backupDir, { recursive: true });
-      fs.writeFileSync(path.join(backupDir, `cerebrum-${stamp}.md`), before, "utf-8");
-    } catch { /* no existing file to back up — first write is harmless */ }
+      fs.writeFileSync(path.join(backupDir, `cerebrum-${stamp}.md`), existing, "utf-8");
+    }
     writeText(cerebrumPath, result);
   }
 

@@ -135,15 +135,18 @@ function sourceFiles(wolfDir: string, opts: RecallOpts): SourceFile[] {
 const BM25_K1 = 1.5;
 const BM25_B = 0.75;
 
-interface Doc { src: string; line: number; text: string; lower: string; len: number; blockStart: number; blockText: string; }
+interface Doc { src: string; line: number; text: string; lower: string; tokens: string[]; len: number; blockStart: number; blockText: string; }
 
 export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): RecallHit[] {
   const limit = opts.limit ?? 12;
-  const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
+  // Split on any non-letter/digit run (Unicode-aware, so umlauts stay inside a word) → whole-word tokens.
+  const terms = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean))];
   if (terms.length === 0) return [];
 
-  // Pass 1: collect every searchable unit as a "document" and its length (in words). Matching stays
-  // substring-based (so "port" still hits "ports"); we only enrich the *ranking* with BM25.
+  // Pass 1: collect every searchable unit as a "document", tokenized into whole words. Matching is
+  // word-PREFIX (anchored at word start): "restar" still hits "restart" and "port" still hits "ports",
+  // but a query no longer spuriously matches mid-word ("port" no longer hits "report"). We only enrich
+  // the *ranking* with BM25.
   const docs: Doc[] = [];
   for (const { label: src, abspath } of sourceFiles(wolfDir, opts)) {
     let content: string;
@@ -151,9 +154,10 @@ export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): R
     const blocks = blocksFor(src, content);
     for (const { line, text } of unitsFor(src, content)) {
       const block = blockContaining(blocks, line);
+      const tokens = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
       docs.push({
-        src, line, text: text.trim(), lower: text.toLowerCase(),
-        len: text.split(/\s+/).filter(Boolean).length || 1,
+        src, line, text: text.trim(), lower: text.toLowerCase(), tokens,
+        len: tokens.length || 1,
         blockStart: block ? block.start : line, blockText: block ? block.text : text,
       });
     }
@@ -164,7 +168,7 @@ export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): R
   const N = docs.length;
   const avgdl = docs.reduce((s, d) => s + d.len, 0) / N;
   const df = new Map<string, number>();
-  for (const term of terms) df.set(term, docs.reduce((c, d) => c + (d.lower.includes(term) ? 1 : 0), 0));
+  for (const term of terms) df.set(term, docs.reduce((c, d) => c + (d.tokens.some((t) => t.startsWith(term)) ? 1 : 0), 0));
   const idf = new Map<string, number>();
   for (const term of terms) idf.set(term, Math.log(1 + (N - df.get(term)! + 0.5) / (df.get(term)! + 0.5)));
 
@@ -174,7 +178,7 @@ export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): R
     let score = 0;
     let matched = 0;
     for (const term of terms) {
-      const tf = d.lower.split(term).length - 1;
+      const tf = d.tokens.reduce((c, t) => c + (t.startsWith(term) ? 1 : 0), 0);
       if (tf === 0) continue;
       matched++;
       const denom = tf + BM25_K1 * (1 - BM25_B + BM25_B * (d.len / avgdl));

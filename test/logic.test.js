@@ -280,18 +280,33 @@ test("recall: ranks multi-term matches, searches buglog entries, empty query →
   assert.deepEqual(recall(w, "zzznomatchzzz", {}), []);
 });
 
-test("recall: BM25 ranks a rare term above a common one; substring matching preserved", () => {
+test("recall: BM25 ranks a rare term above a common one; word-prefix matching, no mid-word match", () => {
   const w = tmpWolf();
   // "restart" is common (3 units), "quokka" is rare (1 unit).
   fs.writeFileSync(path.join(w, "memory.md"),
     "| 1 | the daemon restart happened | a | ok | 1k |\n" +
     "| 2 | another daemon restart today | b | ok | 1k |\n" +
     "| 3 | daemon restart number three | c | ok | 1k |\n" +
-    "| 4 | quokka anomaly observed once | d | ok | 1k |\n");
+    "| 4 | quokka anomaly observed once | d | ok | 1k |\n" +
+    "| 5 | weekly report generated fine | e | ok | 1k |\n");
   const hits = recall(w, "restart quokka", { limit: 5, includeNative: false });
   assert.ok(hits[0].text.toLowerCase().includes("quokka"), "rare term wins the top slot");
-  // substring matching still works: "restar" hits "restart"
-  assert.ok(recall(w, "restar", { includeNative: false }).length >= 3, "substring match preserved");
+  // word-PREFIX matching still works: "restar" hits "restart"
+  assert.ok(recall(w, "restar", { includeNative: false }).length >= 3, "prefix match preserved");
+  // but matching is anchored at word start: "port" must NOT spuriously hit mid-word "report"
+  assert.equal(recall(w, "port", { includeNative: false }).length, 0, "no spurious mid-word match");
+});
+
+test("splitForContext: honours the byte budget and never splits a multi-byte char", () => {
+  // A single oversized paragraph forces the hard cut. "ä" = 2 UTF-8 bytes but 1 UTF-16 unit,
+  // so a naive slice-by-code-unit would produce 20-byte chunks under a 10-byte budget.
+  const para = "ä".repeat(50); // 100 bytes, no paragraph breaks
+  const chunks = splitForContext(para, 10);
+  for (const c of chunks) {
+    assert.ok(Buffer.byteLength(c, "utf-8") <= 10, "chunk stays within the byte budget");
+    assert.equal(Buffer.from(c, "utf-8").toString("utf-8"), c, "chunk is valid UTF-8 (no char cut in half)");
+  }
+  assert.equal(chunks.join(""), para, "chunks reassemble to the original");
 });
 
 // --- consolidate: apply LLM-merged entries to cerebrum ---
