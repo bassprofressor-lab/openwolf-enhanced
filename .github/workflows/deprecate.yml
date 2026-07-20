@@ -1,0 +1,110 @@
+name: Deprecate a published version
+
+# Marks a published version as deprecated on npm, so `npm install` warns about it.
+#
+# Why this exists: publishing is tokenless via Trusted Publishing (OIDC), so no npm
+# credential is kept anywhere. `npm deprecate` is the one routine operation that is
+# NOT a publish, and it was previously impossible without a personal token on someone's
+# laptop. This workflow keeps that off laptops too.
+#
+# OIDC caveat: npm mints its short-lived credential during `npm publish`. Whether the
+# same exchange covers `npm deprecate` is not documented either way, so this job TRIES
+# OIDC first and falls back to an NPM_TOKEN secret if one is configured. The summary
+# says which path worked — the first run settles the question for good.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deprecate, e.g. 1.19.1 (bare, no leading v)'
+        required: true
+        type: string
+      message:
+        description: 'Deprecation message shown on install'
+        required: true
+        type: string
+      undo:
+        description: 'Un-deprecate instead (sends an empty message)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # same OIDC permission the publish workflow uses
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14'
+
+      # Trusted publishing needs npm >= 11.5.1; node 22.14 ships npm 10. Same pin as publish.yml:
+      # npm@latest is 12.x and would EBADENGINE on this node.
+      - run: npm install -g npm@11
+
+      - name: Deprecate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+          UNDO: ${{ inputs.undo }}
+        run: |
+          set -uo pipefail
+          pkg=$(node -p "require('./package.json').name")
+          spec="${pkg}@${VERSION}"
+
+          # Un-deprecating is an empty message — that is npm's documented way to clear the flag.
+          if [ "$UNDO" = "true" ]; then msg=""; else msg="$MESSAGE"; fi
+
+          echo "Target: $spec"
+          echo "Message: ${msg:-<empty — clearing deprecation>}"
+          echo
+
+          echo "→ Attempt 1: OIDC (no token)"
+          if npm deprecate "$spec" "$msg"; then
+            echo "✓ Deprecated via OIDC — no token needed." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo
+          echo "→ OIDC did not authenticate for deprecate."
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            {
+              echo "## Could not deprecate $spec"
+              echo
+              echo "OIDC does not cover \`npm deprecate\` (it authenticates \`npm publish\` only),"
+              echo "and no \`NPM_TOKEN\` repository secret is configured."
+              echo
+              echo "**Fix:** create a granular access token on npmjs.com with *Read and write*"
+              echo "on \`$pkg\`, add it as the repository secret \`NPM_TOKEN\`, and re-run this workflow."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "→ Attempt 2: NPM_TOKEN secret"
+          npm config set //registry.npmjs.org/:_authToken="$NPM_TOKEN"
+          if npm deprecate "$spec" "$msg"; then
+            echo "✓ Deprecated via NPM_TOKEN (OIDC alone was not sufficient)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "✗ Failed with NPM_TOKEN as well — check the token's scope and expiry." | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Verify against the registry
+        if: success()
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').name")
+          # The registry can lag a moment behind the write.
+          sleep 5
+          state=$(npm view "${pkg}@${VERSION}" deprecated 2>/dev/null || true)
+          echo "Registry now reports deprecated = ${state:-<not set>}" | tee -a "$GITHUB_STEP_SUMMARY"
