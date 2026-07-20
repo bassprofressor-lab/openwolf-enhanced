@@ -19,6 +19,13 @@ import { ensureDir } from "./paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * The hook entry points — the scripts `.claude/settings.json` invokes directly. This list is what
+ * `openwolf status` verifies; it is NOT the copy list. Everything in the compiled hooks directory is
+ * deployed (see copyHookScripts), because these entry points import shared modules and a hardcoded
+ * copy list silently omits any new one — which broke every hook in every project in 1.19.1 when
+ * shared.js gained a `token-estimator.js` import that was never copied.
+ */
 export const HOOK_FILES = [
   "session-start.js",
   "pre-read.js",
@@ -57,12 +64,19 @@ export function copyHookScripts(wolfDir: string): boolean {
   const sourceDir = findHooksSourceDir();
   let copiedAny = false;
   if (sourceDir) {
-    for (const file of HOOK_FILES) {
+    // Copy every compiled module, not just the entry points — a hook that imports a helper needs
+    // that helper on disk too, and enumerating them by hand is how they go missing.
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(sourceDir).filter((f) => f.endsWith(".js"));
+    } catch { /* unreadable source dir — handled by the !copiedAny warning below */ }
+    for (const file of files) {
       const src = path.join(sourceDir, file);
-      if (fs.existsSync(src)) {
-        safeCopyFile(src, path.join(hooksDir, file));
-        copiedAny = true;
-      }
+      try {
+        if (!fs.statSync(src).isFile()) continue;
+      } catch { continue; }
+      safeCopyFile(src, path.join(hooksDir, file));
+      copiedAny = true;
     }
   }
 

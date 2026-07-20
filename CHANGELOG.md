@@ -6,32 +6,6 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
-## [1.19.0] — 2026-07-19
-
-### Fixed
-
-- **Maintenance operations now hold the file lock while they read-modify-write.** `compactLedger`,
-  `consolidateMemory` and `dedupeAndCapBuglog` (run by `openwolf doctor`) and `markPushed` (run by
-  `openwolf push`) wrote `token-ledger.json` / `memory.md` / `buglog.json` / `remote-pushed.json`
-  without a lock, while the daemon and stop-hook write the same files *with* `withLock`. Running a
-  compaction next to a live write could silently drop the concurrent update. All four now take the
-  same lock, so each read-modify-write is atomic.
-- **`writeCerebrumFromAi` no longer overwrites `cerebrum.md` when the backup write fails.** The
-  pre-write backup sat in a `try/catch` that swallowed *every* error and then overwrote anyway — a
-  failed backup (disk full, permissions) destroyed the original with no copy. The backup now runs
-  outside the catch: if it throws, the overwrite never happens. Same data-loss class as bug-157.
-- **`splitForContext` no longer cuts a multi-byte character in half.** The hard-cut path for an
-  oversized single paragraph sliced by UTF-16 code units against a *byte* budget — it could exceed the
-  budget and split a multi-byte char / surrogate pair into invalid UTF-8. It now accumulates whole code
-  points up to the byte budget.
-
-### Changed
-
-- **Recall matching is anchored at the start of a word (prefix) instead of anywhere in it (substring).**
-  A query `port` still matches `ports`/`portal` (prefix) but no longer spuriously matches `report`
-  mid-word, which was distorting BM25 term frequencies. Tokenisation is now Unicode-aware, so umlauts
-  stay inside a word.
-
 ## [Unreleased]
 
 ### Added
@@ -45,6 +19,20 @@ release of this fork.
   new/changed entries are re-embedded. If the embeddings endpoint is unreachable, recall falls back
   to keyword search. Config under `openwolf.recall.embeddings` (base_url / model). A lightweight take
   on vector memory — no vector database, sized for a project's few hundred entries.
+
+## [1.19.2] — 2026-07-20
+
+### Fixed
+
+- **1.19.1 broke every hook in every project.** `shared.js` gained an import of `token-estimator.js`,
+  but hooks are deployed from a hardcoded list in `hooks-deploy.ts` that did not include it — so after
+  `openwolf update` every hook died with `ERR_MODULE_NOT_FOUND` on a module that was never copied.
+  Since all hooks import `shared.js`, all of them failed. Deployment now copies every compiled module
+  from the hooks build output rather than an enumerated set; `HOOK_FILES` remains as the entry-point
+  list that `openwolf status` verifies. A test now asserts that every relative import of every
+  deployed hook resolves on disk, so a missing module fails the build instead of the user's session.
+
+  **Upgrading from 1.19.1:** run `openwolf update` to restore the hooks.
 
 ## [1.19.1] — 2026-07-20
 
@@ -79,6 +67,32 @@ release of this fork.
 - **Every auto-detected null-safety bug got the same blank summary.** The summary interpolated
   `path.basename(path.basename(""))` — a hardcoded empty literal — so all of them collapsed into one
   dedupe bucket, since that text is what similar-bug matching compares. It now names the file.
+
+## [1.19.0] — 2026-07-19
+
+### Fixed
+
+- **Maintenance operations now hold the file lock while they read-modify-write.** `compactLedger`,
+  `consolidateMemory` and `dedupeAndCapBuglog` (run by `openwolf doctor`) and `markPushed` (run by
+  `openwolf push`) wrote `token-ledger.json` / `memory.md` / `buglog.json` / `remote-pushed.json`
+  without a lock, while the daemon and stop-hook write the same files *with* `withLock`. Running a
+  compaction next to a live write could silently drop the concurrent update. All four now take the
+  same lock, so each read-modify-write is atomic.
+- **`writeCerebrumFromAi` no longer overwrites `cerebrum.md` when the backup write fails.** The
+  pre-write backup sat in a `try/catch` that swallowed *every* error and then overwrote anyway — a
+  failed backup (disk full, permissions) destroyed the original with no copy. The backup now runs
+  outside the catch: if it throws, the overwrite never happens. Same data-loss class as bug-157.
+- **`splitForContext` no longer cuts a multi-byte character in half.** The hard-cut path for an
+  oversized single paragraph sliced by UTF-16 code units against a *byte* budget — it could exceed the
+  budget and split a multi-byte char / surrogate pair into invalid UTF-8. It now accumulates whole code
+  points up to the byte budget.
+
+### Changed
+
+- **Recall matching is anchored at the start of a word (prefix) instead of anywhere in it (substring).**
+  A query `port` still matches `ports`/`portal` (prefix) but no longer spuriously matches `report`
+  mid-word, which was distorting BM25 term frequencies. Tokenisation is now Unicode-aware, so umlauts
+  stay inside a word.
 
 ## [1.18.2] — 2026-07-16
 

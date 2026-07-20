@@ -1135,3 +1135,28 @@ test("detectWaste: repeated reads and anatomy hits are detected, not silently de
   assert.equal(anatomy.length, 1, "the anatomy-described large read is flagged");
   assert.ok(!anatomy.some((f) => f.description.includes("once.ts")), "reads without an anatomy hit are not flagged");
 });
+
+// --- deployed hooks must be self-contained ---
+// 1.19.1 shipped a shared.js that imported ./token-estimator.js, which the hardcoded copy list in
+// hooks-deploy.ts never deployed. Every hook in every project died with ERR_MODULE_NOT_FOUND.
+import { copyHookScripts, HOOK_FILES } from "../dist/src/utils/hooks-deploy.js";
+test("copyHookScripts: every relative import of a deployed hook resolves on disk", () => {
+  const wolf = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ow-hooks-")), ".wolf");
+  fs.mkdirSync(wolf, { recursive: true });
+  assert.ok(copyHookScripts(wolf), "hooks were deployed");
+
+  const hooksDir = path.join(wolf, "hooks");
+  const deployed = new Set(fs.readdirSync(hooksDir));
+  for (const entry of HOOK_FILES) {
+    assert.ok(deployed.has(entry), `entry point ${entry} deployed`);
+  }
+
+  const missing = [];
+  for (const file of fs.readdirSync(hooksDir).filter((f) => f.endsWith(".js"))) {
+    const src = fs.readFileSync(path.join(hooksDir, file), "utf8");
+    for (const m of src.matchAll(/(?:^|\s)(?:import|export)[^'"]*?from\s+["'](\.[^"']+)["']/g)) {
+      if (!fs.existsSync(path.join(hooksDir, m[1]))) missing.push(`${file} → ${m[1]}`);
+    }
+  }
+  assert.deepEqual(missing, [], `unresolvable imports in deployed hooks:\n${missing.join("\n")}`);
+});
