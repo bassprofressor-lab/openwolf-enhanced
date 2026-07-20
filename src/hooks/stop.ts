@@ -6,6 +6,7 @@ interface FileRead {
   count: number;
   tokens: number;
   first_read: string;
+  anatomy_had_description?: boolean;
 }
 
 interface FileWrite {
@@ -44,6 +45,7 @@ interface SessionEntry {
   reads: Array<{
     file: string;
     tokens_estimated: number;
+    read_count: number;
     was_repeated: boolean;
     anatomy_had_description: boolean;
   }>;
@@ -118,11 +120,14 @@ async function main(): Promise<void> {
   const reminders = fresh.map((c) => c.msg);
 
   // Build session entry for ledger
+  // One entry per unique file — read_count carries the repetition, since the waste detector
+  // cannot recover it by counting array entries (it used to try, and never found any).
   const reads = Object.entries(session.files_read).map(([file, data]) => ({
     file,
     tokens_estimated: data.tokens,
+    read_count: data.count,
     was_repeated: data.count > 1,
-    anatomy_had_description: false, // simplified
+    anatomy_had_description: data.anatomy_had_description ?? false,
   }));
 
   const writes = session.files_written.map((w) => ({

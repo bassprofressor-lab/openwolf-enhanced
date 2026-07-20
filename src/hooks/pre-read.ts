@@ -7,7 +7,7 @@ import {
 
 interface SessionData {
   session_id: string;
-  files_read: Record<string, { count: number; tokens: number; first_read: string; mtime?: number }>;
+  files_read: Record<string, { count: number; tokens: number; first_read: string; anatomy_had_description?: boolean; mtime?: number }>;
   anatomy_hits: number;
   anatomy_misses: number;
   repeated_reads_warned: number;
@@ -126,6 +126,9 @@ async function main(): Promise<void> {
     count: 1,
     tokens: 0,
     first_read: new Date().toISOString(),
+    // Whether anatomy.md already described this file. The ledger used to hardcode this as
+    // false, which made the waste detector's "anatomy would have sufficed" pattern unreachable.
+    anatomy_had_description: found,
     mtime: fileMtime,
   };
 

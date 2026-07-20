@@ -1,8 +1,8 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateFileTokens, getTokenRatios, readStdin, normalizePath, loadIgnore, isSecretFile } from "./shared.js";
 
 interface SessionData {
-  files_read: Record<string, { count: number; tokens: number; first_read: string }>;
+  files_read: Record<string, { count: number; tokens: number; first_read: string; anatomy_had_description?: boolean }>;
   [key: string]: unknown;
 }
 
@@ -48,12 +48,7 @@ async function main(): Promise<void> {
   // Never track secret-bearing files in the ledger (#54).
   if (isSecretFile(normalizedFile)) { process.exit(0); return; }
 
-  const ext = path.extname(filePath).toLowerCase();
-  const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".css", ".json", ".yaml", ".yml", ".dart"]);
-  const proseExts = new Set([".md", ".txt", ".rst"]);
-  const type = codeExts.has(ext) ? "code" : proseExts.has(ext) ? "prose" : "mixed";
-
-  let tokens = content ? estimateTokens(content, type as "code" | "prose" | "mixed") : 0;
+  let tokens = content ? estimateFileTokens(content, filePath, getTokenRatios(wolfDir)) : 0;
 
   // Fallback: if tool_output had no content, use anatomy token estimate
   if (tokens === 0) {
@@ -73,7 +68,13 @@ async function main(): Promise<void> {
 
   const session = readJSON<SessionData>(sessionFile, { files_read: {} });
   if (session.files_read[normalizedFile]) {
-    session.files_read[normalizedFile].tokens = tokens;
+    // Never let a re-read shrink the estimate to zero. A repeat read often arrives with an
+    // empty tool_output.content, and if the file has no anatomy entry the fallback above
+    // cannot recover a number — overwriting unconditionally would wipe the good first-read
+    // estimate. That deflates inputTokens in stop.ts and, because savedFromRepeats multiplies
+    // by (count - 1), silently zeroes the repeat-savings metric too.
+    const prev = session.files_read[normalizedFile].tokens ?? 0;
+    session.files_read[normalizedFile].tokens = Math.max(prev, tokens);
   } else {
     session.files_read[normalizedFile] = {
       count: 1,

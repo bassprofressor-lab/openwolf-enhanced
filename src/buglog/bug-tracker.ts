@@ -54,7 +54,14 @@ export function logBug(
     }
   }
 
-  const id = `bug-${String(bugLog.bugs.length + 1).padStart(3, "0")}`;
+  // Derive the id from the highest existing numeric id, not from bugs.length — entries get
+  // removed by dedupe and by the retention trim in post-write.ts, after which length + 1
+  // hands out an id that is already taken.
+  const maxId = bugLog.bugs.reduce((m, b) => {
+    const n = parseInt(String(b.id).replace(/\D/g, ""), 10);
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  const id = `bug-${String(maxId + 1).padStart(3, "0")}`;
   bugLog.bugs.push({
     id,
     timestamp: now,

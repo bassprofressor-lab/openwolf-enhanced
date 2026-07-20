@@ -32,6 +32,54 @@ release of this fork.
   mid-word, which was distorting BM25 term frequencies. Tokenisation is now Unicode-aware, so umlauts
   stay inside a word.
 
+## [Unreleased]
+
+### Added
+
+- **Semantic recall (`openwolf recall --semantic` / `--hybrid`).** Alongside the lexical BM25 search,
+  recall can now rank by *meaning* using local embeddings — it finds conceptually related entries a
+  keyword match misses. `--semantic` ranks purely by cosine similarity; `--hybrid` fuses BM25 and
+  semantic rankings with Reciprocal Rank Fusion (no score-scale tuning). Embeddings come from any
+  OpenAI-compatible `/embeddings` endpoint, defaulting to a **local LM Studio** server (keyless), so
+  semantic memory stays local. The index is cached in `.wolf/recall-embeddings.json` and only
+  new/changed entries are re-embedded. If the embeddings endpoint is unreachable, recall falls back
+  to keyword search. Config under `openwolf.recall.embeddings` (base_url / model). A lightweight take
+  on vector memory — no vector database, sized for a project's few hundred entries.
+
+## [1.19.1] — 2026-07-20
+
+### Fixed
+
+- **The same file was estimated at three different char/token ratios depending on which hook ran.**
+  `post-read.ts`, `post-write.ts` and `anatomy-scanner.ts` each carried their own extension table and
+  they disagreed: `.rs`/`.go`/`.java`/`.c`/`.cpp` counted as "code" (3.5) on read but "mixed" (3.75) on
+  write, and a `.md` write was charged the *code* ratio outright — three different numbers for one
+  markdown file. The copies existed because `src/hooks/**` is compiled with its own tsconfig
+  (`rootDir: src/hooks`) and cannot import from outside it. There is now a single classifier at
+  `src/hooks/token-estimator.ts`, inside that rootDir, which `src/tracker/token-estimator.ts`
+  re-exports for everything else.
+- **`token_audit.chars_per_token_code` / `_prose` did nothing.** The keys shipped in the init template
+  and were documented as tunable, but no estimator ever read them — every one hardcoded 3.5/4.0/3.75.
+  They are now honoured (with validation; a missing or nonsensical value falls back to the default),
+  and the "mixed" ratio is derived as the midpoint of the two configured ends.
+- **MultiEdit writes were recorded as 0 output tokens.** MultiEdit carries its changes in
+  `tool_input.edits[]`, not `old_string`/`new_string`, so the estimator saw an empty string. It now
+  sums the replacement text of every edit.
+- **A repeated read could wipe a file's token estimate.** A re-read often arrives with empty
+  `tool_output.content`; with no anatomy entry to fall back on, the good first-read estimate was
+  overwritten with 0 — deflating `input_tokens_estimated` and, because the repeat-savings figure
+  multiplies by `(count - 1)`, silently zeroing that metric too. The estimate can no longer shrink.
+- **Both of the waste detector's main patterns were unreachable.** "Repeated reads" counted duplicate
+  array entries, but the ledger stores one entry per *unique* file, so the count could never exceed 1;
+  "anatomy would have sufficed" keyed on a flag the Stop hook hardcoded to `false`. Read counts are now
+  carried explicitly, and the anatomy flag is recorded from the hit the pre-read hook already computed.
+- **Buglog IDs could collide.** New IDs were derived from `bugs.length + 1`, which repeats an existing
+  ID after entries are removed by dedupe or the retention trim (e.g. `[bug-001, bug-003]` → `bug-003`).
+  IDs now continue past the highest existing one — the approach already used by the other writer.
+- **Every auto-detected null-safety bug got the same blank summary.** The summary interpolated
+  `path.basename(path.basename(""))` — a hardcoded empty literal — so all of them collapsed into one
+  dedupe bucket, since that text is what similar-bug matching compares. It now names the file.
+
 ## [1.18.2] — 2026-07-16
 
 ### Fixed

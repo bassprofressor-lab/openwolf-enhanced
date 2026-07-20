@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, serializeAnatomy,
-  extractDescription, estimateTokens, appendMarkdown, timeShort, readStdin, normalizePath,
+  extractDescription, estimateFileTokens, getTokenRatios, appendMarkdown, timeShort, readStdin, normalizePath,
   getRetention, loadIgnore, readBugLog, isSecretFile
 } from "./shared.js";
 
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   const projectRoot = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   const raw = await readStdin();
-  let input: { tool_name?: string; tool_input?: { file_path?: string; path?: string; content?: string; old_string?: string; new_string?: string } };
+  let input: { tool_name?: string; tool_input?: { file_path?: string; path?: string; content?: string; old_string?: string; new_string?: string; edits?: Array<{ new_string?: string }> } };
   try {
     input = JSON.parse(raw);
   } catch {
@@ -85,6 +85,14 @@ async function main(): Promise<void> {
   const oldStr = input.tool_input?.old_string ?? "";
   const newStr = input.tool_input?.new_string ?? "";
 
+  // MultiEdit carries its changes in edits[], not old_string/new_string — so newStr was ""
+  // there and the whole call got booked as 0 output tokens. Sum the replacement text of
+  // every edit so a multi-edit costs what it actually cost.
+  const multiEdits = Array.isArray(input.tool_input?.edits) ? input.tool_input!.edits! : [];
+  const writtenText = multiEdits.length > 0
+    ? multiEdits.map((e) => e?.new_string ?? "").join("\n")
+    : newStr;
+
   // 1. Update anatomy.md
   try {
     const anatomyPath = path.join(wolfDir, "anatomy.md");
@@ -109,11 +117,7 @@ async function main(): Promise<void> {
     }
 
     const desc = extractDescription(absolutePath, fileContent).slice(0, 100);
-    const ext = path.extname(absolutePath).toLowerCase();
-    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css", ".dart"]);
-    const proseExts = new Set([".md", ".txt", ".rst"]);
-    const type = codeExts.has(ext) ? "code" : proseExts.has(ext) ? "prose" : "mixed";
-    const tokens = estimateTokens(fileContent, type as "code" | "prose" | "mixed");
+    const tokens = estimateFileTokens(fileContent, absolutePath, getTokenRatios(wolfDir));
 
     if (!sections.has(sectionKey)) sections.set(sectionKey, []);
     const entries = sections.get(sectionKey)!;
@@ -156,10 +160,7 @@ async function main(): Promise<void> {
     const action = toolName === "Write" ? "Created" : toolName === "MultiEdit" ? "Multi-edited" : "Edited";
     const relFile = normalizePath(path.relative(projectRoot, absolutePath));
     const fileContent = input.tool_input?.content ?? "";
-    const ext = path.extname(absolutePath).toLowerCase();
-    const codeExts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".json", ".yaml", ".yml", ".css", ".dart"]);
-    const type = codeExts.has(ext) ? "code" : "mixed";
-    const writeTokens = estimateTokens(fileContent || newStr, type as "code" | "prose" | "mixed");
+    const writeTokens = estimateFileTokens(fileContent || writtenText, absolutePath, getTokenRatios(wolfDir));
 
     let changeDesc = "";
     if (oldStr && newStr) {
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
     const normalizedFile = normalizePath(filePath);
     const action = toolName === "Write" ? "create" : "edit";
     const fileContent = input.tool_input?.content ?? "";
-    const tokens = estimateTokens(fileContent || newStr, "code");
+    const tokens = estimateFileTokens(fileContent || writtenText, absolutePath, getTokenRatios(wolfDir));
 
     session.files_written.push({
       file: normalizedFile,
@@ -320,7 +321,7 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
   const ext = path.extname(basename).toLowerCase();
 
   // Detect what kind of fix this is
-  const detection = detectFixPattern(oldStr, newStr, ext);
+  const detection = detectFixPattern(oldStr, newStr, ext, path.basename(relFile));
   if (!detection) return;
 
   // Check for recent duplicate (same file + same category within 30 min).
@@ -382,7 +383,7 @@ interface FixDetection {
   context?: string;
 }
 
-function detectFixPattern(oldStr: string, newStr: string, ext: string): FixDetection | null {
+function detectFixPattern(oldStr: string, newStr: string, ext: string, fileLabel: string): FixDetection | null {
   const oldLines = oldStr.split("\n");
   const newLines = newStr.split("\n");
 
@@ -404,7 +405,10 @@ function detectFixPattern(oldStr: string, newStr: string, ext: string): FixDetec
       (/!==?\s*(null|undefined)/.test(newStr) && !/!==?\s*(null|undefined)/.test(oldStr))) {
     return {
       category: "null-safety",
-      summary: `Null/undefined access in ${path.basename(path.basename(""))}`,
+      // Was path.basename(path.basename("")) — a hardcoded empty literal, so every
+      // null-safety detection produced the same blank summary. That is also the string
+      // findSimilarBugs matches on, so all of them collapsed into one dedupe bucket.
+      summary: `Null/undefined access in ${fileLabel}`,
       rootCause: "Property access on potentially null/undefined value",
       fix: `Added null safety (optional chaining or null check)`,
       context: extractChangedLines(oldStr, newStr),

@@ -1017,3 +1017,121 @@ test("reconcileProjectPorts: reassigns a colliding project, leaves the first + n
     if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
   }
 });
+
+// --- cosine similarity (semantic recall core) ---
+import { cosine } from "../dist/src/utils/embeddings.js";
+test("cosine: identical=1, orthogonal=0, opposite=-1, zero/mismatch=0", () => {
+  const approx = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(approx(cosine([1, 2, 3], [1, 2, 3]), 1), "identical → 1");
+  assert.ok(approx(cosine([1, 0], [0, 1]), 0), "orthogonal → 0");
+  assert.ok(approx(cosine([1, 1], [-1, -1]), -1), "opposite → -1");
+  assert.equal(cosine([0, 0], [1, 1]), 0, "zero vector → 0");
+  assert.equal(cosine([1, 2, 3], [1, 2]), 0, "length mismatch → 0");
+  // scale-invariant
+  assert.ok(approx(cosine([2, 4], [1, 2]), 1), "scale-invariant");
+});
+
+// --- token estimation: one classifier, one set of ratios (was three divergent copies) ---
+import {
+  detectContentType, estimateFileTokens, estimateTokens, getTokenRatios, DEFAULT_RATIOS,
+} from "../dist/src/hooks/token-estimator.js";
+
+test("detectContentType: same extension classifies the same everywhere", () => {
+  // These five used to be "code" in post-read but "mixed" in post-write.
+  for (const ext of [".rs", ".go", ".java", ".c", ".cpp"]) {
+    assert.equal(detectContentType(`a${ext}`), "code", `${ext} → code`);
+  }
+  for (const ext of [".md", ".txt", ".rst", ".adoc"]) {
+    assert.equal(detectContentType(`a${ext}`), "prose", `${ext} → prose`);
+  }
+  assert.equal(detectContentType("a.unknown"), "mixed", "unknown → mixed");
+});
+
+test("estimateFileTokens: prose file is not charged the code ratio", () => {
+  const text = "x".repeat(400);
+  // post-write.ts used to hardcode "code" here, over-charging every .md write.
+  assert.equal(estimateFileTokens(text, "notes.md"), Math.ceil(400 / 4.0));
+  assert.equal(estimateFileTokens(text, "main.ts"), Math.ceil(400 / 3.5));
+  assert.notEqual(estimateFileTokens(text, "notes.md"), estimateFileTokens(text, "main.ts"));
+});
+
+test("getTokenRatios: reads config token_audit, falls back on junk, derives mixed", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ow-ratios-"));
+  const wolf = path.join(dir, ".wolf");
+  fs.mkdirSync(wolf);
+  fs.writeFileSync(
+    path.join(wolf, "config.json"),
+    JSON.stringify({ openwolf: { token_audit: { chars_per_token_code: 3.0, chars_per_token_prose: 5.0 } } })
+  );
+  const r = getTokenRatios(wolf);
+  assert.equal(r.code, 3.0, "code ratio comes from config (it used to be ignored entirely)");
+  assert.equal(r.prose, 5.0, "prose ratio comes from config");
+  assert.equal(r.mixed, 4.0, "mixed is the midpoint of the configured ends");
+  assert.equal(estimateTokens("x".repeat(30), "code", r), 10, "configured ratio is actually applied");
+
+  // Missing config → documented defaults, not NaN.
+  const bare = path.join(dir, "empty");
+  fs.mkdirSync(bare);
+  assert.deepEqual(getTokenRatios(bare), DEFAULT_RATIOS, "no config → defaults");
+
+  // Nonsense values must not poison the estimate (0 would yield Infinity).
+  const bad = path.join(dir, "bad");
+  fs.mkdirSync(bad);
+  fs.writeFileSync(
+    path.join(bad, "config.json"),
+    JSON.stringify({ openwolf: { token_audit: { chars_per_token_code: 0, chars_per_token_prose: "nope" } } })
+  );
+  assert.deepEqual(getTokenRatios(bad), DEFAULT_RATIOS, "invalid ratios → defaults");
+});
+
+// --- buglog id uniqueness after a trim ---
+import { logBug } from "../dist/src/buglog/bug-tracker.js";
+test("logBug: id stays unique after entries were removed", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ow-bugid-"));
+  fs.writeFileSync(
+    path.join(dir, "buglog.json"),
+    JSON.stringify({
+      version: 1,
+      bugs: [
+        // Two entries were deleted from the middle, so bugs.length + 1 lands on "bug-003"
+        // — an id that is still in use. That is the actual collision, not just a gap.
+        { id: "bug-001", timestamp: "", error_message: "old one", file: "a.ts", root_cause: "", fix: "", tags: [], related_bugs: [], occurrences: 1, last_seen: "" },
+        { id: "bug-003", timestamp: "", error_message: "old three", file: "b.ts", root_cause: "", fix: "", tags: [], related_bugs: [], occurrences: 1, last_seen: "" },
+      ],
+    })
+  );
+  logBug(dir, { error_message: "brand new distinct failure", file: "c.ts", root_cause: "r", fix: "f", tags: ["t"] });
+  const ids = JSON.parse(fs.readFileSync(path.join(dir, "buglog.json"), "utf8")).bugs.map((b) => b.id);
+  assert.equal(new Set(ids).size, ids.length, `ids must be unique, got ${ids.join(",")}`);
+  assert.ok(ids.includes("bug-004"), `new id continues past the max, got ${ids.join(",")}`);
+});
+
+// --- waste detector: patterns must actually be reachable ---
+import { detectWaste } from "../dist/src/tracker/waste-detector.js";
+test("detectWaste: repeated reads and anatomy hits are detected, not silently dead", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ow-waste-"));
+  fs.writeFileSync(
+    path.join(dir, "token-ledger.json"),
+    JSON.stringify({
+      version: 1,
+      sessions: [{
+        id: "s1", started: "", ended: "",
+        reads: [
+          // One entry per unique file — counting array duplicates found nothing.
+          { file: "big.ts", tokens_estimated: 900, read_count: 3, was_repeated: true, anatomy_had_description: true },
+          { file: "once.ts", tokens_estimated: 900, read_count: 1, was_repeated: false, anatomy_had_description: false },
+        ],
+        writes: [],
+        totals: {},
+      }],
+      lifetime: {},
+    })
+  );
+  const flags = detectWaste(dir);
+  const repeated = flags.filter((f) => f.pattern === "repeated_reads");
+  assert.equal(repeated.length, 1, "the repeated read is flagged");
+  assert.equal(repeated[0].tokens_wasted, 1800, "charges the two extra reads, not the first");
+  const anatomy = flags.filter((f) => f.pattern === "anatomy_could_suffice");
+  assert.equal(anatomy.length, 1, "the anatomy-described large read is flagged");
+  assert.ok(!anatomy.some((f) => f.description.includes("once.ts")), "reads without an anatomy hit are not flagged");
+});

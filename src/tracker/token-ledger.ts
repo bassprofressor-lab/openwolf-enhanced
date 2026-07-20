@@ -4,6 +4,8 @@ import { readJSON, writeJSON } from "../utils/fs-safe.js";
 interface ReadEntry {
   file: string;
   tokens_estimated: number;
+  /** How often this file was read in the session. Absent on entries written before 1.20.0. */
+  read_count?: number;
   was_repeated: boolean;
   anatomy_had_description: boolean;
 }

@@ -15,21 +15,17 @@ export function detectWaste(wolfDir: string): WasteFlag[] {
   const ledger = readLedger(wolfDir);
   const now = new Date().toISOString();
 
-  // Pattern 1: Repeated file reads
+  // Pattern 1: Repeated file reads.
+  // The ledger stores one entry per unique file, so counting duplicate array entries (as this
+  // used to do) could never find anything. The repetition lives in read_count.
   for (const session of ledger.sessions) {
-    const readCounts = new Map<string, number>();
     for (const read of session.reads) {
-      const count = (readCounts.get(read.file) ?? 0) + 1;
-      readCounts.set(read.file, count);
-    }
-    for (const [file, count] of readCounts) {
+      const count = read.read_count ?? (read.was_repeated ? 2 : 1);
       if (count > 1) {
         flags.push({
           pattern: "repeated_reads",
-          description: `File ${file} was read ${count} times in session ${session.id}`,
-          tokens_wasted: Math.round(
-            (session.reads.find((r) => r.file === file)?.tokens_estimated ?? 200) * (count - 1)
-          ),
+          description: `File ${read.file} was read ${count} times in session ${session.id}`,
+          tokens_wasted: Math.round((read.tokens_estimated || 200) * (count - 1)),
           suggestion: "Hooks should have warned about repeated reads.",
           detected_at: now,
         });
@@ -37,7 +33,9 @@ export function detectWaste(wolfDir: string): WasteFlag[] {
     }
   }
 
-  // Pattern 2: Large reads where anatomy sufficed
+  // Pattern 2: Large first reads where the anatomy description may have sufficed.
+  // Only the first read is charged here — the repeats are already accounted for by Pattern 1,
+  // and double-charging the same tokens would inflate the waste total.
   for (const session of ledger.sessions) {
     for (const read of session.reads) {
       if (read.tokens_estimated > 500 && read.anatomy_had_description) {

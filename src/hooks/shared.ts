@@ -805,10 +805,20 @@ export function extractDescription(filePath: string, preloadedContent?: string):
   return "";
 }
 
-export function estimateTokens(text: string, type: "code" | "prose" | "mixed" = "mixed"): number {
-  const ratio = type === "code" ? 3.5 : type === "prose" ? 4.0 : 3.75;
-  return Math.ceil(text.length / ratio);
-}
+// Estimation lives in tracker/token-estimator.ts — the single source of truth for both
+// the extension table and the char/token ratios. Re-exported here so hook call sites keep
+// importing from ./shared.js as before.
+import { estimateTokens } from "./token-estimator.js";
+
+export {
+  estimateTokens,
+  estimateFileTokens,
+  detectContentType,
+  getTokenRatios,
+  DEFAULT_RATIOS,
+  type ContentType,
+  type TokenRatios,
+} from "./token-estimator.js";
 
 // Which coding agent is driving this hook — labels ledger sessions so per-agent usage can be split.
 export function detectAgent(): string {

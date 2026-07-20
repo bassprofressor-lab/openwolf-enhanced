@@ -6,6 +6,7 @@ import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
 import { loadIgnore } from "../utils/maintenance.js";
 import { extractSymbols, symbolsSupported, SYMBOL_MIN_TOKENS, type SymbolEntry } from "./symbol-extractor.js";
+import { estimateFileTokens, getTokenRatios, type TokenRatios } from "../tracker/token-estimator.js";
 
 interface AnatomyEntry {
   file: string;
@@ -40,20 +41,8 @@ const BINARY_EXTENSIONS = new Set([
   ".lock",
 ]);
 
-const CODE_EXTENSIONS = new Set([
-  ".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".java",
-  ".c", ".cpp", ".h", ".css", ".scss", ".sql", ".sh", ".yaml",
-  ".yml", ".json", ".toml", ".xml",
-]);
-
-const PROSE_EXTENSIONS = new Set([".md", ".txt", ".rst", ".adoc"]);
-
-function estimateTokens(text: string, filePath: string): number {
-  const ext = path.extname(filePath).toLowerCase();
-  let ratio = 3.75;
-  if (CODE_EXTENSIONS.has(ext)) ratio = 3.5;
-  if (PROSE_EXTENSIONS.has(ext)) ratio = 4.0;
-  return Math.ceil(text.length / ratio);
+function estimateTokens(text: string, filePath: string, ratios: TokenRatios): number {
+  return estimateFileTokens(text, filePath, ratios);
 }
 
 // Files that should never appear in anatomy (secrets, env files)
@@ -101,7 +90,8 @@ function walkDir(
   maxFiles: number,
   entries: Map<string, AnatomyEntry[]>,
   ignore: (relPath: string) => boolean,
-  symbols: Record<string, SymbolEntry[]>
+  symbols: Record<string, SymbolEntry[]>,
+  ratios: TokenRatios
 ): void {
   let totalFiles = 0;
   for (const [, list] of entries) totalFiles += list.length;
@@ -124,7 +114,7 @@ function walkDir(
     if (ignore(relPath)) continue; // .wolfignore
 
     if (item.isDirectory()) {
-      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols);
+      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols, ratios);
     } else if (item.isFile()) {
       const ext = path.extname(item.name).toLowerCase();
       if (BINARY_EXTENSIONS.has(ext)) continue;
@@ -146,7 +136,7 @@ function walkDir(
       }
 
       const desc = capDescription(extractDescription(fullPath));
-      const tokens = estimateTokens(content, fullPath);
+      const tokens = estimateTokens(content, fullPath, ratios);
       const section = normalizePath(path.relative(rootDir, dir)) || ".";
       const sectionKey = section === "." ? "./" : section + "/";
 
@@ -262,7 +252,8 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
     config.openwolf.anatomy.max_files,
     entries,
     ignore,
-    symbols
+    symbols,
+    getTokenRatios(wolfDir)
   );
 
   let fileCount = 0;
@@ -325,7 +316,7 @@ export function updateAnatomyEntry(
     }
 
     const desc = capDescription(extractDescription(filePath));
-    const tokens = estimateTokens(fileContent, filePath);
+    const tokens = estimateTokens(fileContent, filePath, getTokenRatios(wolfDir));
     const entry: AnatomyEntry = { file: fileName, description: desc, tokens };
 
     if (!sections.has(sectionKey)) {
