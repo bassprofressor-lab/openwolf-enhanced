@@ -33,11 +33,16 @@ export function detectWaste(wolfDir: string): WasteFlag[] {
     }
   }
 
-  // Pattern 2: Large first reads where the anatomy description may have sufficed.
-  // Only the first read is charged here — the repeats are already accounted for by Pattern 1,
-  // and double-charging the same tokens would inflate the waste total.
+  // Pattern 2: Large single reads where the anatomy description may have sufficed.
+  // Skip anything Pattern 1 already flagged (read_count > 1) — a repeated, anatomy-described
+  // file would otherwise get charged twice for the same tokens: (count-1)*tokens from Pattern 1
+  // plus another full `tokens` from here, summing to count*tokens — the entire cost of every
+  // read on that file counted as "wasted", which overstates it. The repeated case is better
+  // represented by Pattern 1's flag alone; this pattern only adds information on a first read.
   for (const session of ledger.sessions) {
     for (const read of session.reads) {
+      const count = read.read_count ?? (read.was_repeated ? 2 : 1);
+      if (count > 1) continue;
       if (read.tokens_estimated > 500 && read.anatomy_had_description) {
         flags.push({
           pattern: "anatomy_could_suffice",

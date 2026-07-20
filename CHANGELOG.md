@@ -20,6 +20,17 @@ release of this fork.
   to keyword search. Config under `openwolf.recall.embeddings` (base_url / model). A lightweight take
   on vector memory — no vector database, sized for a project's few hundred entries.
 
+## [1.19.3] — 2026-07-20
+
+### Fixed
+
+- **Waste detector double-counted a repeated, anatomy-described file.** 1.19.1 made both of the
+  detector's dead patterns reachable again (see 1.19.1's notes), but didn't make them mutually
+  exclusive: a file that was both read multiple times *and* had an anatomy description got charged
+  by Pattern 1 ((count-1) × tokens for the repeats) *and* Pattern 2 (a full `tokens` for "anatomy
+  would have sufficed") — summing to count × tokens, i.e. 100% of everything ever spent reading that
+  file flagged as waste. Pattern 2 now skips anything Pattern 1 already covers.
+
 ## [1.19.2] — 2026-07-20
 
 ### Fixed

@@ -1118,8 +1118,9 @@ test("detectWaste: repeated reads and anatomy hits are detected, not silently de
         id: "s1", started: "", ended: "",
         reads: [
           // One entry per unique file — counting array duplicates found nothing.
-          { file: "big.ts", tokens_estimated: 900, read_count: 3, was_repeated: true, anatomy_had_description: true },
+          { file: "repeated.ts", tokens_estimated: 900, read_count: 3, was_repeated: true, anatomy_had_description: false },
           { file: "once.ts", tokens_estimated: 900, read_count: 1, was_repeated: false, anatomy_had_description: false },
+          { file: "described.ts", tokens_estimated: 900, read_count: 1, was_repeated: false, anatomy_had_description: true },
         ],
         writes: [],
         totals: {},
@@ -1132,8 +1133,36 @@ test("detectWaste: repeated reads and anatomy hits are detected, not silently de
   assert.equal(repeated.length, 1, "the repeated read is flagged");
   assert.equal(repeated[0].tokens_wasted, 1800, "charges the two extra reads, not the first");
   const anatomy = flags.filter((f) => f.pattern === "anatomy_could_suffice");
-  assert.equal(anatomy.length, 1, "the anatomy-described large read is flagged");
+  assert.equal(anatomy.length, 1, "the anatomy-described single read is flagged");
+  assert.ok(anatomy.some((f) => f.description.includes("described.ts")), "the correct file is flagged");
   assert.ok(!anatomy.some((f) => f.description.includes("once.ts")), "reads without an anatomy hit are not flagged");
+});
+
+test("detectWaste: a repeated file with an anatomy description is not double-counted", () => {
+  // Before today's fix, a file that was both repeated AND anatomy-described got charged by
+  // BOTH patterns: (count-1)*tokens from Pattern 1 plus another full `tokens` from Pattern 2 —
+  // summing to count*tokens, i.e. 100% of everything ever spent on that file flagged as waste.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ow-waste-overlap-"));
+  fs.writeFileSync(
+    path.join(dir, "token-ledger.json"),
+    JSON.stringify({
+      version: 1,
+      sessions: [{
+        id: "s1", started: "", ended: "",
+        reads: [
+          { file: "both.ts", tokens_estimated: 900, read_count: 3, was_repeated: true, anatomy_had_description: true },
+        ],
+        writes: [],
+        totals: {},
+      }],
+      lifetime: {},
+    })
+  );
+  const flags = detectWaste(dir);
+  const total = flags.reduce((sum, f) => sum + f.tokens_wasted, 0);
+  assert.ok(total < 900 * 3, `flagged waste (${total}) must not reach the full 3x900 spent on the file`);
+  assert.equal(flags.filter((f) => f.pattern === "anatomy_could_suffice").length, 0, "Pattern 1 already covers this file");
+  assert.equal(flags.filter((f) => f.pattern === "repeated_reads").length, 1, "Pattern 1 still fires");
 });
 
 // --- deployed hooks must be self-contained ---
