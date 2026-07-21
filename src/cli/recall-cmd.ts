@@ -1,13 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getWolfDir } from "../hooks/shared.js";
-import { recallAcross, resolveId } from "../utils/recall.js";
+import { recallAcross, resolveId, type ProjectHit } from "../utils/recall.js";
 import { getRegisteredProjects } from "./registry.js";
 import {
   getRemoteConfig, readRemoteToken, teamRecall, teamResolve, teamId, type TeamEntry,
 } from "../utils/remote.js";
+import { resolveEmbedConfig } from "../utils/embeddings.js";
+import { semanticRecall, hybridRecall } from "../utils/semantic-recall.js";
 
-interface RecallCliOpts { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean }
+interface RecallCliOpts { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean; semantic?: boolean; hybrid?: boolean }
 
 interface Target { name?: string; wolfDir: string }
 
@@ -101,7 +103,25 @@ export async function recallCommand(query: string[], opts: RecallCliOpts): Promi
   }
   const limit = Math.max(1, parseInt(opts.limit || "12", 10) || 12);
 
-  const hits = recallAcross(searchTargets, q, { limit });
+  // Semantic / hybrid recall runs against the primary project only (embeddings index per .wolf/).
+  // It gracefully falls back to keyword search if the embeddings endpoint isn't reachable.
+  let hits: ProjectHit[];
+  if (opts.semantic || opts.hybrid) {
+    const primary = searchTargets[0];
+    const cfg = resolveEmbedConfig(primary.wolfDir);
+    try {
+      const raw = opts.hybrid
+        ? await hybridRecall(primary.wolfDir, q, cfg, limit)
+        : await semanticRecall(primary.wolfDir, q, cfg, limit);
+      hits = raw.map((h) => ({ ...h, wolfDir: primary.wolfDir }));
+      if (opts.all) console.error("Note: --semantic/--hybrid search only this project (not --all).");
+    } catch (e) {
+      console.error(`Semantic recall unavailable (${(e as Error).message}). Falling back to keyword search.`);
+      hits = recallAcross(searchTargets, q, { limit });
+    }
+  } else {
+    hits = recallAcross(searchTargets, q, { limit });
+  }
 
   // Team hits are fetched but NOT merged into the local ranking. The workspace ranks with a hybrid
   // (full-text + trigram + semantic, reciprocal-rank-fused, boosted by confirmed use); local recall

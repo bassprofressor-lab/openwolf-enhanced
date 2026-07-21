@@ -225,8 +225,10 @@ export function createProgram(): Command {
     .option("--id <id>", "Resolve a citation id to its full entry (no query needed)")
     .option("--all", "Search across all registered projects, not just this one")
     .option("--team", "Also search the linked remote workspace (see `openwolf link`)")
+    .option("--semantic", "Rank by meaning (local embeddings) instead of keywords")
+    .option("--hybrid", "Fuse keyword + semantic ranking (best of both)")
     .option("--json", "Output JSON")
-    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean }) => {
+    .action(async (query: string[], opts: { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean; semantic?: boolean; hybrid?: boolean }) => {
       const { recallCommand } = await import("./recall-cmd.js");
       await recallCommand(query, opts);
     });

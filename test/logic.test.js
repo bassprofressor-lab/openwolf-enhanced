@@ -1189,3 +1189,96 @@ test("copyHookScripts: every relative import of a deployed hook resolves on disk
   }
   assert.deepEqual(missing, [], `unresolvable imports in deployed hooks:\n${missing.join("\n")}`);
 });
+
+// --- semantic recall: binary index round-trip, cache/resume, hybrid fusion ---
+// The vectors live in a Float32 sidecar (.vec), NOT in the JSON: 20k+ units × 768 dims as
+// pretty-printed JSON exceeds V8's max string length and the index silently never persisted.
+import { buildOrUpdateIndex, semanticRecall, hybridRecall } from "../dist/src/utils/semantic-recall.js";
+
+// Deterministic fake embeddings: three orthogonal "meaning" clusters keyed on words.
+const fakeVec = (t) =>
+  /apple|fruit/i.test(t) ? [1, 0, 0] : /rocket|space/i.test(t) ? [0, 1, 0] : [0, 0, 1];
+
+function stubEmbedFetch(log) {
+  const orig = global.fetch;
+  global.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const texts = Array.isArray(body.input) ? body.input : [body.input];
+    log.push(texts);
+    return {
+      ok: true,
+      json: async () => ({ data: texts.map((t, i) => ({ embedding: fakeVec(t), index: i })) }),
+      text: async () => "",
+    };
+  };
+  return () => { global.fetch = orig; };
+}
+
+function semWolfDir() {
+  const wolf = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-sem-")) + path.sep + ".wolf";
+  fs.mkdirSync(wolf, { recursive: true });
+  fs.writeFileSync(path.join(wolf, "memory.md"), [
+    "apple pie recipe stored in the kitchen book",
+    "rocket launch scheduled for the orbital mission",
+    "unrelated bookkeeping note about invoices",
+  ].join("\n"));
+  return wolf;
+}
+
+const semCfg = { enabled: true, baseUrl: "http://localhost:9", model: "fake-embed", apiKeyEnv: "X_NONE" };
+
+test("semantic index: persists both files, caches unchanged units, invalidates on model change", async () => {
+  const wolf = semWolfDir();
+  const calls = [];
+  const restore = stubEmbedFetch(calls);
+  try {
+    const idx = await buildOrUpdateIndex(wolf, semCfg);
+    assert.equal(idx.entries.length, 3, "three units indexed");
+    assert.equal(idx.dims, 3, "dims from embedding response");
+    assert.ok(fs.existsSync(path.join(wolf, "recall-embeddings.json")), "meta file written");
+    assert.ok(fs.existsSync(path.join(wolf, "recall-embeddings.vec")), "vector sidecar written");
+    const meta = JSON.parse(fs.readFileSync(path.join(wolf, "recall-embeddings.json"), "utf8"));
+    assert.equal(meta.version, 2);
+    assert.ok(!("vector" in meta.entries[0]) && !("blockText" in meta.entries[0]), "no vectors/blockText in JSON");
+    assert.equal(fs.statSync(path.join(wolf, "recall-embeddings.vec")).size, 3 * 3 * 4, "vec = entries × dims × 4B");
+
+    const embedded = calls.length;
+    await buildOrUpdateIndex(wolf, semCfg);
+    assert.equal(calls.length, embedded, "second build embeds nothing (cache hit)");
+
+    await buildOrUpdateIndex(wolf, { ...semCfg, model: "other-embed" });
+    assert.ok(calls.length > embedded, "model change re-embeds");
+  } finally { restore(); }
+});
+
+test("semantic index: resumes a partial build — zeroed vectors are re-embedded, rest cached", async () => {
+  const wolf = semWolfDir();
+  const calls = [];
+  const restore = stubEmbedFetch(calls);
+  try {
+    const idx = await buildOrUpdateIndex(wolf, semCfg);
+    // Simulate an interrupted checkpoint: zero out entry 1's vector on disk.
+    const vecPath = path.join(wolf, "recall-embeddings.vec");
+    const buf = fs.readFileSync(vecPath);
+    buf.fill(0, 1 * idx.dims * 4, 2 * idx.dims * 4);
+    fs.writeFileSync(vecPath, buf);
+
+    calls.length = 0;
+    await buildOrUpdateIndex(wolf, semCfg);
+    assert.deepEqual(calls.flat(), ["rocket launch scheduled for the orbital mission"], "only the zeroed unit re-embeds");
+  } finally { restore(); }
+});
+
+test("semanticRecall ranks by meaning; hybridRecall fuses with BM25", async () => {
+  const wolf = semWolfDir();
+  const restore = stubEmbedFetch([]);
+  try {
+    const sem = await semanticRecall(wolf, "fresh fruit basket", semCfg, 5);
+    assert.ok(sem.length >= 1, "semantic returns hits");
+    assert.match(sem[0].text, /apple pie/, "semantic top hit is the meaning-match (no shared words)");
+    assert.ok(sem[0].id && /^m-/.test(sem[0].id), "hit carries a citation id");
+
+    const hyb = await hybridRecall(wolf, "apple fruit", semCfg, 5);
+    assert.match(hyb[0].text, /apple pie/, "hybrid: item ranked by both lists wins");
+  } finally { restore(); }
+});

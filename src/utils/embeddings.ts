@@ -60,7 +60,7 @@ export async function embedTexts(cfg: EmbedConfig, texts: string[]): Promise<num
 }
 
 /** Cosine similarity of two equal-length vectors. Returns 0 for a zero vector or a length mismatch. */
-export function cosine(a: number[], b: number[]): number {
+export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
   if (a.length !== b.length) return 0;
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {

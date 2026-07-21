@@ -13,6 +13,8 @@ const ENTRIES: Array<{ pattern: string; why: string }> = [
   { pattern: "dashboard-token", why: "bearer token for the local dashboard API" },
   { pattern: "remote-token", why: "workspace token — grants write access to the team's memory" },
   { pattern: "remote-pushed.json", why: "per-machine push bookkeeping, not shared state" },
+  { pattern: "recall-embeddings.json", why: "semantic recall index metadata — machine-local cache" },
+  { pattern: "recall-embeddings.vec", why: "semantic recall vectors (binary, tens of MB) — rebuildable cache" },
 ];
 
 const HEADER = "# Managed by OpenWolf — local secrets and machine-local state, never commit these.";

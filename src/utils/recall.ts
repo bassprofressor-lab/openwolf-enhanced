@@ -137,6 +137,24 @@ const BM25_B = 0.75;
 
 interface Doc { src: string; line: number; text: string; lower: string; tokens: string[]; len: number; blockStart: number; blockText: string; }
 
+// A searchable unit (one memory line / bug entry) with its containing block — the shared input for
+// both lexical (BM25) and semantic (embedding) recall.
+export interface RecallUnit { src: string; line: number; text: string; blockStart: number; blockText: string; }
+
+export function collectUnits(wolfDir: string, opts: RecallOpts = {}): RecallUnit[] {
+  const units: RecallUnit[] = [];
+  for (const { label: src, abspath } of sourceFiles(wolfDir, opts)) {
+    let content: string;
+    try { content = fs.readFileSync(abspath, "utf-8"); } catch { continue; }
+    const blocks = blocksFor(src, content);
+    for (const { line, text } of unitsFor(src, content)) {
+      const block = blockContaining(blocks, line);
+      units.push({ src, line, text: text.trim(), blockStart: block ? block.start : line, blockText: block ? block.text : text });
+    }
+  }
+  return units;
+}
+
 export function recall(wolfDir: string, query: string, opts: RecallOpts = {}): RecallHit[] {
   const limit = opts.limit ?? 12;
   // Split on any non-letter/digit run (Unicode-aware, so umlauts stay inside a word) → whole-word tokens.

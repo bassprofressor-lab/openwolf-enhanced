@@ -6,19 +6,46 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
-## [Unreleased]
+## [1.20.0] — 2026-07-21
 
 ### Added
 
 - **Semantic recall (`openwolf recall --semantic` / `--hybrid`).** Alongside the lexical BM25 search,
   recall can now rank by *meaning* using local embeddings — it finds conceptually related entries a
-  keyword match misses. `--semantic` ranks purely by cosine similarity; `--hybrid` fuses BM25 and
-  semantic rankings with Reciprocal Rank Fusion (no score-scale tuning). Embeddings come from any
-  OpenAI-compatible `/embeddings` endpoint, defaulting to a **local LM Studio** server (keyless), so
-  semantic memory stays local. The index is cached in `.wolf/recall-embeddings.json` and only
-  new/changed entries are re-embedded. If the embeddings endpoint is unreachable, recall falls back
-  to keyword search. Config under `openwolf.recall.embeddings` (base_url / model). A lightweight take
-  on vector memory — no vector database, sized for a project's few hundred entries.
+  keyword match misses (validated: "firewall rules ignored by containers" surfaces the
+  Docker-bypasses-UFW lesson at rank 1 where BM25 ranked it 6th, and German↔English queries cross
+  the language gap). `--semantic` ranks purely by cosine similarity; `--hybrid` fuses BM25 and
+  semantic rankings with Reciprocal Rank Fusion. Embeddings come from any OpenAI-compatible
+  `/embeddings` endpoint, defaulting to a **local LM Studio** server (keyless), so semantic memory
+  stays local. If the embeddings endpoint is unreachable, recall falls back to keyword search.
+  Config under `openwolf.recall.embeddings` (base_url / model). No vector database — the index is
+  two flat files in `.wolf/`, validated end-to-end on a 22,795-unit knowledge base (459 native
+  memory topic files): first build ~5 min against LM Studio, warm queries ~1.2 s.
+
+- **Embedding index: binary sidecar, checkpointed, resumable.** Unit metadata lives in
+  `recall-embeddings.json` (~6.5 MB for 22k units), the raw Float32 vectors in
+  `recall-embeddings.vec` (~70 MB) — written atomically, checkpointed every 20 batches and on
+  failure, with a progress meter on stderr. An interrupted build resumes where it stopped (verified:
+  kill at 9.7k units → restart embedded only the remainder), and only new/changed units are
+  re-embedded per run. Both files are machine-local caches and are added to the managed
+  `.wolf/.gitignore`. A model change invalidates the cache.
+
+### Fixed
+
+- **The embedding index silently never persisted on real-world knowledge bases.** The original
+  design stored vectors inside the pretty-printed index JSON; at 22k units × 768 dims the ~544 MB
+  `JSON.stringify` output exceeds V8's maximum string length (~537 MB), the resulting `RangeError`
+  was swallowed by both write paths of `fs-safe.writeJSON`, and every semantic query re-embedded the
+  entire knowledge base from scratch (5+ minutes, with no error shown). Treacherous detail: with
+  synthetic `Math.random()` vectors the string lands ~4 % *under* the limit — only real embedding
+  values (~20–21 chars each) tip it over. The binary sidecar format above fixes this structurally,
+  and its write errors propagate instead of being swallowed.
+
+- **RRF fusion constant retuned for two-list fusion (K=60 → K=2).** The textbook K=60 let an item
+  ranked mediocre in *both* lists (2/80) outscore the top hit of *one* list (1/61), making hybrid
+  *worse* than either method alone. Measured on a 14-query set (exact-keyword, paraphrase, and
+  cross-lingual DE↔EN) over the 22k-unit base: MRR 0.845 at K≤2 vs 0.627 at K=60 — beating pure
+  BM25 (0.726) and pure semantic (0.714). Override via `openwolf.recall.rrf_k`.
 
 ## [1.19.3] — 2026-07-20
 
