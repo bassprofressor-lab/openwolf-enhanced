@@ -24,7 +24,11 @@ export function startFileWatcher(
         base === "daemon.log" ||
         base === "_session.json" ||
         base === "token-ledger.json" ||
-        base === "buglog.json"
+        base === "buglog.json" ||
+        // Semantic recall index: tens of MB, checkpointed repeatedly during a build — reading it
+        // as UTF-8 and broadcasting it to every dashboard client would be the watcher's worst case
+        // (the .vec sidecar is raw Float32, not even text).
+        base.startsWith("recall-embeddings")
       );
     },
     persistent: true,
