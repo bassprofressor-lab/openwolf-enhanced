@@ -34,13 +34,18 @@ interface WolfConfig {
   };
 }
 
-const config = readJSON<WolfConfig>(path.join(wolfDir, "config.json"), {
-  openwolf: {
-    daemon: { port: 18790, log_level: "info" },
-    dashboard: { enabled: true, port: 18791 },
-    cron: { enabled: true, heartbeat_interval_minutes: 30 },
-  },
-});
+function loadConfig(dir: string): WolfConfig {
+  return readJSON<WolfConfig>(path.join(dir, "config.json"), {
+    openwolf: {
+      daemon: { port: 18790, log_level: "info" },
+      dashboard: { enabled: true, port: 18791 },
+      cron: { enabled: true, heartbeat_interval_minutes: 30 },
+    },
+  });
+}
+// Mutable: switchProject re-reads the NEW project's config (its cron.enabled used to be ignored).
+// Bind-once values — daemon/dashboard ports, log level, heartbeat cadence — still need a restart.
+let config = loadConfig(wolfDir);
 
 // Per-project dashboard token, required on every /api/* request and WS connection.
 const dashboardToken = ensureDashboardToken(wolfDir);
@@ -478,10 +483,12 @@ function switchProject(newRoot: string): void {
   if (cronEngine) { cronEngine.stop(); cronEngine = null; }
   fileWatcher.close();
 
-  // Swap the mutable project bindings.
+  // Swap the mutable project bindings — including the config, so the NEW project's settings
+  // (cron.enabled in particular) govern from here on, not the boot project's.
   projectRoot = newRoot;
   wolfDir = path.join(newRoot, ".wolf");
   projectMeta = detectProjectMeta();
+  config = loadConfig(wolfDir);
 
   // Restart subsystems for the new project.
   if (config.openwolf.cron.enabled) {
@@ -530,9 +537,13 @@ function shutdown(): void {
   clearInterval(heartbeatTimer);
   if (cronEngine) cronEngine.stop();
 
-  const state = readJSON<Record<string, unknown>>(cronStatePath, {});
+  // Derive the path from the LIVE wolfDir: after a project switch the boot-time cronStatePath
+  // points at the old project — shutdown would mark the wrong project "stopped" and leave the
+  // actual one "running" forever.
+  const statePath = path.join(wolfDir, "cron-state.json");
+  const state = readJSON<Record<string, unknown>>(statePath, {});
   state.engine_status = "stopped";
-  writeJSON(cronStatePath, state);
+  writeJSON(statePath, state);
 
   for (const client of wsClients) {
     client.close();
