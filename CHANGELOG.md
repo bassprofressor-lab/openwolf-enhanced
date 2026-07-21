@@ -6,6 +6,40 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.3] — 2026-07-21
+
+Eleven fixes from a full bug/performance/logic review of the codebase.
+
+### Fixed
+
+- **The daily memory-consolidation cron destroyed its own record.** The engine's private copy of
+  `consolidateMemory` lacked the idempotency guard the `maintenance` version has: each run
+  re-consolidated already-consolidated session blocks and rewrote every count to "(0 actions)" —
+  127 of 128 blocks in one live memory.md had lost their counts. The engine now delegates to the
+  guarded, locked implementation; the duplicate is gone.
+- **The daemon's file watcher read and broadcast the 70 MB semantic-recall index.** Every index
+  checkpoint triggered a full UTF-8 read of `recall-embeddings.vec` plus a WebSocket broadcast to
+  all dashboard clients. Both index files are ignored now (and `doctor` lists them in the footprint).
+- **The "no meaningful summary" reminder fired in every session.** `countSemanticEntries` counted
+  lines starting `| YYYY-MM-DD` — a format no writer produces — so it always saw 0. It now counts
+  non-mechanical rows and `**Did:**` lines within the last session block.
+- **A read `.env` landed in the token ledger by path.** The secret-file guard (#54) only sat in
+  post-read; pre-read created the session entry (with the path) first. Guard added to pre-read.
+- **Ignore matcher is now gitignore-lite.** `!` negations un-ignore (they were silently dropped —
+  `*` + `!src` ignored everything including src) and a leading `/` anchors to the project root
+  (`/dist`, the common .gitignore form, previously matched nothing).
+- **Buglog noise controls.** The pre-write FYI matched tags as substrings ("ts"/"api" hit nearly
+  every edit) — tags now need ≥ 4 chars and a word boundary. `findSimilarBugs` scored 1.0 whenever
+  one normalized message contained the other, folding unrelated bugs into a short/punctuation-only
+  entry — the contained string now needs ≥ 12 chars.
+- **Shell-write counting was blind for openwolf checkouts.** post-bash skipped any command merely
+  *mentioning* "openwolf" (paths included); it now skips only actual CLI invocations.
+- **Ledger integrity.** session-start's `total_sessions` increment now holds the same lock as the
+  stop hook; unnamed writes (shell / other working dirs) count toward `lifetime.total_writes`
+  (surfaced as `totals.unnamed_writes`); the dead, diverged `writeLedger`/`incrementSessions`/
+  `addSessionToLedger` helpers (zero callers, no lock, hardcoded caps) are removed; post-write's
+  anatomy update was the last silent tmp+rename site and now uses `writeAtomic`.
+
 ## [1.20.2] — 2026-07-21
 
 ### Fixed
