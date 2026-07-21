@@ -455,7 +455,11 @@ export class CronEngine {
 
     if (mode === "overwrite") {
       if (result.includes("## User Preferences") || result.includes("## Key Learnings") || result.includes("# Cerebrum")) {
-        this.writeCerebrumFromAi(result, totalChunks > files.length ? new Set(["cerebrum.md"]) : new Set());
+        // Only files that were actually split count as truncated. The old check ("any chunking
+        // anywhere → cerebrum is truncated") wrongly refused a legitimate cerebrum overwrite
+        // whenever some OTHER context file was large. Basenames, so ".wolf/cerebrum.md" matches.
+        const truncated = new Set(files.filter((f) => f.chunks.length > 1).map((f) => path.basename(f.name)));
+        this.writeCerebrumFromAi(result, truncated);
       }
       return;
     }
