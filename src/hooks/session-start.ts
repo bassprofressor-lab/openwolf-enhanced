@@ -117,8 +117,16 @@ async function main(): Promise<void> {
       if (continuing && source === "compact") {
         const session = readJSON<{ files_written?: Array<{ file: string }> }>(sessionFile, {});
         const files = [...new Set((session.files_written ?? []).map((w) => w.file))];
+        // Consume the PreCompact snapshot: it exists solely for this handoff (trigger tells the
+        // model whether the user compacted deliberately or the window simply ran out), and
+        // deleting it after reading keeps .wolf/hooks/ free of stale one-shot state.
+        const snapPath = path.join(hooksDir, "_precompact-snapshot.json");
+        const snap = readJSON<{ trigger?: string }>(snapPath, {});
+        try { fs.unlinkSync(snapPath); } catch {}
+        const how = snap.trigger === "manual" ? "just compacted via /compact" :
+          snap.trigger === "auto" ? "just auto-compacted (window was full)" : "just compacted";
         if (files.length > 0) {
-          const note = `## Session in progress (context was just compacted)\nFiles already modified this session: ${files.slice(-15).join(", ")}. Don't re-read them wholesale — check .wolf/memory.md for what was done.`;
+          const note = `## Session in progress (context was ${how})\nFiles already modified this session: ${files.slice(-15).join(", ")}. Don't re-read them wholesale — check .wolf/memory.md for what was done.`;
           digest = digest ? `${note}\n\n${digest}` : note;
         }
       }
