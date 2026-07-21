@@ -6,6 +6,25 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.2] — 2026-07-21
+
+### Fixed
+
+- **`cron-state.json`: every read-modify-write now runs under the shared lock.** The cron engine
+  locked its execution-log appends, but five sites in the daemon (heartbeat, boot/switch/shutdown
+  status, the dead-letter WS handler) and the CLI's `openwolf cron retry` — a genuinely separate
+  process — wrote the same file unlocked, so a stale snapshot could clobber a freshly appended log
+  entry. The daemon sites share one `markCronState(patch)` helper (lock → re-read → merge → write,
+  always against the live project).
+- **`readJSON` distinguishes a missing file from a corrupt one.** Both used to yield the fallback
+  silently; for an existing-but-unparseable file that means real data is about to be overwritten
+  with defaults by the next read-modify-write. Parse failures on an existing file now print one
+  `[openwolf]` stderr line before falling back.
+- **Waste detector reports when read tracking itself is dead.** All its patterns feed on pre-read
+  hook data; without that hook it was silently blind — "no waste found" and "no data at all" looked
+  identical. Three or more recent sessions that write files but record zero reads now produce a
+  `no_read_tracking` diagnostic flag pointing at `openwolf status` / `openwolf update`.
+
 ## [1.20.1] — 2026-07-21
 
 ### Fixed
