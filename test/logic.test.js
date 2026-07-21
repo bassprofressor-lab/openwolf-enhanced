@@ -1284,7 +1284,7 @@ test("semanticRecall ranks by meaning; hybridRecall fuses with BM25", async () =
 });
 
 // --- fs-safe: failed writes are reported, not swallowed (bug-183 accomplice) ---
-import { writeJSON as fsSafeWriteJSON } from "../dist/src/utils/fs-safe.js";
+import { writeJSON as fsSafeWriteJSON, readJSON as fsSafeReadJSON } from "../dist/src/utils/fs-safe.js";
 test("writeJSON: returns true on success, false + stderr warning when serialization fails", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-fssafe-"));
   const p = path.join(dir, "x.json");
@@ -1301,4 +1301,21 @@ test("writeJSON: returns true on success, false + stderr warning when serializat
   } finally { process.stderr.write = orig; }
   assert.match(warned, /write to x\.json failed/, "failure is reported on stderr");
   assert.deepEqual(JSON.parse(fs.readFileSync(p, "utf8")), { a: 1 }, "previous content untouched");
+});
+
+test("readJSON: missing file is silent, corrupt existing file warns on stderr", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-readjson-"));
+  const missing = path.join(dir, "missing.json");
+  const corrupt = path.join(dir, "corrupt.json");
+  fs.writeFileSync(corrupt, "{ not json !");
+
+  let warned = "";
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { warned += s; return true; };
+  try {
+    assert.deepEqual(fsSafeReadJSON(missing, { d: 1 }), { d: 1 }, "missing → fallback");
+    assert.equal(warned, "", "missing file stays silent");
+    assert.deepEqual(fsSafeReadJSON(corrupt, { d: 1 }), { d: 1 }, "corrupt → fallback");
+  } finally { process.stderr.write = orig; }
+  assert.match(warned, /corrupt\.json exists but is not valid JSON/, "corrupt file is reported");
 });

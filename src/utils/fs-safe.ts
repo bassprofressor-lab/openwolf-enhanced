@@ -2,11 +2,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
+// A missing file is normal (first run) and silently yields the fallback. An EXISTING file that
+// fails to parse is a different situation: whatever it held is about to be treated as empty, and
+// a read-modify-write caller would then overwrite it with defaults. That must at least be visible.
 export function readJSON<T = unknown>(filePath: string, fallback: T): T {
+  let raw: string;
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as T;
+    raw = fs.readFileSync(filePath, "utf-8");
   } catch {
+    return fallback;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (e) {
+    process.stderr.write(`[openwolf] ${path.basename(filePath)} exists but is not valid JSON — using defaults (${(e as Error).message})\n`);
     return fallback;
   }
 }
