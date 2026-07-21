@@ -6,6 +6,31 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.1] — 2026-07-21
+
+### Fixed
+
+- **Failed writes are reported, not swallowed.** `writeJSON`/`writeText` (both the `fs-safe` and the
+  `hooks/shared` copy) caught every error on both write paths and discarded it — the silence that
+  kept 1.20.0's index-persistence bug invisible during development. One shared `writeAtomic` core
+  now serializes once, retries a failed rename briefly (the transient Windows handle-held case)
+  before the non-atomic last-resort write, and prints one `[openwolf]` line to stderr when nothing
+  could be written. Still never throws — a hook must not kill a session over a journal write — but
+  callers get a boolean and users get a trace.
+- **Cerebrum overwrite guard blames the right file.** The (opt-in) `mode: "overwrite"` cron task
+  refused to touch `cerebrum.md` whenever *any* context file was split into chunks — a large
+  `memory.md` next to a small cerebrum blocked the write with a misleading "cerebrum.md is larger
+  than the context cap" error. Fail-closed, so never dangerous, but wrong: the guard now checks
+  whether cerebrum.md itself was split.
+- **PreCompact snapshot is consumed instead of rotting.** `_precompact-snapshot.json` was written on
+  every compaction and read by nothing. The post-compaction digest now uses its one unique fact —
+  whether the user compacted via `/compact` or the window auto-compacted — and deletes the snapshot
+  after reading.
+- **Project hot-switch: config follows, shutdown hits the right project.** `switchProject` kept the
+  boot project's config (the new project's `cron.enabled` was ignored), and shutdown wrote
+  `engine_status: "stopped"` into the boot project's `cron-state.json` — after a switch the actual
+  project stayed "running" forever. Both now follow the live project.
+
 ## [1.20.0] — 2026-07-21
 
 ### Added
