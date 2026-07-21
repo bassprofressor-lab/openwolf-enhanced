@@ -4,6 +4,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
+import { consolidateMemory } from "../utils/maintenance.js";
 import { resolveLlmConfig, callLlmDetailed, requiresApiKey } from "./llm-provider.js";
 
 export interface AiTaskParams {
@@ -291,7 +292,11 @@ export class CronEngine {
         break;
 
       case "consolidate_memory":
-        this.consolidateMemory(action.params?.older_than_days as number ?? 7);
+        // Delegates to utils/maintenance — the engine used to carry its own copy, which MISSED the
+        // idempotency guard: every daily run re-consolidated already-consolidated blocks and, finding
+        // no table rows in them, rewrote every count to "(0 actions)". 127 of 128 blocks in one live
+        // memory.md had lost their counts to this. One implementation now, guarded and locked.
+        consolidateMemory(this.wolfDir, action.params?.older_than_days as number ?? 7);
         break;
 
       case "generate_token_report":
@@ -305,59 +310,6 @@ export class CronEngine {
       default:
         throw new Error(`Unknown action type: ${action.type}`);
     }
-  }
-
-  private consolidateMemory(olderThanDays: number): void {
-    const memoryPath = path.join(this.wolfDir, "memory.md");
-    const content = readText(memoryPath);
-    if (!content) return;
-
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - olderThanDays);
-
-    const lines = content.split("\n");
-    const result: string[] = [];
-    let inOldSession = false;
-    let oldSessionLines: string[] = [];
-    let currentSessionDate: Date | null = null;
-
-    for (const line of lines) {
-      const sessionMatch = line.match(/^## Session: (\d{4}-\d{2}-\d{2})/);
-      if (sessionMatch) {
-        // Flush previous old session
-        if (inOldSession && oldSessionLines.length > 0) {
-          const actionCount = oldSessionLines.filter((l) => l.startsWith("|") && !l.startsWith("|--") && !l.startsWith("| Time")).length;
-          result.push(`> Consolidated session (${actionCount} actions)`);
-          result.push("");
-        }
-
-        currentSessionDate = new Date(sessionMatch[1]);
-        if (currentSessionDate < cutoff) {
-          inOldSession = true;
-          oldSessionLines = [];
-          result.push(line); // Keep the header
-        } else {
-          inOldSession = false;
-          result.push(line);
-        }
-        continue;
-      }
-
-      if (inOldSession) {
-        oldSessionLines.push(line);
-      } else {
-        result.push(line);
-      }
-    }
-
-    // Flush last old session
-    if (inOldSession && oldSessionLines.length > 0) {
-      const actionCount = oldSessionLines.filter((l) => l.startsWith("|") && !l.startsWith("|--") && !l.startsWith("| Time")).length;
-      result.push(`> Consolidated session (${actionCount} actions)`);
-      result.push("");
-    }
-
-    writeText(memoryPath, result.join("\n"));
   }
 
   private generateTokenReport(): void {
