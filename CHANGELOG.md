@@ -6,6 +6,31 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.4] — 2026-07-21
+
+The six low-severity leftovers from the same review.
+
+### Fixed
+
+- **Bash outcome classification no longer treats stderr-only output as failure.** Plenty of
+  successful commands write only to stderr (git checkout progress, curl -v, warnings); they were
+  misclassified as failed, undercounting shell writes and mislabeling activity.log. Explicit
+  signals (exit codes, error flags) only.
+- **The "type-fix" auto-bug no longer fires on adding any `: ` in a small TS edit** — that matched
+  every new object property and flooded the buglog with fake "Type error" entries. Only an added
+  `as`-assertion counts now.
+- **The operator-change detector can finally see `===` → `==`.** It substring-tested operators, and
+  `"===".includes("==")` is true — so the most classic operator bug was structurally invisible.
+  Operators are now tokenized longest-first and compared as multisets.
+- **Sibling directories sharing a path prefix no longer count as inside the project** — pre-read/
+  post-read used a bare `startsWith(projectDir)`, so `/root/orderflow2` was tracked as part of
+  `/root/orderflow`. The separator is required now.
+- **`cerebrum_warnings` is alive.** The session field existed since day one but nothing incremented
+  it; pre-write now records fired Do-Not-Repeat warnings (locked read-modify-write).
+- **Native Auto Memory resolution survives dots in the project path.** The slash→dash slug guess
+  missed Claude's slugging for paths like `/x/my.app`, and native memory silently vanished from
+  recall. On a miss, project dirs are matched by canonicalized name (exact guess still wins).
+
 ## [1.20.3] — 2026-07-21
 
 Eleven fixes from a full bug/performance/logic review of the codebase.

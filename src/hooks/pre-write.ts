@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, readMarkdown, readStdin, readBugLog } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock } from "./shared.js";
 
 interface BugEntry {
   id: string;
@@ -39,7 +39,19 @@ async function main(): Promise<void> {
   if (!allContent.trim()) { process.exit(0); return; }
 
   // 1. Cerebrum Do-Not-Repeat check
-  checkCerebrum(wolfDir, allContent);
+  const cerebrumWarnings = checkCerebrum(wolfDir, allContent);
+  // Record fired warnings in the session tracker — the field existed since day one but nothing
+  // ever incremented it, so the ledger/dashboard always showed 0.
+  if (cerebrumWarnings > 0) {
+    try {
+      const sessionFile = path.join(wolfDir, "hooks", "_session.json");
+      withLock(sessionFile, () => {
+        const session = readJSON<{ cerebrum_warnings?: number; [k: string]: unknown }>(sessionFile, {});
+        session.cerebrum_warnings = (session.cerebrum_warnings ?? 0) + cerebrumWarnings;
+        writeJSON(sessionFile, session);
+      });
+    } catch { /* best-effort */ }
+  }
 
   // 2. Bug log: search for similar past bugs when editing code
   // This fires when Claude is about to edit a file — if the edit looks like a fix
@@ -51,13 +63,14 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-function checkCerebrum(wolfDir: string, content: string): void {
+function checkCerebrum(wolfDir: string, content: string): number {
   const cerebrumContent = readMarkdown(path.join(wolfDir, "cerebrum.md"));
   const doNotRepeatSection = cerebrumContent.split("## Do-Not-Repeat")[1];
-  if (!doNotRepeatSection) return;
+  if (!doNotRepeatSection) return 0;
 
   const entries = doNotRepeatSection.split("## ")[0];
   const lines = entries.split("\n").filter((l) => l.trim().startsWith("[") || l.trim().startsWith("-"));
+  let fired = 0;
 
   for (const line of lines) {
     const trimmed = line.trim().replace(/^[-*]\s*/, "").replace(/^\[[\d-]+\]\s*/, "");
@@ -82,10 +95,13 @@ function checkCerebrum(wolfDir: string, content: string): void {
           process.stderr.write(
             `⚠️ OpenWolf cerebrum warning: "${trimmed}" — check your code before proceeding.\n`
           );
+          fired++;
+          break; // one warning per Do-Not-Repeat entry is enough
         }
       } catch {}
     }
   }
+  return fired;
 }
 
 // Common words that appear in most code — must be excluded from similarity matching

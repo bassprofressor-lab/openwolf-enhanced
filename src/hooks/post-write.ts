@@ -526,15 +526,17 @@ function detectFixPattern(oldStr: string, newStr: string, ext: string, fileLabel
     };
   }
 
-  // --- Type annotation/cast fix ---
+  // --- Type assertion fix ---
+  // Only an added `as`-assertion counts. The old second branch (`": "` newly appearing in a
+  // small edit) fired on adding ANY object property or label and flooded the buglog with
+  // fake "Type error" entries.
   if (ext === ".ts" || ext === ".tsx") {
-    if ((newStr.includes(" as ") && !oldStr.includes(" as ")) ||
-        (newStr.includes(": ") && !oldStr.includes(": ") && oldLines.length <= 3)) {
+    if (newStr.includes(" as ") && !oldStr.includes(" as ")) {
       return {
         category: "type-fix",
         summary: `Type error`,
-        rootCause: `Missing or incorrect type annotation`,
-        fix: `Added type assertion/annotation`,
+        rootCause: `Missing or incorrect type assertion`,
+        fix: `Added type assertion`,
         context: extractChangedLines(oldStr, newStr),
       };
     }
@@ -576,15 +578,22 @@ function tokenizeCode(code: string): string[] {
 }
 
 function findOperatorChange(oldStr: string, newStr: string): { old: string; new: string } | null {
-  const operators = ["===", "!==", "==", "!=", ">=", "<=", ">>", "<<", "&&", "||", "??"];
-  for (const op of operators) {
-    if (oldStr.includes(op) && !newStr.includes(op)) {
-      for (const op2 of operators) {
-        if (op2 !== op && newStr.includes(op2) && !oldStr.includes(op2)) {
-          return { old: op, new: op2 };
-        }
-      }
+  // Tokenize operators longest-first instead of substring-testing: `"===".includes("==")` is true,
+  // so the old check could never see a `===` → `==` (or `!==` → `!=`) change — the most classic
+  // operator bug of them all.
+  const extractOps = (s: string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const m of s.match(/===|!==|==|!=|>=|<=|>>|<<|&&|\|\||\?\?/g) ?? []) {
+      counts.set(m, (counts.get(m) ?? 0) + 1);
     }
+    return counts;
+  };
+  const oldOps = extractOps(oldStr);
+  const newOps = extractOps(newStr);
+  const removed = [...oldOps.keys()].filter((op) => (newOps.get(op) ?? 0) < oldOps.get(op)!);
+  const added = [...newOps.keys()].filter((op) => (oldOps.get(op) ?? 0) < newOps.get(op)!);
+  if (removed.length === 1 && added.length === 1) {
+    return { old: removed[0], new: added[0] };
   }
   return null;
 }

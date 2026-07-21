@@ -12,9 +12,25 @@ export function nativeMemoryDir(projectRoot?: string): string | null {
   const override = process.env.OPENWOLF_NATIVE_MEMORY_DIR;
   if (override) return fs.existsSync(override) ? override : null;
   const root = projectRoot || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const base = path.join(os.homedir(), ".claude", "projects");
   const slug = root.replace(/\//g, "-");
-  const dir = path.join(os.homedir(), ".claude", "projects", slug, "memory");
-  return fs.existsSync(dir) ? dir : null;
+  const dir = path.join(base, slug, "memory");
+  if (fs.existsSync(dir)) return dir;
+  // The exact slugging Claude Code uses varies for paths with dots/underscores — the plain
+  // slash→dash guess above misses those and native memory silently vanished from recall. Fall
+  // back to matching any project dir whose name equals the root once BOTH are canonicalized
+  // (every non-alphanumeric run → "-"). Exact guess still wins; this only runs on a miss.
+  const canon = (s: string) => s.replace(/[^A-Za-z0-9]+/g, "-");
+  const want = canon(root);
+  try {
+    for (const name of fs.readdirSync(base)) {
+      if (canon(name) === want) {
+        const candidate = path.join(base, name, "memory");
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  } catch { /* no projects dir */ }
+  return null;
 }
 
 export function getWolfDir(): string {

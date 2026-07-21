@@ -1416,3 +1416,20 @@ test("findSimilarBugs: a short/empty error_message no longer matches everything"
   const log = JSON.parse(fs.readFileSync(path.join(wolf, "buglog.json"), "utf8"));
   assert.equal(log.bugs.length, 2, "new bug is appended, not folded into the junk entry");
 });
+
+// --- low-severity review fixes (1.20.4) ---
+import { nativeMemoryDir as nmd } from "../dist/hooks/shared.js";
+test("nativeMemoryDir: falls back to canonicalized slug match for paths with dots", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-home-"));
+  const projDir = path.join(home, ".claude", "projects", "-tmp-x-my-app", "memory");
+  fs.mkdirSync(projDir, { recursive: true });
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    assert.equal(nmd("/tmp/x/my.app"), projDir, "dot in path resolves via canonical fallback");
+    assert.equal(nmd("/tmp/x/my-app"), projDir, "exact slash-dash slug still resolves");
+    assert.equal(nmd("/tmp/x/other"), null, "unrelated root stays null");
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+  }
+});

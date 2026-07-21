@@ -33,9 +33,9 @@ function classifyOutcome(resp: unknown): "ok" | "error" | "unknown" {
       if (typeof r[k] === "number") return (r[k] as number) === 0 ? "ok" : "error";
     }
     if (r.interrupted === true || r.is_error === true || r.isError === true) return "error";
-    const stdout = typeof r.stdout === "string" ? r.stdout : "";
-    const stderr = typeof r.stderr === "string" ? r.stderr : "";
-    if (stderr.trim() && !stdout.trim()) return "error";
+    // NOTE: no "stderr but no stdout" heuristic — plenty of successful commands write only to
+    // stderr (git checkout progress, curl -v, warnings). It misclassified them as failures,
+    // undercounting bash_writes and mislabeling activity.log entries. Explicit signals only.
   }
   if (typeof resp === "string" && /(^|\s)(error|failed|command not found)\b|exit code [1-9]/i.test(resp)) {
     return "error";

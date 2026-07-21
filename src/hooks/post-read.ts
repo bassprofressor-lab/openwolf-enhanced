@@ -29,8 +29,10 @@ async function main(): Promise<void> {
 
   // Skip tracking for .wolf/ internal files — consistent with pre-read
   const projectDir = normalizePath(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const relToProject = normalizedFile.startsWith(projectDir)
-    ? normalizedFile.slice(projectDir.length).replace(/^\//, "")
+  // Separator required after the root — see pre-read (sibling-prefix directories, e.g.
+  // /root/orderflow2, must not count as inside /root/orderflow).
+  const relToProject = normalizedFile.startsWith(projectDir + "/")
+    ? normalizedFile.slice(projectDir.length + 1)
     : "";
   // Don't track reads of files outside the project root (upstream #56). relToProject is ""
   // both when the path is outside projectDir and when it equals the root itself — neither

@@ -41,8 +41,10 @@ async function main(): Promise<void> {
   // Skip tracking for .wolf/ internal files — they're infrastructure, not project files.
   // Counting them inflates anatomy miss rates since .wolf/ is excluded from anatomy scanning.
   const projectDir = normalizePath(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const relToProject = normalizedFile.startsWith(projectDir)
-    ? normalizedFile.slice(projectDir.length).replace(/^\//, "")
+  // Require the path SEPARATOR after the root — a bare startsWith(projectDir) also matched
+  // sibling directories sharing the prefix (/root/orderflow2 counted as inside /root/orderflow).
+  const relToProject = normalizedFile.startsWith(projectDir + "/")
+    ? normalizedFile.slice(projectDir.length + 1)
     : "";
   // Don't track files outside the project root (upstream #56).
   if (!relToProject) { process.exit(0); return; }
