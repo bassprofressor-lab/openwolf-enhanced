@@ -15,6 +15,23 @@ export function detectWaste(wolfDir: string): WasteFlag[] {
   const ledger = readLedger(wolfDir);
   const now = new Date().toISOString();
 
+  // Every pattern below feeds on read tracking from the pre-read hook. If that hook is not
+  // running, this detector goes silently blind — "no waste found" and "no data at all" would look
+  // identical. Sessions with writes but zero recorded reads are the tell: real sessions read
+  // before they write. One diagnostic flag instead of silence (threshold 3, so a fresh project
+  // or an odd one-off session doesn't false-alarm).
+  const recent = ledger.sessions.slice(-10);
+  const blind = recent.filter((s) => s.reads.length === 0 && s.writes.length > 0);
+  if (blind.length >= 3 && recent.every((s) => s.reads.length === 0)) {
+    flags.push({
+      pattern: "no_read_tracking",
+      description: `The last ${recent.length} sessions contain writes but not a single recorded read — the pre-read hook is probably not running, so waste detection is blind.`,
+      tokens_wasted: 0,
+      suggestion: "Run `openwolf status` to check the hooks, and `openwolf update` to redeploy them.",
+      detected_at: now,
+    });
+  }
+
   // Pattern 1: Repeated file reads.
   // The ledger stores one entry per unique file, so counting duplicate array entries (as this
   // used to do) could never find anything. The repetition lives in read_count.

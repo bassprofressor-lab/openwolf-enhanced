@@ -1319,3 +1319,25 @@ test("readJSON: missing file is silent, corrupt existing file warns on stderr", 
   } finally { process.stderr.write = orig; }
   assert.match(warned, /corrupt\.json exists but is not valid JSON/, "corrupt file is reported");
 });
+
+// --- waste detector: silent-blind detection when read tracking is dead ---
+// (detectWaste is already imported by the double-count test above)
+test("detectWaste: flags dead read tracking; stays quiet on a fresh or healthy ledger", () => {
+  const mkWolf = (sessions) => {
+    const wolf = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-waste-"));
+    fs.writeFileSync(path.join(wolf, "token-ledger.json"), JSON.stringify({
+      version: 1, created_at: "2026-01-01", lifetime: {}, sessions, daemon_usage: [],
+      waste_flags: [], optimization_report: { last_generated: null, patterns: [] },
+    }));
+    return wolf;
+  };
+  const blindSession = (i) => ({ id: `s${i}`, started: "", ended: "", reads: [], writes: [{ file: "a.ts", tokens_estimated: 100 }], totals: {} });
+  const healthySession = (i) => ({ id: `s${i}`, started: "", ended: "", reads: [{ file: "a.ts", read_count: 1, tokens_estimated: 100, anatomy_had_description: false }], writes: [], totals: {} });
+
+  const blind = detectWaste(mkWolf([1, 2, 3, 4].map(blindSession)));
+  assert.ok(blind.some((f) => f.pattern === "no_read_tracking"), "writes without any reads → diagnostic flag");
+
+  assert.equal(detectWaste(mkWolf([1, 2].map(blindSession))).length, 0, "below threshold → no flag");
+  assert.ok(!detectWaste(mkWolf([1, 2, 3].map(healthySession))).some((f) => f.pattern === "no_read_tracking"), "healthy ledger → no flag");
+  assert.equal(detectWaste(mkWolf([])).length, 0, "fresh project → no flag");
+});
