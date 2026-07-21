@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
 import { ensureDashboardToken, tokenMatches } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "./cron-engine.js";
@@ -432,14 +432,18 @@ function handleDashboardCommand(msg: { type: string; task_id?: string }): void {
       break;
     case "retry_dead_letter":
       if (msg.task_id) {
+        // Same lock as the cron engine's execution_log writes: this read-modify-write must not
+        // race a concurrent writer (engine entry, CLI `cron retry`) and clobber it.
         const statePath = path.join(wolfDir, "cron-state.json");
-        const state = readJSON<{ dead_letter_queue: Array<{ task_id: string }> }>(statePath, {
-          dead_letter_queue: [],
+        withLock(statePath, () => {
+          const state = readJSON<{ dead_letter_queue: Array<{ task_id: string }> }>(statePath, {
+            dead_letter_queue: [],
+          });
+          state.dead_letter_queue = state.dead_letter_queue.filter(
+            (d) => d.task_id !== msg.task_id
+          );
+          writeJSON(statePath, state);
         });
-        state.dead_letter_queue = state.dead_letter_queue.filter(
-          (d) => d.task_id !== msg.task_id
-        );
-        writeJSON(statePath, state);
       }
       break;
     case "force_scan":
@@ -498,11 +502,7 @@ function switchProject(newRoot: string): void {
   fileWatcher = startFileWatcher(wolfDir, logger, broadcast);
 
   // Mark the new project as running.
-  const statePath = path.join(wolfDir, "cron-state.json");
-  const state = readJSON<Record<string, unknown>>(statePath, {});
-  state.engine_status = "running";
-  state.last_heartbeat = new Date().toISOString();
-  writeJSON(statePath, state);
+  markCronState({ engine_status: "running", last_heartbeat: new Date().toISOString() });
 
   // Push the new project's state to all connected dashboard clients (trimmed via the helper).
   const files: Record<string, string> = {};
@@ -510,22 +510,27 @@ function switchProject(newRoot: string): void {
   broadcast({ type: "project_switched", project: { name: projectMeta.name, root: projectRoot }, files });
 }
 
+// Read-modify-write cron-state.json under the same lock the cron engine holds for its
+// execution_log entries — an unlocked stale-snapshot write (from this process's timers or a
+// concurrent CLI `openwolf cron retry`) could otherwise clobber a freshly appended entry.
+// Always derives the path from the LIVE wolfDir (correct across project switches).
+function markCronState(patch: Record<string, unknown>): void {
+  const statePath = path.join(wolfDir, "cron-state.json");
+  withLock(statePath, () => {
+    const state = readJSON<Record<string, unknown>>(statePath, {});
+    writeJSON(statePath, { ...state, ...patch });
+  });
+}
+
 // Health heartbeat
 const heartbeatInterval = config.openwolf.cron.heartbeat_interval_minutes * 60 * 1000;
 const heartbeatTimer = setInterval(() => {
-  const statePath = path.join(wolfDir, "cron-state.json");
-  const state = readJSON<Record<string, unknown>>(statePath, {});
-  state.last_heartbeat = new Date().toISOString();
-  writeJSON(statePath, state);
+  markCronState({ last_heartbeat: new Date().toISOString() });
   broadcast({ type: "health", status: "healthy", uptime: Math.floor((Date.now() - startTime) / 1000) });
 }, heartbeatInterval);
 
 // Update cron-state to running
-const cronStatePath = path.join(wolfDir, "cron-state.json");
-const cronState = readJSON<Record<string, unknown>>(cronStatePath, {});
-cronState.engine_status = "running";
-cronState.last_heartbeat = new Date().toISOString();
-writeJSON(cronStatePath, cronState);
+markCronState({ engine_status: "running", last_heartbeat: new Date().toISOString() });
 
 logger.info("OpenWolf daemon started");
 
@@ -537,13 +542,9 @@ function shutdown(): void {
   clearInterval(heartbeatTimer);
   if (cronEngine) cronEngine.stop();
 
-  // Derive the path from the LIVE wolfDir: after a project switch the boot-time cronStatePath
-  // points at the old project — shutdown would mark the wrong project "stopped" and leave the
-  // actual one "running" forever.
-  const statePath = path.join(wolfDir, "cron-state.json");
-  const state = readJSON<Record<string, unknown>>(statePath, {});
-  state.engine_status = "stopped";
-  writeJSON(statePath, state);
+  // markCronState uses the LIVE wolfDir: after a project switch, shutdown must mark the
+  // actual project "stopped", not the boot project.
+  markCronState({ engine_status: "stopped" });
 
   for (const client of wsClients) {
     client.close();

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
 import { readDashboardToken } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "../daemon/cron-engine.js";
@@ -124,20 +124,24 @@ export function cronRetry(id: string): void {
     return;
   }
 
+  // This CLI runs in its own process while the daemon's cron engine may be appending to the same
+  // file — read-modify-write under the shared lock so neither side clobbers the other.
   const statePath = path.join(wolfDir, "cron-state.json");
-  const state = readJSON<CronState>(statePath, {
-    engine_status: "unknown",
-    execution_log: [],
-    dead_letter_queue: [],
+  const removed = withLock(statePath, () => {
+    const state = readJSON<CronState>(statePath, {
+      engine_status: "unknown",
+      execution_log: [],
+      dead_letter_queue: [],
+    });
+    const idx = state.dead_letter_queue.findIndex((d) => d.task_id === id);
+    if (idx === -1) return false;
+    state.dead_letter_queue.splice(idx, 1);
+    writeJSON(statePath, state);
+    return true;
   });
-
-  const idx = state.dead_letter_queue.findIndex((d) => d.task_id === id);
-  if (idx === -1) {
+  if (!removed) {
     console.log(`Task ${id} not found in dead letter queue.`);
     return;
   }
-
-  state.dead_letter_queue.splice(idx, 1);
-  writeJSON(statePath, state);
   console.log(`Removed ${id} from dead letter queue. It will retry on next schedule.`);
 }
