@@ -83,37 +83,7 @@ export function readLedger(wolfDir: string): TokenLedger {
   });
 }
 
-export function writeLedger(wolfDir: string, ledger: TokenLedger): void {
-  writeJSON(getLedgerPath(wolfDir), ledger);
-}
-
-export function incrementSessions(wolfDir: string): void {
-  const ledger = readLedger(wolfDir);
-  ledger.lifetime.total_sessions++;
-  writeLedger(wolfDir, ledger);
-}
-
-export function addSessionToLedger(
-  wolfDir: string,
-  session: SessionEntry
-): void {
-  const ledger = readLedger(wolfDir);
-  // Keep token-ledger.json bounded (mirrors the cap in hooks/stop.ts).
-  if (Array.isArray(session.reads) && session.reads.length > 100) {
-    session.reads = session.reads.slice(-100);
-  }
-  if (Array.isArray(session.writes) && session.writes.length > 100) {
-    session.writes = session.writes.slice(-100);
-  }
-  ledger.sessions.push(session);
-  if (ledger.sessions.length > 200) {
-    ledger.sessions = ledger.sessions.slice(-200);
-  }
-  ledger.lifetime.total_reads += session.totals.reads_count;
-  ledger.lifetime.total_writes += session.totals.writes_count;
-  ledger.lifetime.total_tokens_estimated +=
-    session.totals.input_tokens_estimated + session.totals.output_tokens_estimated;
-  ledger.lifetime.anatomy_hits += session.totals.anatomy_lookups;
-  ledger.lifetime.repeated_reads_blocked += session.totals.repeated_reads_blocked;
-  writeLedger(wolfDir, ledger);
-}
+// NOTE: writeLedger/incrementSessions/addSessionToLedger were removed — they had ZERO callers
+// and silently diverged from the real writer in hooks/stop.ts (no lock, hardcoded caps instead of
+// config retention, missing anatomy_misses/real_usage). Anyone reaching for them would have
+// corrupted the very stats stop.ts maintains. The stop hook is the single ledger writer.

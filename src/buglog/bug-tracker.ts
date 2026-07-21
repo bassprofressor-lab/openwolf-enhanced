@@ -108,10 +108,14 @@ export function findSimilarBugs(wolfDir: string, errorMessage: string): ScoredBu
   for (const bug of bugLog.bugs) {
     let score = 0;
 
-    // Exact substring match
+    // Exact substring match — but only when the CONTAINED string has real length. normalize()
+    // can reduce a short or punctuation-only message to "" or a few chars, and "".includes / a
+    // 3-char fragment matches everything: logBug would then fold unrelated new bugs into that
+    // entry as "duplicates".
+    const nb = normalize(bug.error_message);
     if (
-      normalize(bug.error_message).includes(normalizedInput) ||
-      normalizedInput.includes(normalize(bug.error_message))
+      (normalizedInput.length >= 12 && nb.includes(normalizedInput)) ||
+      (nb.length >= 12 && normalizedInput.includes(nb))
     ) {
       score += 1.0;
     }
