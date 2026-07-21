@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy,
-  estimateTokens, readStdin, normalizePath, loadIgnore
+  estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile
 } from "./shared.js";
 
 interface SessionData {
@@ -52,6 +52,10 @@ async function main(): Promise<void> {
   }
   // Skip .gitignore / .wolfignore matches — no anatomy hint / repeated-read tracking for them.
   if (loadIgnore(projectDir)(relToProject)) { process.exit(0); return; }
+  // Never track secret-bearing files (#54). post-read already skips them, but the session entry
+  // (with the file's PATH) is created HERE — without this guard a read .env still landed in
+  // _session.json and from there in token-ledger.json.
+  if (isSecretFile(normalizedFile)) { process.exit(0); return; }
 
   const session = readJSON<SessionData>(sessionFile, {
     session_id: "", files_read: {}, anatomy_hits: 0, anatomy_misses: 0,

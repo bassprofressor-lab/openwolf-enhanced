@@ -1,8 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 import {
-  getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, serializeAnatomy,
+  getWolfDir, ensureWolfDir, readJSON, writeJSON, writeAtomic, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateFileTokens, getTokenRatios, appendMarkdown, timeShort, readStdin, normalizePath,
   getRetention, loadIgnore, readBugLog, isSecretFile
 } from "./shared.js";
@@ -144,14 +143,7 @@ async function main(): Promise<void> {
         misses: 0,
       });
 
-      const tmp = anatomyPath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-      try {
-        fs.writeFileSync(tmp, serialized, "utf-8");
-        fs.renameSync(tmp, anatomyPath);
-      } catch {
-        try { fs.writeFileSync(anatomyPath, serialized, "utf-8"); } catch {}
-        try { fs.unlinkSync(tmp); } catch {}
-      }
+      writeAtomic(anatomyPath, () => serialized);
     }
   } catch {}
 

@@ -40,34 +40,55 @@ export function getRetention(wolfDir: string): Retention {
 // .wolfignore matcher (mirror of hooks/shared.ts — separate build roots).
 // ---------------------------------------------------------------------------
 export function makeIgnoreMatcher(patterns: string[]): (relPath: string) => boolean {
-  const pats = patterns
+  // gitignore-lite, evaluated in ORDER with last-match-wins so `!` negations work
+  // ("dist/" then "!dist/keep.js"). A leading "/" anchors the pattern to the project root —
+  // "/dist" matches only the top-level dist, not src/dist. The old matcher dropped negations
+  // entirely and never gave the leading slash any meaning, so "/dist"-style .gitignore lines
+  // (the common form) matched nothing at all.
+  const rules = patterns
     .map((p) => p.trim())
-    .filter((p) => p && !p.startsWith("#") && !p.startsWith("!"));
-  if (pats.length === 0) return () => false;
+    .filter((p) => p && !p.startsWith("#"))
+    .map((raw) => {
+      const negate = raw.startsWith("!");
+      const body = (negate ? raw.slice(1) : raw).trim();
+      const anchored = body.startsWith("/");
+      const pat = (anchored ? body.slice(1) : body).replace(/\/+$/, "");
+      return { negate, anchored, pat };
+    })
+    .filter((r) => r.pat.length > 0);
+  if (rules.length === 0) return () => false;
+
+  const matchesRule = (norm: string, parts: string[], base: string, r: { anchored: boolean; pat: string }): boolean => {
+    const { anchored, pat } = r;
+    if (norm === pat || norm.startsWith(pat + "/")) return true;
+    if (!anchored) {
+      if (base === pat || parts.includes(pat)) return true;
+      if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
+    }
+    if (pat.includes("*")) {
+      const re = new RegExp(
+        "^" +
+          pat
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, "\u0000")
+            .replace(/\*/g, "[^/]*")
+            .replace(/\u0000/g, ".*") +
+          "$"
+      );
+      if (re.test(norm) || (!anchored && re.test(base))) return true;
+    }
+    return false;
+  };
+
   return (relPath: string): boolean => {
     const norm = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     const parts = norm.split("/");
     const base = parts[parts.length - 1];
-    for (const raw of pats) {
-      const pat = raw.replace(/\/+$/, "");
-      if (norm === pat || base === pat) return true;
-      if (parts.includes(pat)) return true;
-      if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
-      if (norm.startsWith(pat + "/")) return true;
-      if (pat.includes("*")) {
-        const re = new RegExp(
-          "^" +
-            pat
-              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replace(/\*\*/g, "\u0000")
-              .replace(/\*/g, "[^/]*")
-              .replace(/\u0000/g, ".*") +
-            "$"
-        );
-        if (re.test(norm) || re.test(base)) return true;
-      }
+    let ignored = false;
+    for (const r of rules) {
+      if (matchesRule(norm, parts, base, r)) ignored = !r.negate;
     }
-    return false;
+    return ignored;
   };
 }
 
@@ -422,7 +443,7 @@ export function footprint(wolfDir: string, ret: Retention): {
   const bugBytes = fileSize(path.join(wolfDir, "buglog.json"));
   items.push({ name: "buglog.json", bytes: bugBytes });
 
-  for (const f of ["anatomy.md", "cerebrum.md", "cron-state.json"]) {
+  for (const f of ["anatomy.md", "cerebrum.md", "cron-state.json", "recall-embeddings.json", "recall-embeddings.vec"]) {
     const b = fileSize(path.join(wolfDir, f));
     if (b > 0) items.push({ name: f, bytes: b });
   }

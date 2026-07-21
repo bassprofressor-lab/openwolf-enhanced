@@ -158,35 +158,55 @@ export function getRetention(wolfDir: string): Retention {
 // and ** globs. (Duplicated in utils/maintenance.ts — separate build roots.)
 // ---------------------------------------------------------------------------
 export function makeIgnoreMatcher(patterns: string[]): (relPath: string) => boolean {
-  const pats = patterns
+  // gitignore-lite, evaluated in ORDER with last-match-wins so `!` negations work
+  // ("dist/" then "!dist/keep.js"). A leading "/" anchors the pattern to the project root —
+  // "/dist" matches only the top-level dist, not src/dist. The old matcher dropped negations
+  // entirely and never gave the leading slash any meaning, so "/dist"-style .gitignore lines
+  // (the common form) matched nothing at all.
+  const rules = patterns
     .map((p) => p.trim())
-    .filter((p) => p && !p.startsWith("#") && !p.startsWith("!"));
-  if (pats.length === 0) return () => false;
+    .filter((p) => p && !p.startsWith("#"))
+    .map((raw) => {
+      const negate = raw.startsWith("!");
+      const body = (negate ? raw.slice(1) : raw).trim();
+      const anchored = body.startsWith("/");
+      const pat = (anchored ? body.slice(1) : body).replace(/\/+$/, "");
+      return { negate, anchored, pat };
+    })
+    .filter((r) => r.pat.length > 0);
+  if (rules.length === 0) return () => false;
+
+  const matchesRule = (norm: string, parts: string[], base: string, r: { anchored: boolean; pat: string }): boolean => {
+    const { anchored, pat } = r;
+    if (norm === pat || norm.startsWith(pat + "/")) return true;
+    if (!anchored) {
+      if (base === pat || parts.includes(pat)) return true;
+      if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
+    }
+    if (pat.includes("*")) {
+      const re = new RegExp(
+        "^" +
+          pat
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, "\u0000")
+            .replace(/\*/g, "[^/]*")
+            .replace(/\u0000/g, ".*") +
+          "$"
+      );
+      if (re.test(norm) || (!anchored && re.test(base))) return true;
+    }
+    return false;
+  };
 
   return (relPath: string): boolean => {
     const norm = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     const parts = norm.split("/");
     const base = parts[parts.length - 1];
-    for (const raw of pats) {
-      const pat = raw.replace(/\/+$/, "");
-      if (norm === pat || base === pat) return true;
-      if (parts.includes(pat)) return true; // dir name anywhere in path
-      if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
-      if (norm.startsWith(pat + "/")) return true; // under a dir prefix
-      if (pat.includes("*")) {
-        const re = new RegExp(
-          "^" +
-            pat
-              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replace(/\*\*/g, "\u0000")
-              .replace(/\*/g, "[^/]*")
-              .replace(/\u0000/g, ".*") +
-            "$"
-        );
-        if (re.test(norm) || re.test(base)) return true;
-      }
+    let ignored = false;
+    for (const r of rules) {
+      if (matchesRule(norm, parts, base, r)) ignored = !r.negate;
     }
-    return false;
+    return ignored;
   };
 }
 
@@ -932,11 +952,17 @@ export function normalizePath(p: string): string {
 export function countSemanticEntries(wolfDir: string): number {
   try {
     const content = fs.readFileSync(path.join(wolfDir, "memory.md"), "utf-8");
+    const lines = content.split(/\r?\n/);
+    // Scope to the CURRENT session: everything after the last "## Session" header. The old code
+    // counted lines starting with "| YYYY-MM-DD" — a format no writer ever produces (rows start
+    // "| HH:MM |"), so the count was always 0 and the summary reminder fired regardless.
+    let start = 0;
+    for (let i = 0; i < lines.length; i++) if (/^## Session\b/.test(lines[i])) start = i + 1;
     const mechanical = /^\|\s*[\d:]+\s*\|\s*(Created|Edited|Multi-edited|Session end:|designqc:)/;
-    const today = `| ${new Date().toISOString().slice(0, 10)}`;
     let count = 0;
-    for (const line of content.split(/\r?\n/)) {
-      if (line.startsWith(today) && !mechanical.test(line)) count++;
+    for (const line of lines.slice(start)) {
+      if (/^\*\*Did:\*\*/.test(line.trim())) { count++; continue; }
+      if (/^\|\s*\d{1,2}:\d{2}\s*\|/.test(line) && !mechanical.test(line)) count++;
     }
     return count;
   } catch {

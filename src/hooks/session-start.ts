@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, SESSION_SUMMARY_SCAFFOLD } from "./shared.js";
+import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, SESSION_SUMMARY_SCAFFOLD } from "./shared.js";
 
 async function main(): Promise<void> {
   ensureWolfDir();
@@ -90,14 +90,18 @@ async function main(): Promise<void> {
   // Increment total_sessions in token-ledger — only for a genuinely new session, not a
   // resume/compact continuation (which would double-count the same session).
   if (!continuing) {
+    // Same lock as the stop hook's ledger write — a session ending in one process while another
+    // starts must not clobber the read-modify-write.
     const ledgerPath = path.join(wolfDir, "token-ledger.json");
-    const ledger = readJSON(ledgerPath, { version: 1, lifetime: { total_sessions: 0 } }) as {
-      version: number;
-      lifetime: { total_sessions: number };
-      [key: string]: unknown;
-    };
-    ledger.lifetime.total_sessions++;
-    writeJSON(ledgerPath, ledger);
+    withLock(ledgerPath, () => {
+      const ledger = readJSON(ledgerPath, { version: 1, lifetime: { total_sessions: 0 } }) as {
+        version: number;
+        lifetime: { total_sessions: number };
+        [key: string]: unknown;
+      };
+      ledger.lifetime.total_sessions++;
+      writeJSON(ledgerPath, ledger);
+    });
   }
 
   // Inject a compact resume digest as additionalContext so the model continues without

@@ -57,6 +57,8 @@ interface SessionEntry {
     writes_count: number;
     repeated_reads_blocked: number;
     anatomy_lookups: number;
+    /** Shell / outside-project writes — counted in lifetime.total_writes, never named. */
+    unnamed_writes?: number;
   };
 }
 
@@ -158,6 +160,7 @@ async function main(): Promise<void> {
       writes_count: writeCount,
       repeated_reads_blocked: session.repeated_reads_warned,
       anatomy_lookups: session.anatomy_hits,
+      ...(unnamedWrites > 0 ? { unnamed_writes: unnamedWrites } : {}),
     },
   };
 
@@ -205,7 +208,9 @@ async function main(): Promise<void> {
     ledger.sessions = ledger.sessions.slice(-ret.token_ledger_max_sessions);
   }
   ledger.lifetime.total_reads += readCount;
-  ledger.lifetime.total_writes += writeCount;
+  // Unnamed writes (shell / other working dirs) count toward the lifetime total — they were real
+  // work. They stay OUT of the session's named writes[] list (no path was recorded, by design).
+  ledger.lifetime.total_writes += writeCount + unnamedWrites;
   ledger.lifetime.total_tokens_estimated += inputTokens + outputTokens;
   ledger.lifetime.anatomy_hits += session.anatomy_hits;
   ledger.lifetime.anatomy_misses += session.anatomy_misses;

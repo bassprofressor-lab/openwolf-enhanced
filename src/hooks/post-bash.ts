@@ -53,8 +53,14 @@ async function main(): Promise<void> {
 
   const cmd = (input.tool_input?.command ?? "").trim();
   if (!cmd) { process.exit(0); return; }
-  // Never capture the capture-reading commands themselves, to avoid feedback noise.
-  if (/\bopenwolf\b/.test(cmd)) { process.exit(0); return; }
+  // Never capture invocations of the openwolf CLI itself, to avoid feedback noise. Match the
+  // COMMAND position of each shell segment, not the whole string — the old `\bopenwolf\b` skipped
+  // every command that merely mentioned an openwolf PATH, which made the write counter blind for
+  // exactly the sessions that work on an openwolf checkout.
+  const invokesOpenwolf = cmd
+    .split(/&&|\|\||[;|]/)
+    .some((seg) => /^(?:\s*[A-Za-z_]\w*=\S*)*\s*(?:\S*\/)?openwolf(?:\s|$)/.test(seg));
+  if (invokesOpenwolf) { process.exit(0); return; }
 
   const failed = classifyOutcome(input.tool_response) === "error";
 

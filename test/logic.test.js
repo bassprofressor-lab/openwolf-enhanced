@@ -1341,3 +1341,78 @@ test("detectWaste: flags dead read tracking; stays quiet on a fresh or healthy l
   assert.ok(!detectWaste(mkWolf([1, 2, 3].map(healthySession))).some((f) => f.pattern === "no_read_tracking"), "healthy ledger → no flag");
   assert.equal(detectWaste(mkWolf([])).length, 0, "fresh project → no flag");
 });
+
+// --- 1.20.3 review fixes ---
+
+test("makeIgnoreMatcher: anchored /dist and ! negation (last match wins)", () => {
+  const m = makeIgnoreMatcher(["/dist", "/build/"]);
+  assert.equal(m("dist/bundle.js"), true, "anchored /dist matches top-level dist");
+  assert.equal(m("build/x.js"), true, "anchored dir with trailing slash");
+  assert.equal(m("src/dist/inner.js"), false, "anchored /dist does NOT match nested dist");
+
+  const n = makeIgnoreMatcher(["dist/", "!dist/keep.js"]);
+  assert.equal(n("dist/bundle.js"), true, "still ignored");
+  assert.equal(n("dist/keep.js"), false, "negation un-ignores (old matcher dropped ! entirely)");
+
+  const all = makeIgnoreMatcher(["*", "!src"]);
+  assert.equal(all("anything.md"), true);
+  assert.equal(all("src"), false, "negation after * works");
+});
+
+import { countSemanticEntries } from "../dist/hooks/shared.js";
+test("countSemanticEntries: mechanical-only session → 0; semantic row or **Did:** counts", () => {
+  const wolf = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-sem-count-"));
+  const mech = [
+    "## Session: 2026-07-21 10:00", "",
+    "| Time | Action | File(s) | Outcome | ~Tokens |", "|------|---|---|---|---|",
+    "| 10:01 | Created src/a.ts | — | ~100 |",
+    "| 10:05 | Edited src/a.ts | fix | ~50 |",
+    "| 10:09 | Session end: 3 writes across 1 files (a.ts) | 2 reads | ~150 tok |",
+  ].join("\n");
+  fs.writeFileSync(path.join(wolf, "memory.md"), mech);
+  assert.equal(countSemanticEntries(wolf), 0, "mechanical rows don't count (old code counted 0 for EVERYTHING — a '| YYYY-MM-DD' prefix no writer produces)");
+
+  fs.appendFileSync(path.join(wolf, "memory.md"),
+    "\n| 10:15 | Release 1.2.3: fixed the watcher | file-watcher.ts | LIVE | ~2k |\n");
+  assert.equal(countSemanticEntries(wolf), 1, "a hand-written summary row counts");
+
+  fs.appendFileSync(path.join(wolf, "memory.md"),
+    "**Did:** released · **Learned:** x · **Next:** y · **Files:** z\n");
+  assert.equal(countSemanticEntries(wolf), 2, "a Did/Learned/Next scaffold replacement counts");
+
+  // Only the LAST session's entries count.
+  fs.appendFileSync(path.join(wolf, "memory.md"), "\n## Session: 2026-07-22 09:00\n\n| 09:01 | Created x | — | ~10 |\n");
+  assert.equal(countSemanticEntries(wolf), 0, "new session starts back at zero");
+});
+
+import { consolidateMemory as maintConsolidate } from "../dist/src/utils/maintenance.js";
+test("consolidateMemory: idempotent — a second run keeps '(N actions)' counts", () => {
+  const wolf = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-consol-"));
+  const old = [
+    "## Session: 2020-01-01 10:00", "",
+    "| Time | Action | File(s) | Outcome | ~Tokens |", "|------|---|---|---|---|",
+    "| 10:01 | a | b | c |", "| 10:02 | d | e | f |", "",
+  ].join("\n");
+  fs.writeFileSync(path.join(wolf, "memory.md"), old);
+  const r1 = maintConsolidate(wolf, 7);
+  assert.equal(r1.changed, true);
+  let txt = fs.readFileSync(path.join(wolf, "memory.md"), "utf8");
+  assert.match(txt, /Consolidated session \(2 actions\)/, "first run records the real count");
+  maintConsolidate(wolf, 7);
+  txt = fs.readFileSync(path.join(wolf, "memory.md"), "utf8");
+  assert.match(txt, /Consolidated session \(2 actions\)/, "second run must NOT rewrite it to (0 actions) — the cron engine's un-guarded copy destroyed 127/128 live counts");
+  assert.doesNotMatch(txt, /\(0 actions\)/);
+});
+
+import { findSimilarBugs } from "../dist/src/buglog/bug-tracker.js";
+test("findSimilarBugs: a short/empty error_message no longer matches everything", () => {
+  const wolf = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-sim-"));
+  fs.writeFileSync(path.join(wolf, "buglog.json"), JSON.stringify({ version: 1, bugs: [
+    { id: "bug-001", error_message: "???", file: "a.ts", root_cause: "", fix: "x", tags: [], related_bugs: [], occurrences: 1, last_seen: "2026-01-01", timestamp: "2026-01-01" },
+  ]}));
+  const sims = findSimilarBugs(wolf, "completely unrelated new failure in the daemon");
+  assert.ok(!sims.some((s) => s.score >= 0.8), "punctuation-only message must not score as a duplicate");
+  logBug(wolf, { error_message: "watcher broadcasts the embedding index", file: "w.ts", root_cause: "r", fix: "f", tags: [] });
+  const log = JSON.parse(fs.readFileSync(path.join(wolf, "buglog.json"), "utf8"));
+  assert.equal(log.bugs.length, 2, "new bug is appended, not folded into the junk entry");
+});

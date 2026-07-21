@@ -121,8 +121,14 @@ function checkBugLog(wolfDir: string, filePath: string, oldStr: string, newStr: 
   const editTokens = tokenize(editText);
 
   const relevant = fileMatches.filter(bug => {
-    // Check if any bug tag appears in the edit content
-    const tagHit = bug.tags.some(t => editText.includes(t.toLowerCase()));
+    // Check if any bug tag appears in the edit content — as a whole word, and only tags with some
+    // substance. A substring match on short tags ("ts", "s1", "api") hit virtually every edit and
+    // made this FYI fire constantly for any file that carried one.
+    const tagHit = (bug.tags ?? []).some(t => {
+      const tag = t.toLowerCase();
+      if (tag.length < 4) return false;
+      return new RegExp(`\\b${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(editText);
+    });
     if (tagHit) return true;
 
     // Check meaningful word overlap (excluding stop words)
