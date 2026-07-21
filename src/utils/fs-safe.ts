@@ -11,21 +11,51 @@ export function readJSON<T = unknown>(filePath: string, fallback: T): T {
   }
 }
 
-export function writeJSON(filePath: string, data: unknown): void {
+// Shared tmp+rename write. Never throws (hooks must not kill a session over a failed journal
+// write), but a total failure is REPORTED on stderr instead of vanishing — a silently dropped
+// write once hid that the semantic-recall index never persisted at all (bug-183).
+function writeAtomic(filePath: string, serialize: () => string): boolean {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  let content: string;
+  try {
+    content = serialize();
+  } catch (e) {
+    // Serialization failed (e.g. JSON.stringify past V8's max string length) — there is nothing
+    // to write, and retrying with the same data cannot succeed.
+    process.stderr.write(`[openwolf] write to ${path.basename(filePath)} failed: ${(e as Error).message}\n`);
+    return false;
+  }
   const tmp = filePath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tmp, filePath);
+    fs.writeFileSync(tmp, content, "utf-8");
+    // On Windows, rename can fail transiently while another process holds a handle — retry briefly
+    // before giving up on atomicity.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(tmp, filePath);
+        return true;
+      } catch (e) {
+        if (attempt >= 2) throw e;
+      }
+    }
   } catch {
-    // On Windows, rename can fail if another process holds a handle.
-    // Fall back to direct write and clean up the tmp file.
-    try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8"); } catch {}
+    // Last resort: non-atomic direct write, so the data still lands even if replace is impossible.
     try { fs.unlinkSync(tmp); } catch {}
+    try {
+      fs.writeFileSync(filePath, content, "utf-8");
+      return true;
+    } catch (e) {
+      process.stderr.write(`[openwolf] write to ${path.basename(filePath)} failed: ${(e as Error).message}\n`);
+      return false;
+    }
   }
+}
+
+export function writeJSON(filePath: string, data: unknown): boolean {
+  return writeAtomic(filePath, () => JSON.stringify(data, null, 2));
 }
 
 export function readText(filePath: string, fallback: string = ""): string {
@@ -36,21 +66,8 @@ export function readText(filePath: string, fallback: string = ""): string {
   }
 }
 
-export function writeText(filePath: string, content: string): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  const tmp = filePath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-  try {
-    fs.writeFileSync(tmp, content, "utf-8");
-    fs.renameSync(tmp, filePath);
-  } catch {
-    // On Windows, rename can fail if another process holds a handle.
-    // Fall back to direct write and clean up the tmp file.
-    try { fs.writeFileSync(filePath, content, "utf-8"); } catch {}
-    try { fs.unlinkSync(tmp); } catch {}
-  }
+export function writeText(filePath: string, content: string): boolean {
+  return writeAtomic(filePath, () => content);
 }
 
 // Best-effort advisory lock around a read-modify-write cycle (M1). Duplicated from

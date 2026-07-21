@@ -78,19 +78,46 @@ export function readJSON<T = unknown>(filePath: string, fallback: T): T {
   }
 }
 
-export function writeJSON(filePath: string, data: unknown): void {
+// Duplicated from utils/fs-safe.ts (separate build roots). Never throws — a hook must not kill a
+// session over a failed journal write — but a total failure is reported on stderr instead of
+// vanishing: a silently dropped write once hid a completely broken persistence path (bug-183).
+export function writeAtomic(filePath: string, serialize: () => string): boolean {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  let content: string;
+  try {
+    content = serialize();
+  } catch (e) {
+    process.stderr.write(`[openwolf] write to ${path.basename(filePath)} failed: ${(e as Error).message}\n`);
+    return false;
+  }
   const tmp = filePath + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tmp, filePath);
+    fs.writeFileSync(tmp, content, "utf-8");
+    // On Windows, rename can fail transiently while another process holds a handle — retry briefly.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(tmp, filePath);
+        return true;
+      } catch (e) {
+        if (attempt >= 2) throw e;
+      }
+    }
   } catch {
-    // On Windows, rename can fail if another process holds a handle.
-    // Fall back to direct write and clean up the tmp file.
-    try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8"); } catch {}
+    // Last resort: non-atomic direct write, so the data still lands even if replace is impossible.
     try { fs.unlinkSync(tmp); } catch {}
+    try {
+      fs.writeFileSync(filePath, content, "utf-8");
+      return true;
+    } catch (e) {
+      process.stderr.write(`[openwolf] write to ${path.basename(filePath)} failed: ${(e as Error).message}\n`);
+      return false;
+    }
   }
+}
+
+export function writeJSON(filePath: string, data: unknown): boolean {
+  return writeAtomic(filePath, () => JSON.stringify(data, null, 2));
 }
 
 // Retention limits, read from config.json (openwolf.retention) with safe defaults.
@@ -249,14 +276,7 @@ export function compactMemoryIfLarge(wolfDir: string, maxBytes: number): void {
   flush();
   if (!changed) return;
 
-  const serialized = out.join("\n");
-  const tmp = p + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-  try {
-    fs.writeFileSync(tmp, serialized, "utf-8");
-    fs.renameSync(tmp, p);
-  } catch {
-    try { fs.unlinkSync(tmp); } catch {}
-  }
+  writeAtomic(p, () => out.join("\n"));
 }
 
 // Read buglog.json tolerating the legacy bare-array format ([...]) as well as the

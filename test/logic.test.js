@@ -1282,3 +1282,23 @@ test("semanticRecall ranks by meaning; hybridRecall fuses with BM25", async () =
     assert.match(hyb[0].text, /apple pie/, "hybrid: item ranked by both lists wins");
   } finally { restore(); }
 });
+
+// --- fs-safe: failed writes are reported, not swallowed (bug-183 accomplice) ---
+import { writeJSON as fsSafeWriteJSON } from "../dist/src/utils/fs-safe.js";
+test("writeJSON: returns true on success, false + stderr warning when serialization fails", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-fssafe-"));
+  const p = path.join(dir, "x.json");
+  assert.equal(fsSafeWriteJSON(p, { a: 1 }), true, "success → true");
+  assert.deepEqual(JSON.parse(fs.readFileSync(p, "utf8")), { a: 1 });
+
+  let warned = "";
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { warned += s; return true; };
+  try {
+    // BigInt is not JSON-serializable — JSON.stringify throws, the same class of failure as
+    // exceeding V8's max string length.
+    assert.equal(fsSafeWriteJSON(p, { big: 1n }), false, "serialize failure → false");
+  } finally { process.stderr.write = orig; }
+  assert.match(warned, /write to x\.json failed/, "failure is reported on stderr");
+  assert.deepEqual(JSON.parse(fs.readFileSync(p, "utf8")), { a: 1 }, "previous content untouched");
+});
