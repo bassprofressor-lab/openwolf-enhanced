@@ -6,6 +6,16 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.7] — 2026-08-10
+
+### Fixed
+
+- **The `backups/` warning could never be satisfied.** It counted every entry in the directory while
+  the pruner only manages timestamped snapshot *directories*, so a single hand-placed file next to
+  them (`cerebrum-…-pre-fix.md`) kept the count one over the limit — and `doctor`, which the warning
+  told you to run, left it exactly where it was. A permanent warning is worse than no warning: it
+  teaches you to skim past the list. Both sides count snapshots now.
+
 ## [1.20.6] — 2026-08-10
 
 ### Fixed

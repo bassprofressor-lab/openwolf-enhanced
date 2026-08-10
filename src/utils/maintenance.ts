@@ -487,11 +487,16 @@ export function footprint(wolfDir: string, ret: Retention): {
   // Directories
   const backupsDir = path.join(wolfDir, "backups");
   if (fs.existsSync(backupsDir)) {
-    const count = safeReaddir(backupsDir).length;
+    // Count only what the pruner actually manages — timestamped snapshot DIRECTORIES. Counting
+    // every entry made a hand-placed file (a one-off `cerebrum-…-pre-fix.md` next to them) tip the
+    // total over the limit, so the warning told you to run a command that could never clear it.
+    const snapshots = safeReaddir(backupsDir).filter((n) => {
+      try { return fs.statSync(path.join(backupsDir, n)).isDirectory(); } catch { return false; }
+    }).length;
     const b = dirSize(backupsDir);
-    items.push({ name: `backups/ (${count})`, bytes: b });
-    if (count > ret.backups_keep) {
-      warnings.push(`backups/: ${count} kept — prune to ${ret.backups_keep} with 'openwolf doctor'`);
+    items.push({ name: `backups/ (${snapshots})`, bytes: b });
+    if (snapshots > ret.backups_keep) {
+      warnings.push(`backups/: ${snapshots} kept — prune to ${ret.backups_keep} with 'openwolf doctor'`);
     }
   }
   const capturesDir = path.join(wolfDir, "designqc-captures");
