@@ -104,6 +104,47 @@ test("dedupeAndCapBuglog: migrates bare array, dedupes auto entries, keeps manua
   assert.ok(log.bugs.some((b) => b.id === "m1"), "manual entry preserved");
 });
 
+test("dedupeAndCapBuglog: capping sacrifices auto-detected entries before curated ones", () => {
+  const w = tmpWolf();
+  // 5 curated bugs written first, then 5 auto-detected ones — the real-world order.
+  const bugs = [
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `m${i}`, file: `src/m${i}.ts`, tags: ["manual"] })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, file: `src/a${i}.ts`, tags: ["auto-detected"] })),
+  ];
+  fs.writeFileSync(path.join(w, "buglog.json"), JSON.stringify({ version: 1, bugs }));
+  dedupeAndCapBuglog(w, 6);
+  const ids = JSON.parse(fs.readFileSync(path.join(w, "buglog.json"), "utf8")).bugs.map((b) => b.id);
+  // All 5 curated entries must survive; the cap is paid out of auto-detected noise.
+  for (let i = 0; i < 5; i++) assert.ok(ids.includes(`m${i}`), `curated m${i} must survive the cap`);
+  assert.equal(ids.length, 6);
+  assert.equal(ids.filter((x) => x.startsWith("a")).length, 1, "only the newest auto entry is kept");
+});
+
+test("dedupeAndCapBuglog: keeps the original order (no manual/auto regrouping)", () => {
+  const w = tmpWolf();
+  // The duplicate auto entry forces a merge, so the file is actually rewritten — without it the
+  // function short-circuits on "same length" and any reordering would stay invisible.
+  const bugs = [
+    { id: "m0", file: "src/a.ts", tags: ["manual"] },
+    { id: "a0", file: "src/x.ts", tags: ["auto-detected"] },
+    { id: "m1", file: "src/b.ts", tags: ["manual"] },
+    { id: "a0dup", file: "src/x.ts", tags: ["auto-detected"] },
+  ];
+  fs.writeFileSync(path.join(w, "buglog.json"), JSON.stringify({ version: 1, bugs }));
+  dedupeAndCapBuglog(w, 200);
+  const log = JSON.parse(fs.readFileSync(path.join(w, "buglog.json"), "utf8"));
+  assert.deepEqual(log.bugs.map((b) => b.id), ["m0", "a0", "m1"], "merged entry keeps its original slot");
+});
+
+test("dedupeAndCapBuglog: only curated entries left → the oldest of them is dropped", () => {
+  const w = tmpWolf();
+  const bugs = Array.from({ length: 4 }, (_, i) => ({ id: `m${i}`, file: `src/m${i}.ts`, tags: ["manual"] }));
+  fs.writeFileSync(path.join(w, "buglog.json"), JSON.stringify({ version: 1, bugs }));
+  dedupeAndCapBuglog(w, 2);
+  const ids = JSON.parse(fs.readFileSync(path.join(w, "buglog.json"), "utf8")).bugs.map((b) => b.id);
+  assert.deepEqual(ids, ["m2", "m3"], "falls back to dropping the oldest curated entries");
+});
+
 // --- readBugLog tolerates legacy array + object shapes ---
 test("readBugLog: normalizes bare array and object forms", () => {
   const w = tmpWolf();
@@ -1432,4 +1473,143 @@ test("nativeMemoryDir: falls back to canonicalized slug match for paths with dot
   } finally {
     if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
   }
+});
+
+// --- <private> redaction must fail CLOSED on an unterminated marker ---
+import { blankPrivate } from "../dist/hooks/shared.js";
+
+test("stripPrivate: an unterminated <private> hides the rest of the file, not nothing", () => {
+  const closed = "public a\n<private>\nSECRET=1\n</private>\npublic b";
+  assert.ok(!stripPrivate(closed).includes("SECRET=1"), "closed block must be removed");
+  assert.ok(stripPrivate(closed).includes("public b"), "text after a closed block survives");
+
+  // A forgotten/typo'd closing tag used to leave everything after it exposed.
+  const open = "public a\n<private>\nSSH_KEY=AAAAB3\nCUSTOMER=admin/pw";
+  const out = stripPrivate(open);
+  assert.ok(!out.includes("SSH_KEY"), "unterminated marker must still hide the secret");
+  assert.ok(!out.includes("admin/pw"), "…including everything after it");
+  assert.ok(out.includes("public a"), "text before the marker is untouched");
+});
+
+test("blankPrivate: redacts the same regions but keeps the line count", () => {
+  const src = "l1\n<private>\nsecret\n</private>\nl5";
+  const out = blankPrivate(src);
+  assert.ok(!out.includes("secret"));
+  assert.equal(out.split("\n").length, src.split("\n").length, "line numbers must not shift");
+  const open = "l1\n<private>\nsecret2\nsecret3";
+  const out2 = blankPrivate(open);
+  assert.ok(!out2.includes("secret2") && !out2.includes("secret3"));
+  assert.equal(out2.split("\n").length, open.split("\n").length);
+});
+
+test("recall: never returns content from an unterminated <private> block", () => {
+  const w = tmpWolf();
+  fs.writeFileSync(path.join(w, "cerebrum.md"), "## Key Learnings\n- normal entry\n\n<private>\nSSH_KEY=AAAAB3NzaSECRET\n");
+  const hits = recall(w, "AAAAB3NzaSECRET", { includeNative: false });
+  assert.equal(hits.length, 0, "an unterminated private block must not be searchable");
+});
+
+// --- openwolf-CLI detection in the Bash hook: correctness + no catastrophic backtracking ---
+import { segmentInvokesOpenwolf } from "../dist/hooks/post-bash.js";
+
+test("segmentInvokesOpenwolf: matches command position, ignores mere mentions", () => {
+  for (const yes of [
+    "openwolf doctor", "openwolf", "  openwolf recall x", "/usr/bin/openwolf doctor",
+    "./bin/openwolf up", "FOO=1 openwolf doctor", "A=1 B=2 C=3 openwolf recall q",
+    "DATABASE_URL=postgres://u:p@h/d openwolf up",
+  ]) assert.ok(segmentInvokesOpenwolf(yes), `should match: ${yes}`);
+
+  for (const no of [
+    "node app.js", "echo openwolf", "cat /path/openwolf.md", "git commit -m openwolf",
+    "FOO=1 node x.js", "openwolfx doctor",
+  ]) assert.ok(!segmentInvokesOpenwolf(no), `should not match: ${no}`);
+});
+
+test("segmentInvokesOpenwolf: stays linear on the backtracking bomb", () => {
+  // The old pattern needed ~300ms at 53 chars and grew exponentially from there.
+  const bomb = "a=".repeat(400) + "!";
+  const started = Date.now();
+  assert.equal(segmentInvokesOpenwolf(bomb), false);
+  assert.ok(Date.now() - started < 200, "an 800-char segment must not take measurable time");
+});
+
+// --- native-memory index repair (doctor --fix-index) ---
+import { repairNativeMemoryIndex } from "../dist/src/utils/maintenance.js";
+
+function tmpMem() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "ow-mem-"));
+  return d;
+}
+function writeTopic(dir, name, { desc, heading, ageDays = 0 } = {}) {
+  const fm = desc ? `---\nname: ${name.replace(/\.md$/, "")}\ndescription: ${desc}\n---\n\n` : "";
+  fs.writeFileSync(path.join(dir, name), `${fm}${heading ? `# ${heading}\n\n` : ""}body text\n`);
+  if (ageDays) {
+    const t = new Date(Date.now() - ageDays * 86400000);
+    fs.utimesSync(path.join(dir, name), t, t);
+  }
+}
+
+test("repairNativeMemoryIndex: appends only recent unindexed files, keeps old ones out", () => {
+  const d = tmpMem();
+  fs.writeFileSync(path.join(d, "MEMORY.md"), "# Index\n\n- [Known](known.md) — already filed\n");
+  writeTopic(d, "known.md", { desc: "already filed" });
+  writeTopic(d, "fresh.md", { desc: "a recent finding", heading: "Fresh Topic" });
+  writeTopic(d, "ancient.md", { desc: "old news", ageDays: 200 });
+
+  const rep = repairNativeMemoryIndex(d, { withinDays: 90 });
+  assert.equal(rep.added.length, 1, "only the recent orphan is added");
+  assert.equal(rep.added[0].file, "fresh.md");
+  assert.equal(rep.skippedStale, 1, "the 200d-old orphan is reported, not added");
+  assert.ok(rep.wrote);
+
+  const idx = fs.readFileSync(path.join(d, "MEMORY.md"), "utf8");
+  assert.ok(idx.includes("- [Fresh Topic](fresh.md) — a recent finding"), "uses heading + description");
+  assert.ok(idx.includes("- [Known](known.md)"), "existing curated content is preserved");
+  assert.ok(!idx.includes("ancient.md"));
+});
+
+test("repairNativeMemoryIndex: dry run writes nothing; second run is idempotent", () => {
+  const d = tmpMem();
+  fs.writeFileSync(path.join(d, "MEMORY.md"), "# Index\n");
+  writeTopic(d, "one.md", { desc: "first" });
+
+  const dry = repairNativeMemoryIndex(d, { dryRun: true });
+  assert.equal(dry.added.length, 1);
+  assert.equal(dry.wrote, false);
+  assert.equal(fs.readFileSync(path.join(d, "MEMORY.md"), "utf8"), "# Index\n", "dry run must not touch the file");
+
+  repairNativeMemoryIndex(d);
+  const after = fs.readFileSync(path.join(d, "MEMORY.md"), "utf8");
+  const again = repairNativeMemoryIndex(d);
+  assert.equal(again.added.length, 0, "an already-referenced file is not added twice");
+  assert.equal(fs.readFileSync(path.join(d, "MEMORY.md"), "utf8"), after, "second run leaves the file untouched");
+});
+
+test("repairNativeMemoryIndex: falls back to the filename when there is no frontmatter", () => {
+  const d = tmpMem();
+  fs.writeFileSync(path.join(d, "MEMORY.md"), "# Index\n");
+  fs.writeFileSync(path.join(d, "no_front-matter.md"), "just a line of text\n");
+  const rep = repairNativeMemoryIndex(d);
+  assert.match(rep.added[0].line, /^- \[No Front Matter\]\(no_front-matter\.md\) — just a line of text$/);
+});
+
+test("repairNativeMemoryIndex: never grows the index past the loadable window", () => {
+  const d = tmpMem();
+  // 10 curated lines already there, budget of 14 → room for 2 entries (heading + blank cost 2).
+  fs.writeFileSync(path.join(d, "MEMORY.md"), Array.from({ length: 10 }, (_, i) => `- [c${i}](c${i}.md)`).join("\n") + "\n");
+  for (let i = 0; i < 10; i++) writeTopic(d, `orphan${i}.md`, { desc: `d${i}` });
+
+  const rep = repairNativeMemoryIndex(d, { maxIndexLines: 14 });
+  assert.equal(rep.added.length, 2, "fills only the remaining room");
+  assert.equal(rep.skippedBudget, 8, "the rest is reported as budget-skipped, not silently dropped");
+  assert.equal(rep.skippedStale, 0, "budget skips must not be mislabelled as stale");
+  const lines = fs.readFileSync(path.join(d, "MEMORY.md"), "utf8").trim().split("\n");
+  assert.ok(lines.length <= 14, `index must stay within the window, got ${lines.length}`);
+});
+
+test("repairNativeMemoryIndex: reports dead index links", () => {
+  const d = tmpMem();
+  fs.writeFileSync(path.join(d, "MEMORY.md"), "- [Gone](vanished.md) — was deleted\n");
+  const rep = repairNativeMemoryIndex(d, { dryRun: true });
+  assert.deepEqual(rep.deadLinks, ["vanished.md"]);
 });

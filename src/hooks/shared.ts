@@ -986,11 +986,27 @@ export function countSemanticEntries(wolfDir: string): number {
   }
 }
 
+// Matches a <private> region. The second alternative is the fail-closed half: an opening tag with
+// no matching </private> swallows everything to end-of-input. Without it a single typo'd or
+// forgotten closing tag silently published the whole rest of the file — into the injected resume
+// digest, into `recall` output, into the semantic index, and (via blocksFor) into `openwolf push`,
+// which sends candidates OFF the machine. An unclosed marker must never mean "not private".
+const PRIVATE_RE = /<private>[\s\S]*?<\/private>|<private>[\s\S]*$/gi;
+
 // Remove <private>…</private> blocks (case-insensitive, spanning newlines). Content wrapped
 // this way in a knowledge file is kept out of the injected resume digest and out of `recall`
 // results — a lightweight way to note secrets/sensitive context without leaking it into the LLM.
 export function stripPrivate(text: string): string {
-  return text.replace(/<private>[\s\S]*?<\/private>/gi, "");
+  return text.replace(PRIVATE_RE, "");
+}
+
+/**
+ * Same redaction, but every non-newline character is replaced by a space instead of the region
+ * being deleted. Callers that report line numbers (recall, citations) need the line count to stay
+ * identical, otherwise every citation after a private block points at the wrong line.
+ */
+export function blankPrivate(text: string): string {
+  return text.replace(PRIVATE_RE, (m) => m.replace(/[^\n]/g, ""));
 }
 
 // Structured session-summary scaffold written under each new session header in memory.md.

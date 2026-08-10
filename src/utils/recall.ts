@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { stripPrivate, nativeMemoryDir } from "../hooks/shared.js";
+import { stripPrivate, blankPrivate, nativeMemoryDir } from "../hooks/shared.js";
 
 // A keyword search over the flat .wolf knowledge files — the query interface OpenWolf
 // lacked. No database: it scans STATUS.md / cerebrum.md / memory.md / buglog.json, scores
@@ -62,7 +62,7 @@ export function blocksFor(src: string, content: string): Block[] {
   if (src.endsWith(".json")) {
     return unitsFor(src, content).map((u) => ({ start: u.line, end: u.line, text: u.text }));
   }
-  const deprivated = content.replace(/<private>[\s\S]*?<\/private>/gi, (m) => m.replace(/[^\n]/g, ""));
+  const deprivated = blankPrivate(content);
   const lines = deprivated.split(/\r?\n/);
   const isBoundary = (l: string) => /^(#{1,6}\s|[-*]\s|\d+\.\s|\|)/.test(l);
   const blocks: Block[] = [];
@@ -102,7 +102,7 @@ function unitsFor(src: string, content: string): Unit[] {
     }));
   }
   // Blank out private blocks but KEEP the newlines, so reported line numbers stay accurate.
-  const deprivated = content.replace(/<private>[\s\S]*?<\/private>/gi, (m) => m.replace(/[^\n]/g, ""));
+  const deprivated = blankPrivate(content);
   return deprivated.split(/\r?\n/)
     .map((text, i) => ({ line: i + 1, text }))
     .filter((u) => u.text.trim().length > 0);

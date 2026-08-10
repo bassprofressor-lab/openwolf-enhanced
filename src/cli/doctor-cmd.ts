@@ -16,12 +16,15 @@ import {
   suggestIgnores,
   nativeMemoryHealth,
   findDuplicateEntries,
+  repairNativeMemoryIndex,
   type CompactResult,
 } from "../utils/maintenance.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 
 interface DoctorOpts {
   dryRun?: boolean;
+  fixIndex?: boolean;
+  indexDays?: string;
 }
 
 // `openwolf doctor` — daemon-independent .wolf/ health report + compaction.
@@ -93,6 +96,29 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
         console.log(`  ⚠ ${h.deadLinks.length} dead index link(s) → missing file: ${h.deadLinks.slice(0, 3).join(", ")}${h.deadLinks.length > 3 ? "…" : ""}`);
       if (h.staleCount)
         console.log(`  · ${h.staleCount} topic files untouched in 90+ days`);
+
+      // --fix-index turns that orphan warning into an action. Opt-in on purpose: MEMORY.md is
+      // injected into context every session and only its first 200 lines load, so growing it is a
+      // trade the user has to make knowingly.
+      if (opts.fixIndex && h.orphanCount) {
+        const days = Number(opts.indexDays ?? 90) || 90;
+        const rep = repairNativeMemoryIndex(nd, { withinDays: days, dryRun: !!opts.dryRun });
+        if (!rep.added.length) {
+          console.log(`  · --fix-index: nothing to add — all ${h.orphanCount} unindexed file(s) are older than ${days}d (raise with --index-days)`);
+        } else if (rep.wrote) {
+          console.log(`  ✓ --fix-index: appended ${rep.added.length} entr${rep.added.length === 1 ? "y" : "ies"} to MEMORY.md`);
+          for (const a of rep.added.slice(0, 5)) console.log(`      ${a.line.slice(0, 110)}`);
+          if (rep.added.length > 5) console.log(`      … and ${rep.added.length - 5} more`);
+        } else {
+          console.log(`  · --fix-index (dry run): would append ${rep.added.length} entr${rep.added.length === 1 ? "y" : "ies"}`);
+        }
+        if (rep.skippedBudget)
+          console.log(`  · ${rep.skippedBudget} more would not fit — only the first 200 index lines load at session start`);
+        if (rep.skippedStale)
+          console.log(`  · ${rep.skippedStale} unindexed file(s) older than ${days}d left out — reach them with \`openwolf recall\``);
+      } else if (h.orphanCount && !opts.fixIndex) {
+        console.log(`  · run \`openwolf doctor --fix-index\` to append the recent ones to MEMORY.md`);
+      }
     }
   } catch { /* native memory unreadable — skip */ }
 

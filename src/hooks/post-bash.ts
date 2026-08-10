@@ -16,6 +16,21 @@ import {
 //
 // (1) runs regardless of the capture setting — see the note at the gate below.
 
+/**
+ * Does this shell segment invoke the openwolf CLI in COMMAND position (optionally behind
+ * `VAR=value` env prefixes and a path)? Matching the command position rather than the bare word
+ * keeps the write counter alive in sessions that merely mention an openwolf path. [bug-149]
+ *
+ * The env-prefix group requires the trailing `\s+` on purpose. With `\s*` leading each iteration
+ * instead, `\S*` and the following iteration could split the SAME token in exponentially many
+ * ways: a ~70-character segment like `A=a=a=a=…` backtracked for minutes, and this hook runs on
+ * every Bash call, so it blocked the agent. Demanding whitespace after each assignment — which is
+ * how shell env prefixes actually work — makes the boundary unambiguous and the match linear.
+ */
+export function segmentInvokesOpenwolf(seg: string): boolean {
+  return /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?openwolf(?:\s|$)/.test(seg);
+}
+
 interface SessionData {
   files_written: unknown[];
   edit_counts: Record<string, number>;
@@ -57,9 +72,7 @@ async function main(): Promise<void> {
   // COMMAND position of each shell segment, not the whole string — the old `\bopenwolf\b` skipped
   // every command that merely mentioned an openwolf PATH, which made the write counter blind for
   // exactly the sessions that work on an openwolf checkout.
-  const invokesOpenwolf = cmd
-    .split(/&&|\|\||[;|]/)
-    .some((seg) => /^(?:\s*[A-Za-z_]\w*=\S*)*\s*(?:\S*\/)?openwolf(?:\s|$)/.test(seg));
+  const invokesOpenwolf = cmd.split(/&&|\|\||[;|]/).some(segmentInvokesOpenwolf);
   if (invokesOpenwolf) { process.exit(0); return; }
 
   const failed = classifyOutcome(input.tool_response) === "error";

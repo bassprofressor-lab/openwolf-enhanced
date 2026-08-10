@@ -157,7 +157,9 @@ export function createProgram(): Command {
     .command("doctor")
     .description("Report .wolf/ health & footprint, then compact (daemon-independent)")
     .option("--dry-run", "Only report sizes/warnings; write nothing")
-    .action(async (opts: { dryRun?: boolean }) => {
+    .option("--fix-index", "Append unindexed native-memory topic files to MEMORY.md so they surface on resume")
+    .option("--index-days <n>", "With --fix-index: only add files touched in the last n days (default 90)", "90")
+    .action(async (opts: { dryRun?: boolean; fixIndex?: boolean; indexDays?: string }) => {
       const { doctorCommand } = await import("./doctor-cmd.js");
       await doctorCommand(opts);
     });

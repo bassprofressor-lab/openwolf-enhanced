@@ -6,6 +6,49 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.5] — 2026-08-10
+
+A security-and-retention pass found by dogfooding the tool on a real project.
+
+### Security
+
+- **An unterminated `<private>` no longer publishes the rest of the file.** The redaction regex
+  required a closing tag, so a forgotten or typo'd `</private>` silently exposed everything after
+  the marker — into the injected resume digest, `recall` output, the semantic embedding index, and,
+  via `blocksFor()`, into `openwolf push`, which sends candidates **off the machine**. Redaction now
+  fails closed: an opening marker without a match hides through end-of-file. The regex lived inline
+  in three places and is now one shared pair (`stripPrivate` / `blankPrivate`, the latter keeping
+  line counts so citations stay accurate).
+- **Catastrophic backtracking in the Bash hook.** The openwolf-CLI detector allowed zero-width
+  separation between `VAR=value` env prefixes, so `\S*` and the next iteration could split the same
+  token exponentially: a 53-character segment already took ~300 ms and grew from there — on a hook
+  that runs on *every* Bash call and blocks the agent. Env prefixes now require the whitespace that
+  a shell demands anyway, which makes the match linear (800 chars: 0.003 ms).
+- **`body-parser` pinned to >= 2.3.0** (GHSA-v422-hmwv-36x6, pulled in transitively by express 5.2.1).
+  `pnpm audit --prod` is clean again.
+
+### Fixed
+
+- **`doctor` no longer deletes hand-written bugs to stay under the cap.** `dedupeAndCapBuglog`
+  rebuilt the array as `[...manual, ...merged]` and then trimmed with `slice(-max)` — which cuts
+  from the front, i.e. exactly the curated entries, while auto-detected ones sat at the back and
+  became un-evictable. Observed on a real log: 184 curated + 16 auto-detected, with the oldest
+  curated bug already lost. Entries keep their original position now, and an overflow is paid out
+  of auto-detected noise first (oldest first), falling back to curated entries only when that runs
+  out.
+
+### Added
+
+- **`doctor` reports when the semantic recall index is stale.** It is usually the largest thing in
+  `.wolf/` but only rebuilds on a semantic/hybrid recall, so its size was shown without the fact
+  that everything written since the last build is reachable by keyword only.
+- **`openwolf doctor --fix-index`** turns the long-standing "N topic files not in the index" warning
+  into an action: it appends pointers (title + `description:` from the frontmatter) for unindexed
+  native-memory topic files, newest first. Opt-in, and budgeted — only the first 200 lines of
+  MEMORY.md load at session start, so it fills the remaining room and reports what did not fit
+  rather than growing the index out of the loadable window. `--index-days` (default 90) controls how
+  far back it reaches; older files stay reachable through `openwolf recall`.
+
 ## [1.20.4] — 2026-07-21
 
 The six low-severity leftovers from the same review.

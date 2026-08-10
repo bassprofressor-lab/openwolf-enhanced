@@ -385,6 +385,15 @@ export function fileSize(p: string): number {
   }
 }
 
+/** Last-modified time in ms, or 0 when the file is missing/unreadable. */
+export function mtimeMs(p: string): number {
+  try {
+    return fs.statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 export function dirSize(dir: string): number {
   let total = 0;
   let entries: fs.Dirent[];
@@ -446,6 +455,25 @@ export function footprint(wolfDir: string, ret: Retention): {
   for (const f of ["anatomy.md", "cerebrum.md", "cron-state.json", "recall-embeddings.json", "recall-embeddings.vec"]) {
     const b = fileSize(path.join(wolfDir, f));
     if (b > 0) items.push({ name: f, bytes: b });
+  }
+
+  // The semantic index is usually the single largest thing in .wolf/, but it only refreshes when
+  // someone runs a semantic/hybrid recall. Reporting its size without its age hides the fact that
+  // everything written since the last build is reachable by keyword only.
+  const vecPath = path.join(wolfDir, "recall-embeddings.vec");
+  if (fileSize(vecPath) > 0) {
+    const builtAt = mtimeMs(vecPath);
+    let newest = 0;
+    for (const f of ["memory.md", "cerebrum.md", "STATUS.md", "buglog.json", "anatomy.md"]) {
+      newest = Math.max(newest, mtimeMs(path.join(wolfDir, f)));
+    }
+    if (newest > builtAt) {
+      const days = Math.floor((Date.now() - builtAt) / 86400000);
+      warnings.push(
+        `recall index: built ${days === 0 ? "today" : `${days}d ago`}, knowledge files changed since ` +
+        `— semantic recall misses them. Refresh with 'openwolf recall <query> --semantic'`,
+      );
+    }
   }
 
   const logBytes = fileSize(path.join(wolfDir, "daemon.log"));
@@ -607,26 +635,39 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
   const bugs = Array.isArray(log.bugs) ? log.bugs : [];
   const startCount = bugs.length;
 
+  const isAuto = (b: Bug) => (b.tags || []).includes("auto-detected");
   const key = (b: Bug) => `${path.basename(b.file || "")}::${(b.tags || []).filter((t) => t !== "auto-detected").sort().join(",")}`;
+  // Fold auto-detected entries into their first occurrence, but keep every entry in its
+  // ORIGINAL position. Regrouping into [...manual, ...merged] used to reorder the file, and
+  // since the cap below trims from the front, that silently deleted the oldest hand-written
+  // bugs while auto-detected ones — appended last — became un-evictable.
   const merged = new Map<string, Bug>();
-  const manual: Bug[] = [];
+  const ordered: Bug[] = [];
   for (const b of bugs) {
-    // Only fold auto-detected entries; keep manual bugs untouched and un-deduped.
-    if (!(b.tags || []).includes("auto-detected")) {
-      manual.push(b);
+    if (!isAuto(b)) {
+      ordered.push(b); // manual bugs stay untouched and un-deduped
       continue;
     }
-    const k = key(b);
-    const prev = merged.get(k);
+    const prev = merged.get(key(b));
     if (prev) {
       prev.occurrences = (prev.occurrences ?? 1) + (b.occurrences ?? 1);
       if (b.last_seen && (!prev.last_seen || b.last_seen > prev.last_seen)) prev.last_seen = b.last_seen;
     } else {
-      merged.set(k, { ...b });
+      const copy = { ...b };
+      merged.set(key(b), copy);
+      ordered.push(copy);
     }
   }
-  let result = [...manual, ...merged.values()];
-  if (result.length > max) result = result.slice(-max);
+  let result = ordered;
+  if (result.length > max) {
+    // Over the cap: spend auto-detected noise first (oldest first), and only fall back to
+    // curated entries once that is exhausted. Manual bugs carry the root_cause/fix knowledge.
+    const overflow = result.length - max;
+    const drop = new Set<number>();
+    for (let i = 0; i < result.length && drop.size < overflow; i++) if (isAuto(result[i])) drop.add(i);
+    for (let i = 0; i < result.length && drop.size < overflow; i++) drop.add(i);
+    result = result.filter((_, i) => !drop.has(i));
+  }
 
   // No change AND already in the canonical object form → nothing to do.
   if (result.length === startCount && !wasArray) {
@@ -780,4 +821,107 @@ export function findDuplicateEntries(
   }
   pairs.sort((a, b) => b.similarity - a.similarity);
   return pairs.slice(0, limit);
+}
+
+// ---------------------------------------------------------------------------
+// Native-memory index repair
+// ---------------------------------------------------------------------------
+
+export interface IndexRepair {
+  added: { file: string; line: string }[];
+  skippedStale: number;   // unindexed, but older than the cutoff — deliberately left out
+  skippedBudget: number;  // recent enough, but no room left in the loadable index window
+  deadLinks: string[];    // MEMORY.md entries pointing at files that no longer exist
+  wrote: boolean;
+}
+
+/** First `# Heading`, else the frontmatter name/filename slug turned into words. */
+function titleFor(body: string, front: Record<string, string>, file: string): string {
+  const h = body.match(/^#\s+(.+)$/m);
+  if (h) return h[1].trim().replace(/\s*[—–-]\s*$/, "");
+  const slug = front.name || file.replace(/\.md$/, "");
+  return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function frontmatterOf(raw: string): { front: Record<string, string>; body: string } {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!m) return { front: {}, body: raw };
+  const front: Record<string, string> = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (kv) front[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return { front, body: m[2] };
+}
+
+/**
+ * Append pointers for topic files that MEMORY.md doesn't reference, so they surface on resume
+ * instead of being reachable by `openwolf recall` alone.
+ *
+ * Deliberately NOT "add everything": MEMORY.md is injected into context every session and only its
+ * first 200 lines load, so appending hundreds of ancient entries would push out the curated ones —
+ * the index would grow while getting less useful. Only files touched within `withinDays` are added;
+ * the rest are reported as skipped and stay searchable via recall.
+ */
+export function repairNativeMemoryIndex(
+  dir: string,
+  opts: { withinDays?: number; dryRun?: boolean; maxIndexLines?: number } = {},
+): IndexRepair {
+  const cutoffMs = (opts.withinDays ?? 90) * 24 * 60 * 60 * 1000;
+  const maxLines = opts.maxIndexLines ?? 200;
+  const indexPath = path.join(dir, "MEMORY.md");
+  const index = readText(indexPath, "");
+  const referenced = new Set<string>();
+  for (const m of index.matchAll(/\]\(([^)]+\.md)\)/g)) referenced.add(path.basename(m[1]));
+
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".md") && !n.includes(".bak") && n !== "MEMORY.md");
+  } catch {
+    return { added: [], skippedStale: 0, skippedBudget: 0, deadLinks: [], wrote: false };
+  }
+  const existing = new Set(names);
+  const deadLinks = [...referenced].filter((r) => !existing.has(r));
+
+  const now = Date.now();
+  const candidates: { file: string; mtime: number }[] = [];
+  let skippedStale = 0;
+  for (const n of names) {
+    if (referenced.has(n)) continue;
+    let mtime = 0;
+    try { mtime = fs.statSync(path.join(dir, n)).mtimeMs; } catch { continue; }
+    if (now - mtime > cutoffMs) { skippedStale++; continue; }
+    candidates.push({ file: n, mtime });
+  }
+  candidates.sort((a, b) => b.mtime - a.mtime); // newest first
+
+  // Only the first `maxLines` of MEMORY.md load at session start, so the index has a hard budget.
+  // Appending past it would push the curated entries out of the loaded window — the repair would
+  // create exactly the problem `indexCutoffExceeded` warns about. Fill the remaining room with the
+  // newest orphans and report the rest as skipped; they stay reachable through recall.
+  const usedLines = index.trim() ? index.trim().split(/\r?\n/).length : 0;
+  const room = Math.max(0, maxLines - usedLines - 2); // -2 for the blank line + section heading
+  let skippedBudget = 0;
+  if (candidates.length > room) {
+    skippedBudget = candidates.length - room;
+    candidates.length = room;
+  }
+
+  const added = candidates.map(({ file }) => {
+    const { front, body } = frontmatterOf(readText(path.join(dir, file), ""));
+    const hook = (front.description || body.split(/\r?\n/).find((l) => l.trim())?.trim() || "")
+      .replace(/\s+/g, " ").slice(0, 160);
+    const title = titleFor(body, front, file);
+    return { file, line: `- [${title}](${file})${hook ? ` — ${hook}` : ""}` };
+  });
+
+  if (!added.length || opts.dryRun) return { added, skippedStale, skippedBudget, deadLinks, wrote: false };
+
+  const heading = "## Unfiled — appended by `openwolf doctor --fix-index`";
+  const base = index.replace(/\s*$/, "");
+  const next = base.includes(heading)
+    ? `${base}\n${added.map((a) => a.line).join("\n")}\n`
+    : `${base}\n\n${heading}\n${added.map((a) => a.line).join("\n")}\n`;
+  const wrote = withLock(indexPath, () => writeText(indexPath, next));
+  return { added, skippedStale, skippedBudget, deadLinks, wrote };
 }
