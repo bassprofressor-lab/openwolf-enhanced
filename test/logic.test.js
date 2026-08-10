@@ -1599,12 +1599,25 @@ test("repairNativeMemoryIndex: never grows the index past the loadable window", 
   fs.writeFileSync(path.join(d, "MEMORY.md"), Array.from({ length: 10 }, (_, i) => `- [c${i}](c${i}.md)`).join("\n") + "\n");
   for (let i = 0; i < 10; i++) writeTopic(d, `orphan${i}.md`, { desc: `d${i}` });
 
+  // 10 entries + the trailing newline count as 11 lines, minus blank + heading → room for 1.
   const rep = repairNativeMemoryIndex(d, { maxIndexLines: 14 });
-  assert.equal(rep.added.length, 2, "fills only the remaining room");
-  assert.equal(rep.skippedBudget, 8, "the rest is reported as budget-skipped, not silently dropped");
+  assert.equal(rep.added.length, 1, "fills only the remaining room");
+  assert.equal(rep.skippedBudget, 9, "the rest is reported as budget-skipped, not silently dropped");
   assert.equal(rep.skippedStale, 0, "budget skips must not be mislabelled as stale");
   const lines = fs.readFileSync(path.join(d, "MEMORY.md"), "utf8").trim().split("\n");
   assert.ok(lines.length <= 14, `index must stay within the window, got ${lines.length}`);
+});
+
+test("repairNativeMemoryIndex: the repair never trips the doctor's own >200-line warning", () => {
+  const d = tmpMem();
+  // 90 curated lines — the shape of a real index that is close to, but under, the limit.
+  fs.writeFileSync(path.join(d, "MEMORY.md"), Array.from({ length: 89 }, (_, i) => `- [c${i}](c${i}.md)`).join("\n") + "\n");
+  for (let i = 0; i < 300; i++) writeTopic(d, `orphan${i}.md`, { desc: `d${i}` });
+
+  repairNativeMemoryIndex(d);
+  const h = nativeMemoryHealth(d);
+  assert.equal(h.indexCutoffExceeded, false,
+    `repair must not push the index past the loadable window (got ${h.indexLines} lines)`);
 });
 
 test("repairNativeMemoryIndex: reports dead index links", () => {

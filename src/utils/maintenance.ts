@@ -899,7 +899,10 @@ export function repairNativeMemoryIndex(
   // Appending past it would push the curated entries out of the loaded window — the repair would
   // create exactly the problem `indexCutoffExceeded` warns about. Fill the remaining room with the
   // newest orphans and report the rest as skipped; they stay reachable through recall.
-  const usedLines = index.trim() ? index.trim().split(/\r?\n/).length : 0;
+  // Count exactly the way nativeMemoryHealth does (raw split, so a trailing newline counts as the
+  // line it is) — otherwise the repair can fill to its own budget and still trip the
+  // indexCutoffExceeded warning, which is the one thing it must never do.
+  const usedLines = index ? index.split(/\r?\n/).length : 0;
   const room = Math.max(0, maxLines - usedLines - 2); // -2 for the blank line + section heading
   let skippedBudget = 0;
   if (candidates.length > room) {

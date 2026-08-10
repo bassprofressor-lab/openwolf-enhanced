@@ -6,6 +6,16 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.6] — 2026-08-10
+
+### Fixed
+
+- **`doctor --fix-index` could still trip the very warning it exists to avoid.** Its line budget
+  counted the index with `trim()` while `nativeMemoryHealth` counts the raw split, so a repair could
+  land one line over and leave MEMORY.md reporting "> 200 lines — only the first 200 load at session
+  start". Both now measure the same way, and a test asserts the invariant directly: after a repair,
+  `indexCutoffExceeded` must be false.
+
 ## [1.20.5] — 2026-08-10
 
 A security-and-retention pass found by dogfooding the tool on a real project.
