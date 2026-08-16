@@ -1,3 +1,4 @@
+import * as net from "node:net";
 import * as path from "node:path";
 import { readJSON } from "../utils/fs-safe.js";
 
@@ -52,14 +53,54 @@ export function resolveLlmConfig(wolfDir: string): LlmConfig {
   return llmConfigFrom(cfg.openwolf?.cron);
 }
 
-// Literal-IP private/link-local check (incl. cloud metadata 169.254.169.254). Hostnames that resolve
-// to private IPs via DNS are NOT caught here — this guards the common SSRF sinks, not every case.
-function isPrivateHost(host: string): boolean {
-  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return true;
+function isPrivateIpv4(host: string): boolean {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
   if (!m) return false;
   const a = Number(m[1]), b = Number(m[2]);
   return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+/**
+ * Private/link-local check for an IPv6 LITERAL (brackets already stripped).
+ *
+ * The ranges are defined by the first 16-bit group, so that is what gets compared — as a number, not
+ * as text:
+ *   fe80::/10  link-local        → fe80 … febf   (the old `startsWith("fe80:")` missed fe81…febf,
+ *                                                 so fe90::1 sailed through the guard) [bug-213]
+ *   fc00::/7   unique local      → fc00 … fdff
+ *
+ * ::ffff:a.b.c.d maps an IPv4 address into v6 and is the classic way around a v4-only check, so it
+ * is unwrapped and handed to the v4 rules. Both spellings have to be handled: WHATWG `new URL()`
+ * rewrites ::ffff:127.0.0.1 into the hex form ::ffff:7f00:1 before this code ever sees it, so
+ * matching only the dotted spelling would leave exactly the bypass this is meant to close.
+ */
+function isPrivateIpv6(host: string): boolean {
+  if (host === "::1" || host === "::") return true;
+  const mapped = host.match(/^::ffff:(?:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|([0-9a-f]{1,4}):([0-9a-f]{1,4}))$/i);
+  if (mapped) {
+    if (mapped[1]) return isPrivateIpv4(mapped[1]);
+    const hi = parseInt(mapped[2], 16), lo = parseInt(mapped[3], 16);
+    return isPrivateIpv4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+  }
+  const head = parseInt(host.split(":")[0], 16);
+  if (!Number.isFinite(head)) return false;
+  return (head >= 0xfe80 && head <= 0xfebf) || (head >= 0xfc00 && head <= 0xfdff);
+}
+
+/**
+ * Literal-IP private/link-local check (incl. cloud metadata 169.254.169.254). Hostnames that resolve
+ * to private IPs via DNS are NOT caught here — this guards the common SSRF sinks, not every case.
+ *
+ * The prefix rules only apply to actual IP literals. They used to run against any string, so
+ * `startsWith("fc")` / `startsWith("fd")` rejected every ordinary hostname beginning with those two
+ * letters — fc2.com, fdisk.example.com, fd-api.vendor.io — as if it were an IPv6 ULA. [bug-212]
+ */
+function isPrivateHost(host: string): boolean {
+  switch (net.isIP(host)) {
+    case 4: return isPrivateIpv4(host);
+    case 6: return isPrivateIpv6(host);
+    default: return false;   // a name, not an address — DNS is out of scope here, see above
+  }
 }
 
 // A loopback endpoint is a local model server (Ollama, llama.cpp, LM Studio). Two consequences:
@@ -144,21 +185,26 @@ export async function callLlmDetailed(
   const req = buildLlmRequest(cfg, apiKey, prompt, opts.maxTokens ?? 4096);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 120_000);
-  let response: Response;
+  // The timer has to survive until the BODY is read, not just until the headers arrive. fetch()
+  // resolves as soon as the response head is in; response.json()/.text() pull the rest afterwards.
+  // With clearTimeout in a finally around the fetch alone, a server that sends headers and then
+  // stalls the body held the call forever — timeoutMs covered the handshake and nothing else.
+  // [bug-211]
   try {
-    response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal, redirect: "error" });
+    const response = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal: controller.signal, redirect: "error" });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    return { text: parseLlmResponse(cfg.provider, data), truncated: wasTruncated(cfg.provider, data) };
   } catch (err) {
+    // Also catches an abort during the body read, which is the case this fix is about.
     if ((err as Error).name === "AbortError") throw new Error(`${cfg.provider} API request timed out`);
     throw err;
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`${cfg.provider} API error (${cfg.model}) ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  return { text: parseLlmResponse(cfg.provider, data), truncated: wasTruncated(cfg.provider, data) };
 }
 
 /** Did the model stop because it hit max_tokens (rather than finishing its thought)? — pure. */

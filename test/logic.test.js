@@ -1626,3 +1626,32 @@ test("repairNativeMemoryIndex: reports dead index links", () => {
   const rep = repairNativeMemoryIndex(d, { dryRun: true });
   assert.deepEqual(rep.deadLinks, ["vanished.md"]);
 });
+
+test("llm-provider: IPv6 prefix rules only apply to real addresses [bug-212]", () => {
+  // `startsWith("fc")` / `startsWith("fd")` used to run against any string, so ordinary hostnames
+  // starting with those two letters were refused as if they were IPv6 unique-local addresses.
+  assertSafeBaseUrl("https://fc2.com/v1");
+  assertSafeBaseUrl("https://fdisk.example.com/v1");
+  assertSafeBaseUrl("https://fd-api.vendor.io/v1");
+  assertSafeBaseUrl("https://fe80.example.com/v1");
+  // Actual ULA literals stay blocked.
+  assert.throws(() => assertSafeBaseUrl("https://[fc00::1]/v1"), /private/);
+  assert.throws(() => assertSafeBaseUrl("https://[fd12:3456::1]/v1"), /private/);
+});
+
+test("llm-provider: link-local is fe80::/10, not just fe80: [bug-213]", () => {
+  // fe80::/10 spans fe80…febf. The old string check only caught the first of sixty-four blocks,
+  // so fe90::1 passed the guard and the API key would have gone to a link-local address.
+  for (const host of ["fe80::1", "fe81::1", "fe90::1", "feaf::1", "febf::1"]) {
+    assert.throws(() => assertSafeBaseUrl(`https://[${host}]/v1`), /private/, `${host} must be blocked`);
+  }
+  // fec0:: is site-local (deprecated) and outside /10 — unchanged behaviour, documented here so a
+  // future widening of the range is a deliberate decision rather than an accident.
+  assertSafeBaseUrl("https://[fec0::1]/v1");
+});
+
+test("llm-provider: IPv4-mapped IPv6 does not slip past the v4 rules [bug-213]", () => {
+  assert.throws(() => assertSafeBaseUrl("https://[::ffff:127.0.0.1]/v1"), /private/);
+  assert.throws(() => assertSafeBaseUrl("https://[::ffff:169.254.169.254]/v1"), /private/);
+  assertSafeBaseUrl("https://[::ffff:93.184.216.34]/v1");
+});
