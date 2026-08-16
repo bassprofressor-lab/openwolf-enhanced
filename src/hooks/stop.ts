@@ -34,7 +34,52 @@ interface SessionData {
   /** Writes made through the shell (heredoc, `>`, sed -i, cp) — counted, never named. post-write
    *  never sees these: it only matches Write|Edit|MultiEdit. [bug-149] */
   bash_writes?: number;
+  /**
+   * What this session has ALREADY contributed to ledger.lifetime.
+   *
+   * Stop fires once per TURN, not once per session — that is what stop_count counts. But
+   * files_read/files_written/anatomy_hits are cumulative for the whole session, so adding them to
+   * lifetime on every stop books the same work again and again: over N turns the ledger counts
+   * 1+2+3+…+N instead of N. Measured in this project before the fix: 200 session entries for 13
+   * sessions, total_writes 187090, estimated_savings_vs_bare_cli 898967826 — the number the tool
+   * advertises its own value with. [bug-210]
+   *
+   * Absent on a fresh session (session-start writes the object without it) → everything counts as
+   * new, which is correct. Present across compact/resume, where the session file survives on
+   * purpose — which is also correct, because those turns are the same session.
+   */
+  booked?: Booked;
 }
+
+/** Cumulative amounts already added to lifetime for the current session. */
+interface Booked {
+  reads: number;
+  writes: number;
+  tokens: number;
+  anatomy_hits: number;
+  anatomy_misses: number;
+  repeated_reads_blocked: number;
+  savings: number;
+  real_input: number;
+  real_output: number;
+  real_cache_read: number;
+  real_cache_creation: number;
+  real_api_calls: number;
+}
+
+const NOTHING_BOOKED: Booked = {
+  reads: 0, writes: 0, tokens: 0, anatomy_hits: 0, anatomy_misses: 0, repeated_reads_blocked: 0,
+  savings: 0, real_input: 0, real_output: 0, real_cache_read: 0, real_cache_creation: 0, real_api_calls: 0,
+};
+
+/**
+ * Only what is new since the last stop goes into lifetime.
+ *
+ * Clamped at zero: if the cumulative value ever goes DOWN (session file reset while `booked`
+ * survived, retention trimming a counter), the honest answer is "nothing new", never a negative
+ * correction — that would silently eat other sessions' numbers.
+ */
+const delta = (current: number, booked: number): number => Math.max(0, current - booked);
 
 interface SessionEntry {
   id: string;
@@ -203,36 +248,66 @@ async function main(): Promise<void> {
   if (Array.isArray(sessionEntry.writes) && sessionEntry.writes.length > ret.session_io_max) {
     sessionEntry.writes = sessionEntry.writes.slice(-ret.session_io_max);
   }
-  ledger.sessions.push(sessionEntry);
+  // One entry per session, not per turn: the entry carries the session's cumulative state, so a
+  // later stop REPLACES the earlier one instead of appending a near-duplicate under the same id.
+  const existing = ledger.sessions.findIndex((s) => s.id === sessionEntry.id);
+  if (existing === -1) ledger.sessions.push(sessionEntry);
+  else ledger.sessions[existing] = sessionEntry;
   if (ledger.sessions.length > ret.token_ledger_max_sessions) {
     ledger.sessions = ledger.sessions.slice(-ret.token_ledger_max_sessions);
   }
-  ledger.lifetime.total_reads += readCount;
-  // Unnamed writes (shell / other working dirs) count toward the lifetime total — they were real
-  // work. They stay OUT of the session's named writes[] list (no path was recorded, by design).
-  ledger.lifetime.total_writes += writeCount + unnamedWrites;
-  ledger.lifetime.total_tokens_estimated += inputTokens + outputTokens;
-  ledger.lifetime.anatomy_hits += session.anatomy_hits;
-  ledger.lifetime.anatomy_misses += session.anatomy_misses;
-  ledger.lifetime.repeated_reads_blocked += session.repeated_reads_warned;
 
-  // Accumulate measured usage alongside the estimates, so the ledger carries both a heuristic and
-  // a verifiable ground truth (F1).
-  if (realUsage) {
-    const lt = ledger.lifetime;
-    lt.real_input_tokens = (lt.real_input_tokens ?? 0) + realUsage.input_tokens;
-    lt.real_output_tokens = (lt.real_output_tokens ?? 0) + realUsage.output_tokens;
-    lt.real_cache_read_tokens = (lt.real_cache_read_tokens ?? 0) + realUsage.cache_read_input_tokens;
-    lt.real_cache_creation_tokens = (lt.real_cache_creation_tokens ?? 0) + realUsage.cache_creation_input_tokens;
-    lt.real_api_calls = (lt.real_api_calls ?? 0) + realUsage.api_calls;
-  }
+  // Everything below books DELTAS. The values on `session` are cumulative for the whole session and
+  // this hook runs every turn — see the `booked` doc comment. [bug-210]
+  const booked = { ...NOTHING_BOOKED, ...(session.booked ?? {}) };
+  const totalWritesNow = writeCount + unnamedWrites;
+  const tokensNow = inputTokens + outputTokens;
 
   // Estimate savings: anatomy hits save ~200 tokens each, repeated reads blocked save their token count
   const savedFromAnatomy = session.anatomy_hits * 200;
   const savedFromRepeats = Object.values(session.files_read)
     .filter((r) => r.count > 1)
     .reduce((sum, r) => sum + r.tokens * (r.count - 1), 0);
-  ledger.lifetime.estimated_savings_vs_bare_cli += savedFromAnatomy + savedFromRepeats;
+  const savingsNow = savedFromAnatomy + savedFromRepeats;
+
+  ledger.lifetime.total_reads += delta(readCount, booked.reads);
+  // Unnamed writes (shell / other working dirs) count toward the lifetime total — they were real
+  // work. They stay OUT of the session's named writes[] list (no path was recorded, by design).
+  ledger.lifetime.total_writes += delta(totalWritesNow, booked.writes);
+  ledger.lifetime.total_tokens_estimated += delta(tokensNow, booked.tokens);
+  ledger.lifetime.anatomy_hits += delta(session.anatomy_hits, booked.anatomy_hits);
+  ledger.lifetime.anatomy_misses += delta(session.anatomy_misses, booked.anatomy_misses);
+  ledger.lifetime.repeated_reads_blocked += delta(session.repeated_reads_warned, booked.repeated_reads_blocked);
+  ledger.lifetime.estimated_savings_vs_bare_cli += delta(savingsNow, booked.savings);
+
+  // Accumulate measured usage alongside the estimates, so the ledger carries both a heuristic and
+  // a verifiable ground truth (F1). readTranscriptUsage reads the WHOLE transcript, so these are
+  // cumulative per session too and need the same delta treatment.
+  if (realUsage) {
+    const lt = ledger.lifetime;
+    lt.real_input_tokens = (lt.real_input_tokens ?? 0) + delta(realUsage.input_tokens, booked.real_input);
+    lt.real_output_tokens = (lt.real_output_tokens ?? 0) + delta(realUsage.output_tokens, booked.real_output);
+    lt.real_cache_read_tokens = (lt.real_cache_read_tokens ?? 0) + delta(realUsage.cache_read_input_tokens, booked.real_cache_read);
+    lt.real_cache_creation_tokens = (lt.real_cache_creation_tokens ?? 0) + delta(realUsage.cache_creation_input_tokens, booked.real_cache_creation);
+    lt.real_api_calls = (lt.real_api_calls ?? 0) + delta(realUsage.api_calls, booked.real_api_calls);
+  }
+
+  // Mark what is now booked. Set inside the lock, right after the numbers went in, so a crash
+  // between the two writes cannot leave the ledger credited and the session unmarked.
+  session.booked = {
+    reads: Math.max(readCount, booked.reads),
+    writes: Math.max(totalWritesNow, booked.writes),
+    tokens: Math.max(tokensNow, booked.tokens),
+    anatomy_hits: Math.max(session.anatomy_hits, booked.anatomy_hits),
+    anatomy_misses: Math.max(session.anatomy_misses, booked.anatomy_misses),
+    repeated_reads_blocked: Math.max(session.repeated_reads_warned, booked.repeated_reads_blocked),
+    savings: Math.max(savingsNow, booked.savings),
+    real_input: Math.max(realUsage?.input_tokens ?? 0, booked.real_input),
+    real_output: Math.max(realUsage?.output_tokens ?? 0, booked.real_output),
+    real_cache_read: Math.max(realUsage?.cache_read_input_tokens ?? 0, booked.real_cache_read),
+    real_cache_creation: Math.max(realUsage?.cache_creation_input_tokens ?? 0, booked.real_cache_creation),
+    real_api_calls: Math.max(realUsage?.api_calls ?? 0, booked.real_api_calls),
+  };
 
   writeJSON(ledgerPath, ledger);
   });
