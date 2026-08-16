@@ -219,6 +219,31 @@ export const TRUNCATED_BEFORE_ANSWER =
   "the model hit max_tokens before emitting any answer. Reasoning models (Qwen3, o-series, …) spend the " +
   "budget on hidden reasoning tokens first, so a small max_tokens yields an empty reply. Raise maxTokens.";
 
+/**
+ * Models like to wrap an answer in a code fence. Unwrap it — but ONLY when the fence encloses the
+ * WHOLE answer.
+ *
+ * The previous version in consolidate stripped a leading fence and a trailing fence independently
+ * (`/^```[\w]*\n?|\n?```$/g`), two alternations that fire without knowing about each other. That is
+ * wrong in both directions and silently so:
+ *   - an answer that legitimately ENDS with a code block lost that block's CLOSING fence, and the
+ *     unbalanced markdown went straight into cerebrum.md [bug-214]
+ *   - an answer that merely STARTS with one lost its opening fence, the same damage mirrored
+ *
+ * Matching to the LAST closing fence also handles a wrapped answer that contains code blocks of its
+ * own; stopping at the first inner fence would truncate the content at that point.
+ *
+ * Text that is not fully wrapped is returned untouched. For a prompt like "return the cleaned file
+ * content only", a model that adds a sentence around the fence then leaves that sentence visible in
+ * the proposal — deliberately: a human reviews proposals, and visible junk is cheaper to catch than
+ * silently dropped content.
+ */
+export function unwrapFencedBlock(text: string): string {
+  const t = text.trim();
+  const m = t.match(/^```[\w-]*\r?\n([\s\S]*?)\r?\n?```$/);
+  return m ? m[1].trim() : t;
+}
+
 // Extract the assistant text from either API's response shape — pure.
 //
 // A reasoning model can burn the entire max_tokens budget on reasoning tokens and return HTTP 200 with

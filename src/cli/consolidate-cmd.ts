@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { findDuplicateEntries } from "../utils/maintenance.js";
 import { blocksFor } from "../utils/recall.js";
-import { resolveLlmConfig, callLlm, requiresApiKey } from "../daemon/llm-provider.js";
+import { resolveLlmConfig, callLlm, requiresApiKey, unwrapFencedBlock } from "../daemon/llm-provider.js";
 
 interface Merge { aStart: number; aEnd: number; bStart: number; bEnd: number; mergedText: string }
 
@@ -70,7 +70,7 @@ export async function consolidateCommand(opts: ConsolidateOpts): Promise<void> {
       // 3000, not 900: the merge itself is short, but a reasoning model bills its thinking to the same
       // budget and would otherwise return nothing — every merge then looked "implausible" and was skipped.
       merged = (await callLlm(llm, apiKey, MERGE_PROMPT(a.text, b.text), { maxTokens: 3000, timeoutMs: 120000 })).trim();
-      merged = merged.replace(/^```[\w]*\n?|\n?```$/g, "").trim(); // strip stray fences
+      merged = unwrapFencedBlock(merged); // only when the fence wraps the WHOLE answer [bug-214]
     } catch (e) {
       console.log(`skipped (LLM error: ${(e as Error).message.slice(0, 60)})`);
       continue;

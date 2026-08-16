@@ -5,7 +5,7 @@ import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
 import { consolidateMemory } from "../utils/maintenance.js";
-import { resolveLlmConfig, callLlmDetailed, requiresApiKey } from "./llm-provider.js";
+import { resolveLlmConfig, callLlmDetailed, requiresApiKey, unwrapFencedBlock } from "./llm-provider.js";
 
 export interface AiTaskParams {
   prompt: string;
@@ -391,8 +391,10 @@ export class CronEngine {
         // file, which still looks like a valid result to any writer downstream.
         const { text, truncated } = await callLlmDetailed(llm, apiKey, fullPrompt, { maxTokens: 16000, timeoutMs: 600_000 });
         if (truncated) throw new Error(`The model hit max_tokens mid-answer on ${f.name}${part} — the result is an incomplete fragment, so it is discarded rather than used.`);
-        const fence = text.match(/```[\w]*\n([\s\S]*?)\n```/);
-        sections.push(`## ${f.name}${part}\n\n${(fence ? fence[1] : text).trim()}`);
+        // Was: take the FIRST fenced block found anywhere. Two ways that loses content — an answer
+        // with prose plus an example dropped the prose, and a wrapped answer containing its own code
+        // block was cut at that block's closing fence. Same family as bug-214, same helper.
+        sections.push(`## ${f.name}${part}\n\n${unwrapFencedBlock(text)}`);
       }
     }
     const result = sections.map((s) => s.replace(/^## .*\n\n/, "")).join("\n\n").trim();

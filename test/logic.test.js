@@ -505,7 +505,7 @@ test("resume digest i18n: config lang + OPENWOLF_LANG env; localizes headers/pre
 });
 
 // --- LLM provider abstraction (cron AI tasks) ---
-import { llmConfigFrom, buildLlmRequest, parseLlmResponse, wasTruncated, assertSafeBaseUrl, requiresApiKey, isLocalEndpoint } from "../dist/src/daemon/llm-provider.js";
+import { llmConfigFrom, buildLlmRequest, parseLlmResponse, wasTruncated, assertSafeBaseUrl, requiresApiKey, isLocalEndpoint, unwrapFencedBlock } from "../dist/src/daemon/llm-provider.js";
 import { explainLlmError } from "../dist/src/cli/llm-cmd.js";
 test("llm-provider: assertSafeBaseUrl blocks SSRF / cleartext key exfil", () => {
   assertSafeBaseUrl("https://api.groq.com/openai/v1"); // ok
@@ -1654,4 +1654,28 @@ test("llm-provider: IPv4-mapped IPv6 does not slip past the v4 rules [bug-213]",
   assert.throws(() => assertSafeBaseUrl("https://[::ffff:127.0.0.1]/v1"), /private/);
   assert.throws(() => assertSafeBaseUrl("https://[::ffff:169.254.169.254]/v1"), /private/);
   assertSafeBaseUrl("https://[::ffff:93.184.216.34]/v1");
+});
+
+test("unwrapFencedBlock only unwraps a fence that wraps the whole answer [bug-214]", () => {
+  // The damage this replaces: two independent alternations stripped a leading fence and a trailing
+  // fence without knowing about each other, so an entry that legitimately ended with a code block
+  // lost that block's closing fence and went into cerebrum.md unbalanced.
+  const endsWithCode = "## Entry\nExample:\n```ts\nconst a = 1;\n```";
+  assert.equal(unwrapFencedBlock(endsWithCode), endsWithCode, "closing fence of a trailing code block was eaten");
+
+  const startsWithCode = "```ts\nconst a = 1;\n```\nand then some prose";
+  assert.equal(unwrapFencedBlock(startsWithCode), startsWithCode, "opening fence of a leading code block was eaten");
+
+  // The case it is actually for: the model wrapped its whole answer.
+  assert.equal(unwrapFencedBlock("```md\n# Title\n\nbody\n```"), "# Title\n\nbody");
+  assert.equal(unwrapFencedBlock("```\nplain\n```"), "plain");
+
+  // A wrapped answer containing its own code block must survive whole — stopping at the first inner
+  // closing fence would truncate it right there.
+  const nested = "```md\n# Title\n\n```ts\nconst a = 1;\n```\n\ntail text\n```";
+  assert.equal(unwrapFencedBlock(nested), "# Title\n\n```ts\nconst a = 1;\n```\n\ntail text");
+
+  // Nothing to unwrap → unchanged (trimmed).
+  assert.equal(unwrapFencedBlock("  just prose  "), "just prose");
+  assert.equal(unwrapFencedBlock("no fences here\nat all"), "no fences here\nat all");
 });
