@@ -6,6 +6,22 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.9] — 2026-08-16
+
+### Fixed
+
+- **Stripping code fences ate the fence it did not put there.** `merged.replace(/^```[\w]*\n?|\n?```$/g, "")`
+  is two alternations that fire without knowing about each other: an entry that legitimately *ends*
+  with a code block lost that block's closing fence, and `consolidate` wrote the unbalanced markdown
+  into `cerebrum.md`, where the length check saw nothing wrong. Mirrored for an entry that starts
+  with one. `unwrapFencedBlock()` now unwraps only when a fence encloses the whole answer, matching
+  to the last closing fence so a wrapped answer containing its own code blocks survives intact.
+- **The cron engine had the same mistake in its other form.** It took the *first* fenced block found
+  anywhere in a model's answer, which drops the prose around it and truncates a wrapped answer at its
+  first inner fence. Both callers share one helper now.
+
+Found by a local model (Qwen 3.8 27B) in the bug-hunt benchmark, like 1.20.8's four.
+
 ## [1.20.8] — 2026-08-16
 
 ### Fixed
