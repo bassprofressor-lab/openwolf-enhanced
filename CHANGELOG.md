@@ -6,6 +6,36 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.20.8] — 2026-08-16
+
+### Fixed
+
+- **The token ledger counted every turn as if it were a whole session.** The Stop hook fires once per
+  turn, but everything on `_session.json` is cumulative for the session, so adding those values to
+  `lifetime` on every stop booked the same work again and again — over N turns it counted 1+2+3+…+N
+  instead of N, and `sessions[]` collected another entry under the same id each time. In one project
+  that meant 200 session entries for 13 sessions and an `estimated_savings_vs_bare_cli` of 898,967,826,
+  which is the number the tool advertises its own value with. Only deltas are booked now
+  (`session.booked`, clamped at zero, marked inside the ledger lock), and `sessions[]` is upserted by
+  id. `scripts/repair-ledger.mjs` cleans up an already-inflated ledger.
+- **`callLlm`'s timeout ended at the response headers.** `fetch()` resolves as soon as the head is in,
+  and `clearTimeout` sat in a `finally` around that call, so the body was read with no timer left. A
+  server that sent headers and then stalled held the call forever, whatever `timeoutMs` said.
+- **The SSRF guard read hostnames as if they were addresses.** `startsWith("fc")` / `startsWith("fd")`
+  were meant for IPv6 unique-local addresses but ran against any string, so `fc2.com`,
+  `fdisk.example.com` and every other host starting with those two letters was refused as private.
+  The prefix rules now only apply when `net.isIP` says the host is an address.
+- **Link-local covered one block out of sixty-four.** Link-local is `fe80::/10`, which spans
+  fe80…febf; `startsWith("fe80:")` let `fe90::1` through and the API key would have gone to it. The
+  first hextet is compared numerically now, and IPv4-mapped addresses are unwrapped — `new URL()`
+  rewrites `::ffff:127.0.0.1` into `::ffff:7f00:1`, so matching only the dotted spelling would have
+  left exactly the bypass this closes.
+
+All four were found by a local model (Qwen 3.8 27B, Q4_K_M) reading the files with no symptom given,
+in the bug-hunt benchmark. Both new tests are checked against the pre-fix build: the ledger test books
+7 reads instead of 3 there, and the timeout test hangs until the test timeout without the process even
+exiting.
+
 ## [1.20.7] — 2026-08-10
 
 ### Fixed
