@@ -43,6 +43,13 @@ interface Lifetime {
   anatomy_misses: number;
   repeated_reads_blocked: number;
   estimated_savings_vs_bare_cli: number;
+  /**
+   * What OpenWolf ITSELF put into the model's context: resume digests and end-of-turn
+   * reminders. [2026-08-20] Until now the ledger only counted what OpenWolf avoided and
+   * never what it costs — a one-sided balance, which is exactly how the "898 million
+   * tokens saved" figure survived so long (bug-210). Absent on ledgers written before.
+   */
+  injection_tokens_estimated?: number;
 }
 
 interface TokenLedger {
@@ -75,6 +82,7 @@ export function readLedger(wolfDir: string): TokenLedger {
       anatomy_misses: 0,
       repeated_reads_blocked: 0,
       estimated_savings_vs_bare_cli: 0,
+      injection_tokens_estimated: 0,
     },
     sessions: [],
     daemon_usage: [],

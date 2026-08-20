@@ -14,6 +14,8 @@ interface TokenLedger {
     anatomy_misses: number;
     repeated_reads_blocked: number;
     estimated_savings_vs_bare_cli: number;
+    /** What OpenWolf ITSELF injects (resume digest, reminders). Absent on ledgers before 1.21.0. */
+    injection_tokens_estimated?: number;
   };
   sessions: any[];
   waste_flags: any[];
@@ -77,7 +79,7 @@ export function useWolfData(): WolfData {
   const [anatomy, setAnatomy] = useState<WolfData["anatomy"]>({ entries: [], metadata: { files: 0, hits: 0, misses: 0 } });
   const [cerebrum, setCerebrum] = useState<CerebrumData>({ preferences: [], learnings: [], doNotRepeat: [], decisions: [], lastUpdated: "" });
   const [memory, setMemory] = useState<MemorySession[]>([]);
-  const [tokenLedger, setTokenLedger] = useState<TokenLedger>({ lifetime: { total_tokens_estimated: 0, total_reads: 0, total_writes: 0, total_sessions: 0, anatomy_hits: 0, anatomy_misses: 0, repeated_reads_blocked: 0, estimated_savings_vs_bare_cli: 0 }, sessions: [], waste_flags: [] });
+  const [tokenLedger, setTokenLedger] = useState<TokenLedger>({ lifetime: { total_tokens_estimated: 0, total_reads: 0, total_writes: 0, total_sessions: 0, anatomy_hits: 0, anatomy_misses: 0, repeated_reads_blocked: 0, estimated_savings_vs_bare_cli: 0, injection_tokens_estimated: 0 }, sessions: [], waste_flags: [] });
   const [cronState, setCronState] = useState<CronState>({ engine_status: "unknown", last_heartbeat: null, execution_log: [], dead_letter_queue: [] });
   const [cronManifest, setCronManifest] = useState<CronManifest>({ tasks: [] });
   const [buglog, setBuglog] = useState<BugLog>({ bugs: [] });

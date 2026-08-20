@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, SESSION_SUMMARY_SCAFFOLD } from "./shared.js";
+import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, SESSION_SUMMARY_SCAFFOLD, bookInjection } from "./shared.js";
+import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 async function main(): Promise<void> {
   ensureWolfDir();
@@ -139,6 +140,8 @@ async function main(): Promise<void> {
         process.stdout.write(
           JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: digest } })
         );
+        // What goes in here is paid for by the model — so it gets counted, not just the savings.
+        bookInjection(wolfDir, estimateTokens(digest, "prose", getTokenRatios(wolfDir)));
       }
     }
   } catch {}

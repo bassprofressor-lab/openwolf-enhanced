@@ -82,7 +82,10 @@ export async function statusCommand(): Promise<void> {
   console.log(`  Total reads: ${ledger.lifetime.total_reads}`);
   console.log(`  Total writes: ${ledger.lifetime.total_writes}`);
   console.log(`  Tokens tracked: ~${ledger.lifetime.total_tokens_estimated.toLocaleString()}`);
-  console.log(`  Estimated savings: ~${ledger.lifetime.estimated_savings_vs_bare_cli.toLocaleString()} tokens`);
+  // Net, not gross: what OpenWolf injects counts against the savings (see `openwolf report`).
+  const injected = (ledger.lifetime as unknown as Record<string, number>).injection_tokens_estimated ?? 0;
+  const net = ledger.lifetime.estimated_savings_vs_bare_cli - injected;
+  console.log(`  Estimated savings: ~${net.toLocaleString()} tokens net (injected ~${injected.toLocaleString()})`);
 
   // Anatomy stats
   const anatomyContent = readText(path.join(wolfDir, "anatomy.md"));

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, readStdin, readTranscriptUsage, detectAgent, type RealUsage } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
+import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 interface FileRead {
   count: number;
@@ -346,6 +347,9 @@ async function main(): Promise<void> {
   if (reminders.length > 0) {
     const additionalContext = `⚠️ OpenWolf end-of-turn reminders:\n${reminders.map((r) => `• ${r}`).join("\n")}`;
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "Stop", additionalContext } }));
+    // The reminder block is context the model pays for in the next window — book it. This runs
+    // after the ledger write above, hence its own short lock rather than restructuring that block.
+    bookInjection(wolfDir, estimateTokens(additionalContext, "prose", getTokenRatios(wolfDir)));
   }
 
   process.exit(0);

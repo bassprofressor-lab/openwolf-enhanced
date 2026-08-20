@@ -27,6 +27,19 @@ interface Ledger {
 
 const fmt = (n: number | undefined): string => (n ?? 0).toLocaleString("en-US");
 
+/**
+ * Net savings: what OpenWolf avoided minus what it injected.
+ *
+ * [2026-08-20] The gross figure alone is not a claim anyone should act on — every resume
+ * digest and reminder block is context the model pays for. Exported so the arithmetic can be
+ * tested without capturing console output.
+ */
+export function netSavings(lt: Record<string, number>): { gross: number; injected: number; net: number } {
+  const gross = lt.estimated_savings_vs_bare_cli ?? 0;
+  const injected = lt.injection_tokens_estimated ?? 0;
+  return { gross, injected, net: gross - injected };
+}
+
 export function reportCommand(): void {
   const projectRoot = findProjectRoot();
   const ledger = readJSON<Ledger>(path.join(projectRoot, ".wolf", "token-ledger.json"), {
@@ -42,9 +55,16 @@ export function reportCommand(): void {
   console.log(`  Anatomy hits / misses:    ${fmt(lt.anatomy_hits)} / ${fmt(lt.anatomy_misses)}`);
   console.log(`  Repeated reads blocked:   ${fmt(lt.repeated_reads_blocked)}`);
   console.log("");
+  const sav = netSavings(lt as Record<string, number>);
   console.log("  Estimated (char-ratio heuristic)");
   console.log(`    Total tokens:           ${fmt(lt.total_tokens_estimated)}`);
-  console.log(`    Est. savings vs bare:   ${fmt(lt.estimated_savings_vs_bare_cli)}`);
+  console.log(`    Reads avoided:          ${fmt(sav.gross)}`);
+  console.log(`    OpenWolf injected:      ${fmt(sav.injected)} (resume digests, reminders)`);
+  console.log(`    Net savings:            ${sav.net < 0 ? "-" : ""}${fmt(Math.abs(sav.net))}`);
+  if (sav.injected === 0 && sav.gross > 0) {
+    console.log("    (injection accounting starts with 1.21.0 — the gross figure above");
+    console.log("     still carries sessions from before it existed.)");
+  }
   console.log("");
   if (lt.real_api_calls) {
     console.log("  Measured (from harness transcripts)");

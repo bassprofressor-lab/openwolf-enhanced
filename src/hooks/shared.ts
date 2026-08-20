@@ -89,6 +89,61 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
 // A missing file is normal (first run) and silently yields the fallback. An EXISTING file that
 // fails to parse is a different situation: whatever it held is about to be treated as empty, and
 // a read-modify-write caller would then overwrite it with defaults. That must at least be visible.
+/**
+ * Book what OpenWolf ITSELF injected into the model's context, in estimated tokens.
+ *
+ * [2026-08-20] `estimated_savings_vs_bare_cli` counted only the avoided reads and never the cost
+ * of the avoiding: every resume digest and every reminder block is context the model would not
+ * otherwise pay for. A ledger with only one side is how "898 million tokens saved" stayed
+ * plausible for months (bug-210). Both sides go in now, and `openwolf report` shows the net.
+ *
+ * Accounting must never break a hook — every failure path here is swallowed on purpose. The
+ * lock is the same one the stop hook uses for its read-modify-write.
+ */
+export function bookInjection(wolfDir: string, tokens: number): void {
+  if (!Number.isFinite(tokens) || tokens <= 0) return;
+  const ledgerPath = path.join(wolfDir, "token-ledger.json");
+  try {
+    withLock(ledgerPath, () => {
+      // [2026-08-20, review] The first cut used readJSON with a two-field fallback and then wrote
+      // it back. On an UNPARSEABLE ledger that produced a valid-looking file with no `sessions[]`,
+      // and the stop hook died on `ledger.sessions.findIndex(...)` from then on — silently, because
+      // main() swallows its own throw. One booked digest is never worth that.
+      //
+      // So: existence and parseability are decided here, not delegated to a fallback.
+      //   missing      -> create the FULL shape the stop hook expects
+      //   parseable    -> increment, preserve everything else byte for byte
+      //   unparseable  -> write NOTHING. A corrupt ledger may still be recoverable by hand;
+      //                   overwriting it with a stub destroys that for the sake of one counter.
+      let ledger: Record<string, unknown>;
+      if (fs.existsSync(ledgerPath)) {
+        try {
+          ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf-8")) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (!ledger || typeof ledger !== "object" || Array.isArray(ledger)) return;
+      } else {
+        ledger = {
+          version: 1,
+          created_at: new Date().toISOString(),
+          lifetime: {},
+          sessions: [],
+          daemon_usage: [],
+          waste_flags: [],
+          optimization_report: { last_generated: null, patterns: [] },
+        };
+      }
+      if (!ledger.lifetime || typeof ledger.lifetime !== "object") ledger.lifetime = {};
+      const lt = ledger.lifetime as Record<string, number>;
+      lt.injection_tokens_estimated = (lt.injection_tokens_estimated ?? 0) + Math.round(tokens);
+      writeJSON(ledgerPath, ledger);
+    });
+  } catch {
+    /* an accounting miss is better than a broken session */
+  }
+}
+
 export function readJSON<T = unknown>(filePath: string, fallback: T): T {
   let raw: string;
   try {
