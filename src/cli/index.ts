@@ -164,6 +164,28 @@ export function createProgram(): Command {
       await doctorCommand(opts);
     });
 
+  // --- Lint command ---
+  program
+    .command("lint")
+    .description("Check the knowledge base against the protocol (sections, dated entries, buglog fields, links)")
+    .option("--json", "Machine-readable report")
+    .option("--strict", "Exit non-zero on warnings too — for pre-commit and CI")
+    .option("--skip-links", "Skip the link graph (the slow part on large knowledge bases)")
+    .action(async (opts: { json?: boolean; strict?: boolean; skipLinks?: boolean }) => {
+      const { lintCommand } = await import("./lint-cmd.js");
+      lintCommand(opts);
+    });
+
+  // --- Distill command ---
+  program
+    .command("distill")
+    .description("File a drifted cerebrum.md back under its four sections (moves text, never rewrites it)")
+    .option("--dry-run", "Show what would be re-filed without writing")
+    .action(async (opts: { dryRun?: boolean }) => {
+      const { distillCommand } = await import("./distill-cmd.js");
+      distillCommand(opts);
+    });
+
   // --- Consolidate command ---
   program
     .command("consolidate")

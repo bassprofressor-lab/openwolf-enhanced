@@ -174,6 +174,15 @@ export function buildLinkGraph(
       if (!nodes.has(key)) {
         nodes.set(key, { key, kind: "block", src: f.label, line: b.start, title: title(b.text), inbound: 0, outbound: 0 });
       }
+      // [2026-08-20] Bug records are referenced by id from cerebrum and memory (`[[bug-209]]`), so
+      // they need an address of their own. Without one, `lint` reported live bug ids as dead links
+      // on its very first run — 10 of them, all present in buglog.json. A checker whose false
+      // positives point at the checker is worse than no checker.
+      const idm = f.label.endsWith(".json") ? b.text.match(/^([a-z]+-\d{2,})[\s—:-]/i) : null;
+      if (idm) {
+        const s = normalizeSlug(idm[1]);
+        if (!bySlug.has(s)) bySlug.set(s, key);
+      }
     }
   }
 

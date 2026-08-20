@@ -6,6 +6,63 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.23.0] — 2026-08-20
+
+Prompted by a side-by-side comparison against a hand-curated, cross-project agent knowledge tree.
+Two of its criticisms were fair and are addressed here: the knowledge base had no lifecycle and
+nothing ever checked it, and the strongest retrieval stopped at the repository boundary.
+
+### Added
+
+- ✅ **`openwolf lint`** — checks the knowledge base against the protocol it promises: the four
+  cerebrum sections, dated Do-Not-Repeat entries, buglog records carrying `root_cause` and `fix`,
+  references that resolve. Reports an **item-weighted** compliance percentage (weighting by rule
+  would make the number swing with the count of rules rather than the state of the corpus), and
+  says plainly what it cannot see. `--strict` turns warnings into a non-zero exit for pre-commit
+  and CI; `--json` for tooling; `--skip-links` skips the slow part.
+
+  This replaces a guess. The README used to state adherence as "~85–90%" — a number nobody had
+  ever measured. On this project's own year-old knowledge base `lint` reads **86.7%** across 1,612
+  checkable items. The proximity is a coincidence, not a vindication.
+
+  Its first run found **8 duplicate bug ids** in a 234-entry buglog: three separate batches had
+  restarted numbering, so `openwolf bug <id>` answers with whichever record comes first and the
+  other is unreachable.
+
+- 🧪 **`openwolf distill`** — files a drifted `cerebrum.md` back under its four sections. Measured
+  before building it: a 126-line project still matched the template exactly, while a year-old one
+  had grown to 1,006 lines and 52 headings, 44 of them dated one-offs, with 47% of the file past
+  the last section the template knows — including a literal `## Do-Not-Repeat (Forts.)`. Structure
+  erodes with age, not at birth, because nothing ever objected.
+
+  It **moves text and never rewrites it**, splitting at heading level 3 (where the drift actually
+  put the classification) and proving the result is lossless before writing — refusing entirely if
+  a single content line would change. Deliberately not an LLM pass: this project already logged the
+  opposite as a critical bug, when a scheduled AI task overwrote a file it had only seen part of.
+
+- ⏳ **Entry maturity** — content-addressed ids make "how long has this been true?" answerable, so
+  settled knowledge stops looking as provisional as yesterday's note. The run that creates the
+  baseline says so instead of reporting "0 settled" as though it were a finding.
+
+- 🌍 **`recall --semantic --all` / `--hybrid --all`** — semantic search across every registered
+  project, which previously fell back to keyword search with a one-line note. Two constraints
+  shaped it: it never builds an index behind your back (projects without one are skipped **and
+  named**, so "absent from the results" cannot silently mean "never searched"), and it does not
+  invent a common ranking — per-project lists are fused by rank (RRF), because cosine similarities
+  from separately built indexes share a scale but not a distribution.
+
+### Fixed
+
+- 🔗 **The link graph reported live bug ids as dead links.** `[[bug-209]]`-style references resolve
+  now: buglog records had block ids but no address of their own, so 4 of the first run's 10
+  dangling links pointed at bugs that exist. A checker whose false positives point at the checker
+  is worse than no checker.
+- 🩺 **`recall --all` conflated "no index" with "search failed."** The first run reported five
+  projects "skipped without an embeddings index" — one of which had a 24,855-entry index and had
+  merely failed to reach the endpoint. Failures are now listed separately, with their reason.
+- 🔇 **`lint` on a directory without `.wolf` printed "nothing checkable" and "everything holds"**
+  in the same breath.
+
 ## [1.22.0] — 2026-08-20
 
 **Contains a privacy fix. If you run the background daemon with an API key exported, read the

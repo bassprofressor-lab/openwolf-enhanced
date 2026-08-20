@@ -84,7 +84,15 @@ Everything upstream does, plus the following. Details for each live in the
 | 🔎 **`openwolf find`** | Symbol and file lookup from the existing index — with exact line ranges, so you read one function instead of the file. Also `--json` and the MCP tool `openwolf_find`. |
 | 🧭 **Import-graph importance** | Ties break on PageRank over your own imports, stored as a rank percentile. The biggest file is rarely the most important one. |
 | 🌳 **tree-sitter ranges** *(optional)* | Real symbol boundaries from the syntax tree instead of "the line before the next one" — which was wrong for 97 % of symbols. Optional dependency; falls back cleanly and says why. |
-| 🧠 **Searchable memory** | `recall <query>` over STATUS / cerebrum / memory / buglog **and** Claude's native Auto Memory, BM25-ranked, each hit with a stable citation id. `--semantic` ranks by meaning via local embeddings; `--hybrid` fuses both. |
+| 🧠 **Searchable memory** | `recall <query>` over STATUS / cerebrum / memory / buglog **and** Claude's native Auto Memory, BM25-ranked, each hit with a stable citation id. `--semantic` ranks by meaning via local embeddings; `--hybrid` fuses both. `--all` extends either across every registered project — fusing the per-project lists by rank, skipping (and naming) projects without an index rather than quietly building one. |
+
+**Keeping it honest**
+
+| | |
+|---|---|
+| ✅ **`openwolf lint`** | Checks the knowledge base against the protocol it promises — the four sections, dated Do-Not-Repeat entries, buglog records carrying `root_cause` and `fix`, references that resolve — and prints an item-weighted compliance percentage. Exit code for pre-commit and CI (`--strict`). On its first run here it found 8 duplicate bug ids, each making one of two records unreachable. |
+| 🧪 **`openwolf distill`** | A cerebrum that grew for a year drifts: 52 headings, 47 % of the file past the last section the template knows. This files it back under the four — **moving text, never rewriting it**, and refusing to write at all if a single content line would change. |
+| ⏳ **Entry maturity** | Content-addressed ids make "how long has this been true?" answerable, so settled knowledge stops looking as provisional as yesterday's note. |
 
 **Knowing what it costs**
 
@@ -266,8 +274,12 @@ openwolf init                 Initialize .wolf/ and register hooks
 openwolf status               Show health, stats, .wolf/ footprint, size warnings
 openwolf doctor               Report + compact .wolf/, suggest .wolfignore [--dry-run]
 openwolf consolidate          LLM-merge near-duplicate cerebrum entries [--dry-run] [--threshold N]
+openwolf lint                 Check the knowledge base against the protocol; prints a measured
+                              compliance number [--strict] [--json] [--skip-links]
+openwolf distill              File a drifted cerebrum.md back under its four sections [--dry-run]
 openwolf recall <query>       Keyword-search .wolf + native memory; ids per hit [--limit N] [--full] [--all] [--json]
                               [--semantic] rank by meaning (local embeddings) · [--hybrid] fuse keyword + semantic
+                              both work with [--all]: rank-fused across projects that already have an index
 openwolf recall --id <id>     Expand a citation id to its full entry (second disclosure layer)
 openwolf find <query>         Locate a symbol or file — ranked, with exact line ranges [--limit N] [--json]
 openwolf link                 Link to a remote workspace [--url URL --token TOKEN] [--status] [--unlink]
@@ -386,7 +398,15 @@ No. Hooks are small Node scripts with short timeouts; they update the index and 
 
 - Claude Code hooks are a relatively new feature. OpenWolf falls back to `CLAUDE.md` instructions when hooks don't fire.
 - Token tracking is estimation-based (character-to-token ratio), not exact API counts. Accurate to within ~15%.
-- `cerebrum.md` depends on Claude following instructions to update it after corrections. Compliance is ~85–90%, not 100%.
+- `cerebrum.md` depends on Claude following instructions to update it after corrections, so it drifts.
+  Run `openwolf lint` for a measured number instead of a guess: it checks the conventions that are
+  mechanically checkable (the four sections, dated Do-Not-Repeat entries, buglog records that carry
+  `root_cause` and `fix`, references that resolve) and reports an item-weighted percentage. On this
+  project's own year-old knowledge base it reads **86.7%**. What it cannot see is whether the right
+  thing was learned — that stays unmeasurable, and the output says so.
+- Structure erodes with age rather than at birth: a young project still matched the template exactly
+  while a year-old one had grown to 52 headings with 47% of the file past the last section the
+  template knows. `openwolf distill` files it back — moving text and never rewriting it.
 
 ## Credits
 

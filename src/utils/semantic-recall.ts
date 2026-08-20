@@ -169,3 +169,113 @@ export async function hybridRecall(wolfDir: string, query: string, cfg: EmbedCon
     .slice(0, limit)
     .map(({ hit, score }) => ({ ...hit, score: Math.round(score * 1000) / 1000 }));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-project semantic recall.
+//
+// [2026-08-20] `--all` used to fall back to keyword search with a one-line note, so the strongest
+// retrieval this tool has stopped at the repo boundary — the "per-repo silo" critique in its most
+// concrete and most fixable form.
+//
+// Two things had to be true before it could be turned on:
+//
+//   1. It must not build indexes behind the user's back. `semanticRecall` builds on demand, which
+//      is right for one project and wrong for twelve: `recall --all --semantic` would have fired
+//      off an embedding run for every registered project. Projects without an index are skipped
+//      and NAMED, so "not in the results" never silently means "never searched".
+//   2. It must not invent a common ranking. Cosine similarities from separately built indexes are
+//      on nominally the same scale, but their distributions are not — a small corpus concentrates
+//      high similarities. So the per-project lists are fused by RANK (the same RRF already used
+//      for hybrid), which is what rank fusion exists for. A single project keeps its native
+//      scores; there is nothing to fuse.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CrossTarget { wolfDir: string; name?: string }
+
+export interface CrossHit extends RecallHit { wolfDir: string; project?: string }
+
+export interface CrossResult {
+  hits: CrossHit[];
+  /** Projects that were actually searched. */
+  searched: string[];
+  /** Projects skipped for want of an embeddings index — named, never silently dropped. */
+  skipped: string[];
+  /**
+   * Projects that HAVE an index but whose search failed, with the reason.
+   *
+   * [2026-08-20] Kept apart from `skipped` deliberately: the first run reported "skipped 5 without
+   * an embeddings index" while one of the five had a 24,855-entry index and had merely failed to
+   * reach the embedding endpoint. Two very different problems, one message, and the user would
+   * have gone looking for the wrong one.
+   */
+  failed: Array<{ project: string; reason: string }>;
+  /** True when scores are RRF ranks rather than the mode's native score. */
+  fused: boolean;
+}
+
+/** Is there a usable index for this model, without building one? */
+export function hasEmbeddingIndex(wolfDir: string, model: string): boolean {
+  const meta = readJSON<Meta | null>(path.join(wolfDir, META_FILE), null);
+  return Boolean(meta && meta.version === 2 && meta.model === model
+    && Array.isArray(meta.entries) && meta.entries.length > 0);
+}
+
+export function fuseByRank(lists: CrossHit[][], limit: number, K: number): CrossHit[] {
+  const fused = new Map<string, { hit: CrossHit; score: number }>();
+  for (const list of lists) {
+    list.forEach((hit, rank) => {
+      const key = `${hit.wolfDir}:${hit.file}:${hit.line}`;
+      const s = 1 / (K + rank);
+      const cur = fused.get(key);
+      if (cur) cur.score += s; else fused.set(key, { hit, score: s });
+    });
+  }
+  return [...fused.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ hit, score }) => ({ ...hit, score: Math.round(score * 1000) / 1000 }));
+}
+
+export async function semanticRecallAcross(
+  targets: CrossTarget[],
+  query: string,
+  mode: "semantic" | "hybrid",
+  limit: number,
+  resolveCfg: (wolfDir: string) => EmbedConfig,
+  /**
+   * May a missing index be built on the spot? True for a single-project recall, where building on
+   * demand has always been the behaviour. False for `--all`: firing off an embedding run for every
+   * registered project as a side effect of one query is exactly the surprise this must not create.
+   */
+  allowBuild = true,
+): Promise<CrossResult> {
+  const searched: string[] = [];
+  const skipped: string[] = [];
+  const failed: Array<{ project: string; reason: string }> = [];
+  const lists: CrossHit[][] = [];
+
+  for (const t of targets) {
+    const cfg = resolveCfg(t.wolfDir);
+    const name = t.name ?? "this project";
+    if (!allowBuild && !hasEmbeddingIndex(t.wolfDir, cfg.model)) { skipped.push(name); continue; }
+    try {
+      const raw = mode === "hybrid"
+        ? await hybridRecall(t.wolfDir, query, cfg, limit)
+        : await semanticRecall(t.wolfDir, query, cfg, limit);
+      searched.push(name);
+      lists.push(raw.map((h) => ({ ...h, wolfDir: t.wolfDir, project: t.name })));
+    } catch (e) {
+      // One unreachable project must not sink the whole query — but it is reported as a failure
+      // with its reason, not quietly folded in with the ones that simply have no index.
+      failed.push({ project: name, reason: (e as Error).message });
+    }
+  }
+
+  if (lists.length === 0) return { hits: [], searched, skipped, failed, fused: false };
+  if (lists.length === 1) return { hits: lists[0].slice(0, limit), searched, skipped, failed, fused: false };
+
+  const tuning = readJSON<{ openwolf?: { recall?: { rrf_k?: number } } }>(
+    path.join(targets[0].wolfDir, "config.json"), {});
+  const K = tuning.openwolf?.recall?.rrf_k ?? 2;
+  return { hits: fuseByRank(lists, limit, K), searched, skipped, failed, fused: true };
+}

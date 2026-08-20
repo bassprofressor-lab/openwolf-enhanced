@@ -7,7 +7,7 @@ import {
   getRemoteConfig, readRemoteToken, teamRecall, teamResolve, teamId, type TeamEntry,
 } from "../utils/remote.js";
 import { resolveEmbedConfig } from "../utils/embeddings.js";
-import { semanticRecall, hybridRecall } from "../utils/semantic-recall.js";
+import { semanticRecallAcross } from "../utils/semantic-recall.js";
 
 interface RecallCliOpts { limit?: string; json?: boolean; full?: boolean; id?: string; all?: boolean; team?: boolean; semantic?: boolean; hybrid?: boolean }
 
@@ -121,18 +121,34 @@ export async function recallCommand(query: string[], opts: RecallCliOpts): Promi
   }
   const limit = Math.max(1, parseInt(opts.limit || "12", 10) || 12);
 
-  // Semantic / hybrid recall runs against the primary project only (embeddings index per .wolf/).
-  // It gracefully falls back to keyword search if the embeddings endpoint isn't reachable.
+  // Semantic / hybrid recall. Across projects it searches every registered project that already
+  // has an embeddings index, skips the rest by name, and fuses the per-project lists by rank —
+  // see the header of utils/semantic-recall.ts for why by rank and not by score.
   let hits: ProjectHit[];
   if (opts.semantic || opts.hybrid) {
-    const primary = searchTargets[0];
-    const cfg = resolveEmbedConfig(primary.wolfDir);
     try {
-      const raw = opts.hybrid
-        ? await hybridRecall(primary.wolfDir, q, cfg, limit)
-        : await semanticRecall(primary.wolfDir, q, cfg, limit);
-      hits = raw.map((h) => ({ ...h, wolfDir: primary.wolfDir }));
-      if (opts.all) console.error("Note: --semantic/--hybrid search only this project (not --all).");
+      const res = await semanticRecallAcross(
+        searchTargets, q, opts.hybrid ? "hybrid" : "semantic", limit, resolveEmbedConfig, !opts.all);
+      hits = res.hits.map((h) => ({ ...h, file: h.project ? `${h.project}:${h.file}` : h.file }));
+      if (opts.all && !opts.json) {
+        const what = res.searched.length === 1 ? "1 project" : `${res.searched.length} projects`;
+        const note = res.skipped.length
+          ? ` · ${res.skipped.length} without an embeddings index: ${res.skipped.join(", ")}`
+          : "";
+        console.error(`Searched ${what}${note}`);
+        for (const f of res.failed) console.error(`  ${f.project}: search failed — ${f.reason}`);
+        // The number in the score column changes meaning when lists are fused. Say so rather than
+        // letting a rank score be read as a similarity.
+        if (res.fused) console.error("Scores are rank-fusion scores across projects, not similarities.");
+      }
+      if (res.searched.length === 0) {
+        // Name the actual cause. "No index anywhere" and "the endpoint was down" send the user to
+        // two different places.
+        console.error(res.failed.length
+          ? "Semantic search reached no project. Falling back to keyword search."
+          : "No project has an embeddings index yet — build one with `openwolf recall <query> --semantic` inside it. Falling back to keyword search.");
+        hits = recallAcross(searchTargets, q, { limit });
+      }
     } catch (e) {
       console.error(`Semantic recall unavailable (${(e as Error).message}). Falling back to keyword search.`);
       hits = recallAcross(searchTargets, q, { limit });
