@@ -5,6 +5,7 @@ import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
 import { consolidateMemory } from "../utils/maintenance.js";
+import { stripPrivate } from "../hooks/shared.js";
 import { resolveLlmConfig, callLlmDetailed, requiresApiKey, unwrapFencedBlock } from "./llm-provider.js";
 
 export interface AiTaskParams {
@@ -360,7 +361,14 @@ export class CronEngine {
         continue;
       }
       try {
-        files.push({ name: file, chunks: splitForContext(fs.readFileSync(filePath, "utf-8"), chunkBytes) });
+        // [2026-08-20] <private> MUST be stripped here. This is an egress path — the text goes to
+        // an LLM API — and it was the only one that sent raw file contents. push, recall and
+        // consolidate all route through blocksFor(), which blanks private regions; this one read
+        // the file directly. Two AI tasks ship enabled by default and read cerebrum.md, memory.md
+        // and anatomy.md, so on a machine with an API key exported the promise in the README
+        // ("kept out of anything OpenWolf sends elsewhere") was simply untrue once a week.
+        const raw = stripPrivate(fs.readFileSync(filePath, "utf-8"));
+        files.push({ name: file, chunks: splitForContext(raw, chunkBytes) });
       } catch {
         files.push({ name: file, chunks: ["(not found)"] });
       }

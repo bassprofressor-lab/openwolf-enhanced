@@ -1048,11 +1048,53 @@ export function countSemanticEntries(wolfDir: string): number {
 // which sends candidates OFF the machine. An unclosed marker must never mean "not private".
 const PRIVATE_RE = /<private>[\s\S]*?<\/private>|<private>[\s\S]*$/gi;
 
+/**
+ * Blank out code spans and fences, keeping length and newlines, so a tag *written about* is not
+ * mistaken for a tag *in effect*.
+ *
+ * [2026-08-20] This project's own MEMORY.md mentions `<private>` in prose while describing a bug.
+ * Fail-closed matching therefore treated it as an unclosed marker and redacted **104 of 114 lines**
+ * of the index — silently. Measured: `recall` could not find "ContactDock" or "Kurswerk" in
+ * MEMORY.md although both are there. A knowledge base that disables itself the moment you write
+ * down the name of the feature is not a safe default, it is a trap.
+ *
+ * The security property is unchanged: a marker outside code with no closing tag still swallows
+ * everything to end of input. Only backtick-quoted text is exempt, which is markdown's own,
+ * unambiguous way of saying "this is literal text". A real secret is never wrapped in backticks.
+ */
+function maskCode(text: string): string {
+  return text.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => m.replace(/[^\n]/g, "\u0000"));
+}
+
+/** Character ranges covered by an effective <private> region. */
+function privateRanges(text: string): Array<[number, number]> {
+  const masked = maskCode(text);
+  const re = new RegExp(PRIVATE_RE.source, "gi"); // own instance: no shared lastIndex
+  const out: Array<[number, number]> = [];
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    out.push([m.index, m.index + m[0].length]);
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  return out;
+}
+
+function redact(text: string, replacer: (chunk: string) => string): string {
+  const ranges = privateRanges(text);
+  if (ranges.length === 0) return text;
+  let out = "";
+  let cursor = 0;
+  for (const [a, b] of ranges) {
+    out += text.slice(cursor, a) + replacer(text.slice(a, b));
+    cursor = b;
+  }
+  return out + text.slice(cursor);
+}
+
 // Remove <private>…</private> blocks (case-insensitive, spanning newlines). Content wrapped
 // this way in a knowledge file is kept out of the injected resume digest and out of `recall`
 // results — a lightweight way to note secrets/sensitive context without leaking it into the LLM.
 export function stripPrivate(text: string): string {
-  return text.replace(PRIVATE_RE, "");
+  return redact(text, () => "");
 }
 
 /**
@@ -1061,7 +1103,7 @@ export function stripPrivate(text: string): string {
  * identical, otherwise every citation after a private block points at the wrong line.
  */
 export function blankPrivate(text: string): string {
-  return text.replace(PRIVATE_RE, (m) => m.replace(/[^\n]/g, ""));
+  return redact(text, (m) => m.replace(/[^\n]/g, ""));
 }
 
 // Structured session-summary scaffold written under each new session header in memory.md.
