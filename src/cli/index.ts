@@ -235,6 +235,17 @@ export function createProgram(): Command {
       await recallCommand(query, opts);
     });
 
+  // --- Find command ---
+  program
+    .command("find <query...>")
+    .description("Locate a symbol or file — ranked from the anatomy index, no repo-wide grep")
+    .option("--limit <n>", "Max results", "15")
+    .option("--json", "Machine-readable output (for agents and scripts)")
+    .action(async (query: string[], opts: { limit?: string; json?: boolean }) => {
+      const { findCommand } = await import("./find-cmd.js");
+      findCommand(query, opts);
+    });
+
   // --- Remote workspace: link + push ---
   program
     .command("link")

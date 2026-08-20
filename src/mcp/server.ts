@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { recall, resolveId } from "../utils/recall.js";
 import { buildResumeDigest, nativeMemoryDir } from "../hooks/shared.js";
+import { loadFindIndex, rankFind } from "../cli/find-cmd.js";
 import { nativeMemoryHealth } from "../utils/maintenance.js";
 
 // A minimal, dependency-free MCP server (JSON-RPC 2.0 over newline-delimited stdio) that exposes
@@ -40,6 +41,19 @@ export const MCP_TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "openwolf_find",
+    description:
+      "Locate a symbol or file in THIS project without a repo-wide grep. Ranked from OpenWolf's anatomy index; symbol hits carry exact start/end lines, so the next step is a targeted offset/limit read instead of loading the whole file. Falls back to file-name, path and description matches. Returns 'no index' if `openwolf scan` has never run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Symbol name, file name, or a word from a file's description" },
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "openwolf_memory_health",
     description:
       "Report the health of Claude's native Auto Memory for this project: how many topic files exist vs. how many the MEMORY.md index actually references (unreferenced ones never load), the 200-line cutoff, dead links, and stale files.",
@@ -69,6 +83,23 @@ function callTool(name: string, args: Record<string, unknown>, projectDir: strin
     if (hits.length === 0) return `No matches for "${q}".`;
     const body = hits.map((h) => `[${h.id}] (${h.score}) ${h.file}:${h.line}\n    ${h.text.slice(0, 160)}`).join("\n");
     return `${hits.length} match(es) for "${q}" — pass an id back to expand it:\n${body}`;
+  }
+  if (name === "openwolf_find") {
+    const q = String(args.query ?? "").trim();
+    if (!q) return "Provide a `query`.";
+    const index = loadFindIndex(wolfDir);
+    if (index.files.length === 0) return "No anatomy index for this project — run `openwolf scan` first.";
+    const hits = rankFind(q, index, Math.max(1, Number(args.limit) || 10));
+    if (hits.length === 0) {
+      return `No match for "${q}" among ${index.files.length} indexed files. `
+        + "Symbols are only recorded for larger files — for small ones, grep is the right tool.";
+    }
+    // Line ranges first: they are the actual payoff, because the agent can then read with
+    // offset/limit instead of pulling the whole file.
+    const body = hits.map((h) => h.startLine
+      ? `${h.path}:${h.startLine}-${h.endLine}  ${h.why}  (~${h.tokens} tok)`
+      : `${h.path}  ${h.why}  (~${h.tokens} tok)`).join("\n");
+    return `${hits.length} hit(s) for "${q}":\n${body}`;
   }
   if (name === "openwolf_resume") {
     return buildResumeDigest(wolfDir, 6000) ?? "No resume context available for this project.";

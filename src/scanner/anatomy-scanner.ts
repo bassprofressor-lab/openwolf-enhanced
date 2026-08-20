@@ -6,6 +6,7 @@ import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
 import { loadIgnore } from "../utils/maintenance.js";
 import { extractSymbols, symbolsSupported, SYMBOL_MIN_TOKENS, type SymbolEntry } from "./symbol-extractor.js";
+import { extractImports, importsSupported, buildGraph, pageRank, toPercentile } from "./import-graph.js";
 import { estimateFileTokens, getTokenRatios, type TokenRatios } from "../tracker/token-estimator.js";
 
 interface AnatomyEntry {
@@ -91,7 +92,8 @@ function walkDir(
   entries: Map<string, AnatomyEntry[]>,
   ignore: (relPath: string) => boolean,
   symbols: Record<string, SymbolEntry[]>,
-  ratios: TokenRatios
+  ratios: TokenRatios,
+  rawImports: Record<string, string[]>
 ): void {
   let totalFiles = 0;
   for (const [, list] of entries) totalFiles += list.length;
@@ -114,7 +116,7 @@ function walkDir(
     if (ignore(relPath)) continue; // .wolfignore
 
     if (item.isDirectory()) {
-      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols, ratios);
+      walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols, ratios, rawImports);
     } else if (item.isFile()) {
       const ext = path.extname(item.name).toLowerCase();
       if (BINARY_EXTENSIONS.has(ext)) continue;
@@ -159,6 +161,13 @@ function walkDir(
           symbols[normalizePath(path.join(sectionKey, item.name))] = syms;
         }
       }
+
+      // Import edges for the importance calculation. Collected here because the content is
+      // already read — a second pass over the project would be pure waste. EVERY indexed file
+      // enters the node list, even without imports: otherwise a heavily imported file that
+      // imports nothing itself would not appear in the graph at all.
+      const relForGraph = normalizePath(path.relative(rootDir, fullPath));
+      rawImports[relForGraph] = importsSupported(ext) ? extractImports(content, ext) : [];
 
       totalFiles++;
       if (totalFiles >= maxFiles) return;
@@ -228,7 +237,7 @@ export function parseAnatomy(content: string): Map<string, AnatomyEntry[]> {
 /**
  * Scan the project and return the anatomy content and file count WITHOUT writing to disk.
  */
-export function buildAnatomy(wolfDir: string, projectRoot: string): { content: string; fileCount: number; symbols: Record<string, SymbolEntry[]> } {
+export function buildAnatomy(wolfDir: string, projectRoot: string): { content: string; fileCount: number; symbols: Record<string, SymbolEntry[]>; importance: Record<string, number>; pagerank: Record<string, number> } {
   const configPath = path.join(wolfDir, "config.json");
   const config = readJSON<WolfConfig>(configPath, {
     version: 1,
@@ -242,18 +251,32 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
     },
   });
 
+  // [2026-08-20] When the file EXISTS, readJSON returns its content — so the defaults above never
+  // apply. A config.json holding only `openwolf.remote` (which is what this fork's own looks like)
+  // made `scan` die with a raw TypeError. Hence field-wise defaulting instead of relying on the
+  // whole-object fallback.
+  const anatomyCfg = {
+    max_description_length: 100,
+    max_files: 500,
+    exclude_patterns: ["node_modules", ".git", "dist", "build", ".wolf"],
+    // Treat as Partial: the type says "complete", the file on disk need not be.
+    ...((config.openwolf?.anatomy ?? {}) as Partial<WolfConfig["openwolf"]["anatomy"]>),
+  };
+
   const entries = new Map<string, AnatomyEntry[]>();
   const symbols: Record<string, SymbolEntry[]> = {};
+  const rawImports: Record<string, string[]> = {};
   const ignore = loadIgnore(projectRoot);
   walkDir(
     projectRoot,
     projectRoot,
-    config.openwolf.anatomy.exclude_patterns,
-    config.openwolf.anatomy.max_files,
+    anatomyCfg.exclude_patterns,
+    anatomyCfg.max_files,
     entries,
     ignore,
     symbols,
-    getTokenRatios(wolfDir)
+    getTokenRatios(wolfDir),
+    rawImports
   );
 
   let fileCount = 0;
@@ -266,16 +289,22 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
     misses: 0,
   });
 
-  return { content: serialized, fileCount, symbols };
+  // Raw PageRank for traceability, percentile for ranking and display.
+  const raw = pageRank(buildGraph(rawImports), Object.keys(rawImports));
+  const importance = toPercentile(raw);
+
+  return { content: serialized, fileCount, symbols, importance, pagerank: raw };
 }
 
 export function scanProject(wolfDir: string, projectRoot: string): number {
-  const { content, fileCount, symbols } = buildAnatomy(wolfDir, projectRoot);
+  const { content, fileCount, symbols, importance, pagerank } = buildAnatomy(wolfDir, projectRoot);
   const anatomyPath = path.join(wolfDir, "anatomy.md");
   writeText(anatomyPath, content);
   // Sidecar: symbol-level line ranges for big files (see symbol-extractor). Written next to
   // anatomy.md; pre-read reads it to point the agent at a slice instead of the whole file.
   writeText(path.join(wolfDir, "anatomy-symbols.json"), JSON.stringify({ version: 1, files: symbols }, null, 2));
+  // Importance as its own sidecar: `openwolf find` uses it to order otherwise equal hits.
+  writeText(path.join(wolfDir, "anatomy-graph.json"), JSON.stringify({ version: 1, importance, pagerank }, null, 2));
   return fileCount;
 }
 
