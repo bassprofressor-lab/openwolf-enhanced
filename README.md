@@ -5,8 +5,10 @@
 <h1 align="center">OpenWolf Enhanced</h1>
 
 <p align="center">
-  <strong>A second brain for Claude Code — bounded, self-maintaining, and now reachable from Claude Desktop.</strong><br />
-  Project intelligence, token tracking, and invisible enforcement through 7 hook scripts — plus a read-only MCP server that carries your knowledge into Claude Desktop and any MCP client. Zero workflow changes.
+  <strong>A second brain for your coding agent.</strong><br />
+  A file index it consults before opening anything, a memory of your corrections that survives
+  <code>/clear</code>, and a token ledger that counts <em>both</em> sides. Through invisible hooks —
+  no workflow changes.
 </p>
 
 <p align="center">
@@ -14,6 +16,8 @@
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/openwolf-enhanced"><img src="https://img.shields.io/npm/v/openwolf-enhanced?color=CB3837&logo=npm&label=npm" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/openwolf-enhanced"><img src="https://img.shields.io/npm/dm/openwolf-enhanced?color=CB3837&label=downloads" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-20%2B-green.svg" alt="Node.js" /></a>
   <a href="https://github.com/cytostack/openwolf"><img src="https://img.shields.io/badge/fork%20of-cytostack%2Fopenwolf-lightgrey.svg" alt="Fork of cytostack/openwolf" /></a>
@@ -31,7 +35,36 @@
 
 **Works with [Claude Code](https://claude.com/claude-code), [OpenAI Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) and [OpenCode](https://github.com/sst/opencode)** — plus Claude Desktop and any MCP client. Persistent project memory, searchable citations, and context injection through invisible hooks. Git-native, no database, no cloud.
 
-**Contents:** [Why](#why-openwolf-exists) · [What's Enhanced](#whats-enhanced) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Claude Desktop / MCP](#use-in-claude-desktop-mcp) · [FAQ](#faq)
+**Contents:** [See it](#see-it) · [Why](#why-openwolf-exists) · [What's Enhanced](#whats-enhanced) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Claude Desktop / MCP](#use-in-claude-desktop-mcp) · [FAQ](#faq)
+
+## See it
+
+Find where something lives, without a repo-wide grep — and read only that slice:
+
+```console
+$ openwolf find pageRank
+
+  1 hit(s) for "pageRank"
+
+  ▆ src/scanner/import-graph.ts:106-147
+      fn pageRank  ·  ~380 tok
+
+  ▁…█ = importance in the import graph (how often, and from how central a file).
+```
+
+Ask what it actually cost you — including what OpenWolf itself put into the context:
+
+```console
+$ openwolf report
+
+  Estimated (char-ratio heuristic)
+    Total tokens:           1,204,880
+    Reads avoided:            412,300
+    OpenWolf injected:         88,140   (resume digests, reminders)
+    Net savings:              324,160
+```
+
+That third line is the one most tools leave out. It can go negative, and it is meant to.
 
 ## Why OpenWolf Exists
 
@@ -41,27 +74,53 @@ OpenWolf gives Claude a second brain: a file index so it knows what files contai
 
 ## What's Enhanced
 
-Everything upstream does, plus — grouped by what it gives you:
+Everything upstream does, plus the following. Details for each live in the
+[docs](docs/index.md) and the [CHANGELOG](CHANGELOG.md).
 
-| Area | Enhancement |
-|------|-------------|
-| 🩺 **Self-maintenance** | `openwolf doctor` reports the `.wolf/` footprint and compacts everything (ledger, memory, bug log, backups, logs, tmp), flags cross-project registry issues, suggests `.wolfignore` entries for noisy dirs, and hints at near-duplicate cerebrum entries to merge — and `openwolf consolidate` LLM-merges them. `--dry-run` previews. |
-| 📦 **Bounded, tunable storage** | Ledger, bug log, cron queues and waste flags are all capped — no runaway multi-MB files. Every limit lives in `openwolf.retention` and survives updates (config is deep-merged, not overwritten). |
-| 🧭 **Smart session resume** | On session start a compact, token-bounded digest is injected — STATUS + Do-Not-Repeat inline, recent activity as a one-line headline, the rest as an *"Available on demand"* index — so the model continues without re-reading. |
-| 📓 **Passive activity capture** *(opt-in)* | File edits are always journaled; enable `openwolf.capture` and a `PostToolUse:Bash` hook also appends notable commands (commits, installs, tests, builds, deploys) **and failures** to a size-capped `.wolf/activity.log` that feeds the next session's resume digest. Secrets are redacted; trivial read-only commands are dropped. Off by default. |
-| 🔎 **Searchable memory + citations** | `openwolf recall <query>` keyword-searches STATUS / cerebrum / memory / buglog **and Claude's native Auto Memory**, **BM25-ranked** (rare terms weighted, length-normalized), returning a compact index where each hit has a stable citation id like `[c-3f9a]`. Expand one with `recall --id <id>` (or all inline with `--full`) — progressive disclosure, no database. Cite ids in notes to re-open them later; `recall --all` searches every registered project. |
-| 🧲 **Semantic & hybrid recall** | `recall --semantic` ranks by *meaning* via local embeddings (any OpenAI-compatible `/embeddings` endpoint; defaults to keyless **LM Studio**, so memory stays local) — it finds paraphrases and crosses languages where keywords fail. `--hybrid` fuses BM25 + semantic with Reciprocal Rank Fusion; measured on a 22k-unit knowledge base it beats both alone. The vector index is two flat cache files in `.wolf/` — checkpointed, resumable, only changed entries re-embed; unreachable endpoint → clean fallback to keyword search. |
-| 🧠 **Native-memory interop** | Reads Claude Code's own Auto Memory (read-only): `doctor` flags its blind spots (files the `MEMORY.md` index never loads, the 200-line cutoff, dead links), a dashboard panel browses it, and an **MCP server** (`openwolf mcp`) exposes recall/resume to **Claude Desktop** and other MCP clients — so OpenWolf works beyond Claude Code. |
-| 🐝 **Beyond Claude Code** | `init`/`update` auto-detect **Codex CLI**, **Gemini CLI** and **OpenCode** and register OpenWolf's hooks there too. Codex & Gemini share Claude's hook model, so the session-start resume digest is injected and activity captured; OpenCode gets a JS-plugin adapter (compaction-time inject). Claude stays the primary target, unchanged. |
-| 🔌 **Model-agnostic AI tasks** | The background cron engine's AI tasks default to the Anthropic API but can point at **any OpenAI-compatible endpoint** (OpenAI, Groq, Cerebras, Mistral, Qwen, a local server) via `openwolf.cron` config — `llm_provider` / `llm_base_url` / `llm_model` / `api_key_env`. No code change; existing setups keep running on Claude unchanged. |
-| 🌍 **Localized digest** | The injected session-start resume digest can render in German — set `openwolf.lang` or `OPENWOLF_LANG`. English is the default. |
-| 🔒 **Privacy** | `<private>…</private>` content in any `.wolf` file is kept out of the injected context and out of search. |
-| 🗒 **Structured summaries** | Each session gets a `Did / Learned / Next / Files` scaffold, keeping memory consistent and greppable. |
-| 📤 **Export** | `openwolf export <sessions\|bugs>` to JSON or CSV (RFC 4180). |
-| 🎯 **`.wolfignore`** | gitignore-style scoping for anatomy scanning **and** hook tracking; `doctor` suggests what to add. |
-| 📊 **Dashboard** | Deep-linkable panels, a cross-project **All Projects** view, a **Command Log** for the opt-in Bash capture, jump-to-file from AI insights, a Design QC thumbnail grid + lightbox, and a daemon-down banner. |
-| 🔒 **Security & correctness** | Dashboard bound to loopback and token-gated, no command injection / path traversal, secret-file exclusion (`.pem`/`.key`/`id_rsa`…), plus ~15 adopted upstream security & bug fixes the inactive upstream never merged. |
-| 🚀 **Trusted releases** | Published to npm via GitHub OIDC — no long-lived token — with SLSA provenance; CI builds and tests on every push. |
+**Finding things**
+
+| | |
+|---|---|
+| 🔎 **`openwolf find`** | Symbol and file lookup from the existing index — with exact line ranges, so you read one function instead of the file. Also `--json` and the MCP tool `openwolf_find`. |
+| 🧭 **Import-graph importance** | Ties break on PageRank over your own imports, stored as a rank percentile. The biggest file is rarely the most important one. |
+| 🌳 **tree-sitter ranges** *(optional)* | Real symbol boundaries from the syntax tree instead of "the line before the next one" — which was wrong for 97 % of symbols. Optional dependency; falls back cleanly and says why. |
+| 🧠 **Searchable memory** | `recall <query>` over STATUS / cerebrum / memory / buglog **and** Claude's native Auto Memory, BM25-ranked, each hit with a stable citation id. `--semantic` ranks by meaning via local embeddings; `--hybrid` fuses both. |
+
+**Knowing what it costs**
+
+| | |
+|---|---|
+| 📊 **Both sides of the ledger** | `report` shows reads avoided, **what OpenWolf itself injected**, and the net. The net may go negative — a metric that cannot look bad measures nothing. |
+| 📦 **Bounded storage** | Ledger, bug log, cron queues and waste flags are all capped. No runaway multi-MB files. Every limit lives in `openwolf.retention` and survives updates. |
+| 🩺 **Self-maintenance** | `doctor` reports the `.wolf/` footprint and compacts it, flags registry issues, suggests `.wolfignore` entries, and hints at near-duplicate cerebrum entries — `consolidate` LLM-merges them. |
+| 📤 **Export** | `export <sessions\|bugs>` to JSON or CSV (RFC 4180). |
+
+**Working across agents**
+
+| | |
+|---|---|
+| 🐝 **Codex, Gemini, OpenCode** | `init`/`update` detect them and register the hooks there too, including the `AGENTS.md` protocol block they actually read — one delimited block, everything outside it untouched. |
+| 🔌 **Claude Desktop / MCP** | `openwolf mcp` exposes recall, resume, find and memory-health to any MCP client. |
+| 🔌 **Model-agnostic AI tasks** | The cron engine's AI tasks point at any OpenAI-compatible endpoint — OpenAI, Groq, Cerebras, Mistral, a local server. No code change. |
+
+**Session hygiene**
+
+| | |
+|---|---|
+| 🧭 **Smart resume** | A token-bounded digest on session start: STATUS and Do-Not-Repeat inline, the rest as an *"available on demand"* index — so the model continues without re-reading. |
+| 📓 **Activity capture** *(opt-in)* | Notable shell commands **and failures** appended to a capped log that feeds the next resume. Secrets redacted, trivial reads dropped. Off by default. |
+| 🗒 **Structured summaries** | Each session gets a `Did / Learned / Next / Files` scaffold, so memory stays greppable. |
+| 🎯 **`.wolfignore`** | gitignore-style scoping for both anatomy scanning and hook tracking. |
+| 🌍 **Localized digest** | The resume digest can render in German via `openwolf.lang`. |
+
+**Trust**
+
+| | |
+|---|---|
+| 🔒 **Privacy** | `<private>…</private>` in any `.wolf` file stays out of the injected context, out of search, and out of anything sent elsewhere. |
+| 🛡 **Security & correctness** | Dashboard on loopback and token-gated, no command injection or path traversal, secret-file exclusion — plus ~15 upstream security fixes the inactive upstream never merged. |
+| 🚀 **Trusted releases** | Published to npm via GitHub OIDC — no long-lived token — with SLSA provenance. CI builds and tests on every push. |
+| 📈 **Dashboard** | Deep-linkable panels, a cross-project view, a command log, Design QC grid, and a daemon-down banner. |
 
 Every change is versioned in the [CHANGELOG](CHANGELOG.md); attribution is in the [NOTICE](NOTICE).
 
@@ -127,7 +186,9 @@ Two things to know before you re-run `pnpm build` on a copy you have already ins
 | `memory.md` | Chronological action log with token estimates |
 | `buglog.json` | Bug fix memory, searchable, prevents re-discovery |
 | `token-ledger.json` | Lifetime token tracking and session history |
-| `hooks/` | 7 Claude Code lifecycle hooks (pure Node.js) |
+| `hooks/` | 8 lifecycle hooks (pure Node.js), deployed to every detected agent |
+| `anatomy-symbols.json` | Symbol line ranges for larger files — what `find` returns and what turns a read into a slice |
+| `anatomy-graph.json` | Import-graph importance per file, used to order otherwise equal hits |
 | `config.json` | Configuration with sensible defaults (incl. `retention`) |
 | `identity.md` | Agent persona for this project |
 | `OPENWOLF.md` | Instructions Claude follows every session |
@@ -205,10 +266,11 @@ openwolf consolidate          LLM-merge near-duplicate cerebrum entries [--dry-r
 openwolf recall <query>       Keyword-search .wolf + native memory; ids per hit [--limit N] [--full] [--all] [--json]
                               [--semantic] rank by meaning (local embeddings) · [--hybrid] fuse keyword + semantic
 openwolf recall --id <id>     Expand a citation id to its full entry (second disclosure layer)
+openwolf find <query>         Locate a symbol or file — ranked, with exact line ranges [--limit N] [--json]
 openwolf link                 Link to a remote workspace [--url URL --token TOKEN] [--status] [--unlink]
 openwolf push                 Offer learnings, decisions and bugs to the linked workspace [--dry-run]
 openwolf export <what>        Export sessions|bugs as JSON or CSV [--format csv] [--out FILE]
-openwolf mcp                  Run an MCP server (recall/resume/memory-health) [--project DIR]
+openwolf mcp                  Run an MCP server (recall/resume/find/memory-health) [--project DIR]
 openwolf scan                 Refresh the project structure map [--check]
 openwolf dashboard            Open the real-time web dashboard
 openwolf daemon <cmd>         start | stop | restart | logs — background task scheduler

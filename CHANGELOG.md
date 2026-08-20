@@ -6,6 +6,66 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.21.0] — 2026-08-20
+
+The honest-ledger release. Three additions, and one number that stops flattering itself.
+
+### Added
+
+- **Injection accounting.** The savings figure counted only what OpenWolf avoided and never what
+  it costs. Every resume digest and every reminder block is context the model pays for, and none
+  of it appeared anywhere — a ledger with one side is how "898 million tokens saved" stayed
+  plausible for months (see 1.20.8). There are exactly two injection points, and both now book
+  into `lifetime.injection_tokens_estimated`. `report`, `status` and the dashboard show
+  reads-avoided, injected, and the net. **The net may go negative on purpose**: a metric that
+  cannot look bad measures nothing.
+- **`openwolf find <query>`.** Locates a symbol or file without a repo-wide grep, ranked from the
+  index the scanner already writes — no second index that can go stale unnoticed. Symbol hits carry
+  exact line ranges, so the next step is a targeted `offset`/`limit` read instead of loading the
+  file. Also available as `--json` and as the MCP tool **`openwolf_find`**, which is the point: an
+  agent can ask where something lives instead of reading a file to find out.
+- **Import-graph importance.** Ties in `find` break on PageRank over the project's own import graph.
+  Only project-internal relative imports count, and an unresolvable specifier creates no edge —
+  invented edges skew importance invisibly. Stored as a **rank percentile**, not the raw score:
+  measured on this repo the raw distribution was so skewed (median 0.058 against a maximum of 1.0)
+  that 118 of 158 files collapsed into the lowest bar.
+- **tree-sitter symbol ranges (optional).** The regex extractor guesses a symbol's end as "the line
+  before the next one"; of 487 shared symbols, **472 (97 %) had an end line that was too far**, so
+  an `offset`/`limit` hint almost always pulled in something else. tree-sitter gives the real end
+  from the syntax tree and finds methods inside classes. It is an `optionalDependency` — 52 MB of
+  grammars is the wrong trade to force on everyone — falls back cleanly, and says why when it
+  cannot run. `web-tree-sitter` is pinned to `^0.24.7`: 0.26 is ABI-incompatible with the 0.1.13
+  grammars and fails with an *empty* error message.
+- **`AGENTS.md` protocol block.** Codex and OpenCode read `AGENTS.md`, not `CLAUDE.md`, and this
+  fork never wrote it — their hooks fired while the protocol never reached the model. One delimited
+  block is now maintained there; everything outside it is left byte for byte alone, and broken
+  markers cause a refusal rather than a guessed repair.
+
+### Fixed
+
+- **Codex only ever got 4 of the 8 hooks.** `pre-read`, `pre-write`, `post-read` and `precompact`
+  were missing — exactly the ones carrying read avoidance, the do-not-repeat warning and the
+  compaction snapshot. OpenWolf ran there at half strength without anything ever failing.
+- **The Codex tool matchers were too narrow.** `^apply_patch$` would never have seen a write
+  reported as `Write`, and a matcher that misses fails silently. They are a union of Claude and
+  Codex tool names now, and `SessionStart` deliberately carries no matcher so a compaction still
+  gets its digest.
+- **Codex ignores hooks without `hooks = true` under `[features]`.** Without that switch a
+  perfectly fine-looking `hooks.json` sits there and none of it fires. `config.toml` is created
+  when missing and warned about otherwise — table-scoped, so the same key under another table does
+  not suppress the warning.
+- **A partial `config.json` crashed `openwolf scan`.** `readJSON` returns the file's content when
+  the file exists, so the defaults never applied; a config holding only `openwolf.remote` died with
+  a raw `TypeError`.
+- **`--limit` with a non-number reported "no match".** `parseInt("abc")` is `NaN` and
+  `slice(0, NaN)` is empty, so `find <symbol> --limit abc` claimed nothing was found for a symbol
+  that is indexed. A silent wrong answer is worse than a rejected flag.
+- **`anatomy-symbols.json` was written non-atomically**, unlike every other `.wolf` file. A
+  `pre-read` hook firing mid-write read truncated JSON and lost all symbol hints for that turn.
+
+Eight findings from the pre-release review are folded into these commits rather than left for a
+follow-up; the review was run against the finished branch before anything was pushed.
+
 ## [1.20.9] — 2026-08-16
 
 ### Fixed
