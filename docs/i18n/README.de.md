@@ -120,7 +120,7 @@ Alles, was Upstream tut, plus das Folgende. Einzelheiten stehen in der
 | | |
 |---|---|
 | 🔒 **Privatsphäre** | `<private>…</private>` in einer `.wolf`-Datei bleibt aus dem eingespeisten Kontext, aus der Suche und aus allem heraus, was das Haus verlässt. |
-| 🛡 **Sicherheit & Korrektheit** | Dashboard nur auf Loopback und token-geschützt, keine Command-Injection, keine Path-Traversal, Ausschluss von Geheimnis-Dateien — dazu rund 15 Upstream-Sicherheitsfixes, die das inaktive Upstream nie übernommen hat. |
+| 🛡 **Sicherheit & Korrektheit** | Dashboard nur auf Loopback und token-geschützt, keine Command-Injection, keine Path-Traversal, Ausschluss von Geheimnis-Dateien — dazu rund 15 Sicherheitsfixes aus Upstream-Pull-Requests, die nie in die 1.x-Linie eingeflossen sind, auf der dieser Fork aufsetzt. |
 | 🚀 **Vertrauenswürdige Releases** | Veröffentlichung auf npm über GitHub OIDC — kein langlebiges Token — mit SLSA-Provenance. CI baut und testet bei jedem Push. |
 | 📈 **Dashboard** | Verlinkbare Panels, projektübergreifende Ansicht, Befehlsprotokoll, Design-QC-Raster und ein Banner, wenn der Daemon steht. |
 
@@ -133,7 +133,10 @@ npm install -g openwolf-enhanced
 ```
 
 > **Hinweis:** Dies ist der gepflegte Fork. `npm install -g openwolf` installiert das originale
-> `openwolf` (zuletzt 1.0.4, März 2026, ungepflegt) — ein anderes Paket. Installiere
+> `openwolf` — ein anderes Paket, und es wird **aktiv weiterentwickelt** (2.x-Linie, Stand
+> August 2026). Dieses Paket ist eine **eigene Linie**: es ist 2026 vom 1.x-Stand abgezweigt und
+> hat den 2.x-Umbau nie übernommen. Beide belegen denselben Befehl `openwolf`, lassen sich also
+> nicht nebeneinander installieren. Installiere
 > `openwolf-enhanced` für den begrenzten Speicher, die Selbstwartung und die Security-Arbeit.
 > Beide stellen denselben `openwolf`-Befehl bereit.
 
@@ -324,7 +327,7 @@ aufgerufen. OpenWolf schreibt nie in Claudes native Memory — es liest und mach
 Nein. Alles liegt lokal in einem `.wolf/`-Verzeichnis im Projekt — reines Markdown/JSON, git-nativ, ohne Datenbank und ohne Cloud. Nichts verlässt deinen Rechner. (Die einzigen ausgehenden Calls sind optional: die Hintergrund-AI-Tasks und `openwolf consolidate`, die du auf einen Provider deiner Wahl richtest.)
 
 **Wie unterscheidet sich das vom originalen `openwolf`?**
-Dies ist ein gepflegter Fork. Das Original (npm `openwolf`, zuletzt März 2026) ist ungepflegt. Dieser Fork ergänzt begrenzten/selbstwartenden Speicher, BM25-Gedächtnissuche mit Zitaten, einen MCP-Server, modell-agnostische AI-Tasks, Multi-Agent-Support und ~15 Security-Fixes — bleibt aber Drop-in-Ersatz für denselben `openwolf`-Befehl.
+Es sind inzwischen zwei eigene Linien, nicht ein gepflegter Fork eines aufgegebenen Projekts. Dieses Paket ist 2026 vom **1.x**-Stand abgezweigt; Upstream hat seither einen **2.x-Umbau** veröffentlicht und wird aktiv weiterentwickelt. Keine der beiden Linien verfolgt die andere. Was dieser Fork auf der 1.x-Basis ergänzt: begrenzten und selbstwartenden Speicher, BM25-Gedächtnissuche mit Zitaten, einen MCP-Server, modell-agnostische KI-Aufgaben, Unterstützung mehrerer Agenten und rund 15 Sicherheitsfixes — bei gleichem Befehl `openwolf`. Wer Upstreams 2.x-Arbeit will, installiert `openwolf`.
 
 **Funktioniert es außer mit Claude Code auch mit anderen Tools?**
 Ja. `init`/`update` erkennen **Codex CLI**, **Gemini CLI** und **OpenCode** automatisch und registrieren dieselben Hooks. Der `openwolf mcp`-Server stellt recall/resume zudem für **Claude Desktop** und jeden MCP-Client bereit.

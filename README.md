@@ -118,7 +118,7 @@ Everything upstream does, plus the following. Details for each live in the
 | | |
 |---|---|
 | 🔒 **Privacy** | `<private>…</private>` in any `.wolf` file stays out of the injected context, out of search, and out of anything sent elsewhere. |
-| 🛡 **Security & correctness** | Dashboard on loopback and token-gated, no command injection or path traversal, secret-file exclusion — plus ~15 upstream security fixes the inactive upstream never merged. |
+| 🛡 **Security & correctness** | Dashboard on loopback and token-gated, no command injection or path traversal, secret-file exclusion — plus ~15 security fixes from upstream pull requests that were never merged into the 1.x line this fork is based on. |
 | 🚀 **Trusted releases** | Published to npm via GitHub OIDC — no long-lived token — with SLSA provenance. CI builds and tests on every push. |
 | 📈 **Dashboard** | Deep-linkable panels, a cross-project view, a command log, Design QC grid, and a daemon-down banner. |
 
@@ -130,10 +130,13 @@ Every change is versioned in the [CHANGELOG](CHANGELOG.md); attribution is in th
 npm install -g openwolf-enhanced
 ```
 
-> **Note:** this is the maintained fork. `npm install -g openwolf` installs the
-> original `openwolf` (last released 1.0.4, March 2026, unmaintained) — a different
-> package. Install `openwolf-enhanced` for the bounded-storage, self-maintenance and
-> security work described above. Both provide the same `openwolf` command.
+> **Note — two different packages.** `npm install -g openwolf` installs
+> [cytostack/openwolf](https://github.com/cytostack/openwolf), which is **actively developed**
+> (2.x line, current as of August 2026). This package is a **separate lineage**: it forked the
+> 1.x codebase in 2026 and never adopted the 2.x rewrite, so the two have diverged in
+> architecture as well as features. Both still provide the same `openwolf` command, which means
+> they cannot be installed side by side. Pick this one for the bounded-storage, self-maintenance
+> and security work described above; pick upstream for the 2.x feature line.
 
 <details>
 <summary>Install from source instead</summary>
@@ -359,7 +362,7 @@ explicitly. OpenWolf never writes to Claude's native memory — it reads and sur
 No. Everything lives in a local `.wolf/` directory in your project — plain Markdown and JSON, git-native, no database and no cloud. Nothing leaves your machine. (The only outbound calls are optional: the background cron AI tasks and `openwolf consolidate`, which you point at a provider of your choice.)
 
 **How is this different from the original `openwolf`?**
-This is a maintained fork. The original (npm `openwolf`, last released March 2026) is unmaintained. This fork adds bounded/self-maintaining storage, BM25 memory search with citations, an MCP server, model-agnostic AI tasks, multi-agent support, and ~15 security fixes — while staying a drop-in replacement for the same `openwolf` command.
+They are separate lineages now, not a maintained fork of an abandoned project. This package forked upstream's **1.x** code in 2026; upstream has since shipped a **2.x rewrite** and is actively developed. Neither tracks the other. What this fork adds on top of the 1.x base: bounded/self-maintaining storage, BM25 memory search with citations, an MCP server, model-agnostic AI tasks, multi-agent support, and ~15 security fixes — while staying a drop-in replacement for the same `openwolf` command. If you want upstream's 2.x work, install `openwolf`.
 
 **Does it work with anything other than Claude Code?**
 Yes. `init`/`update` auto-detect **Codex CLI**, **Gemini CLI** and **OpenCode** and register the same hooks there. The `openwolf mcp` server also exposes recall/resume to **Claude Desktop** and any MCP client.

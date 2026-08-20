@@ -476,6 +476,33 @@ export function footprint(wolfDir: string, ret: Retention): {
     }
   }
 
+  // [2026-08-20] AI cron tasks send .wolf files to an LLM API. They now ship disabled, but
+  // cron-manifest.json is user data and `update` never rewrites it — so a project created before
+  // this change keeps them on and would never hear about it. This warning is how existing installs
+  // find out. It fires only when a key is actually available, so it is a real exposure, not a lecture.
+  try {
+    // params live under `action`, not on the task — reading t.params silently found nothing and
+    // the warning stayed quiet on exactly the installs it exists for.
+    type CronTask = { id?: string; enabled?: boolean; action?: { params?: { context_files?: string[] } } };
+    const manifest = readJSON<{ tasks?: CronTask[] }>(path.join(wolfDir, "cron-manifest.json"), {});
+    const filesOf = (t: CronTask) => t.action?.params?.context_files ?? [];
+    const sending = (manifest.tasks ?? []).filter((t) => t.enabled && filesOf(t).length > 0);
+    const cfg = readJSON<{ openwolf?: { cron?: { enabled?: boolean; api_key_env?: string | null } } }>(
+      path.join(wolfDir, "config.json"), {},
+    );
+    const cron = cfg.openwolf?.cron ?? {};
+    const keyEnv = cron.api_key_env || "ANTHROPIC_API_KEY";
+    if (sending.length > 0 && cron.enabled !== false && process.env[keyEnv]) {
+      const names = sending.map((t) => t.id).join(", ");
+      const files = [...new Set(sending.flatMap(filesOf))].join(", ");
+      warnings.push(
+        `cron: ${names} send ${files} to an LLM API on schedule, and ${keyEnv} is set. ` +
+        `<private> blocks are stripped, everything else is not. Disable in .wolf/cron-manifest.json ` +
+        `(enabled: false) if that is not what you want.`,
+      );
+    }
+  } catch { /* no manifest, nothing to warn about */ }
+
   const logBytes = fileSize(path.join(wolfDir, "daemon.log"));
   if (logBytes > 0) {
     items.push({ name: "daemon.log", bytes: logBytes });

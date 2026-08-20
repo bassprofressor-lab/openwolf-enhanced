@@ -6,6 +6,62 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.22.0] — 2026-08-20
+
+**Contains a privacy fix. If you run the background daemon with an API key exported, read the
+first entry.**
+
+### Fixed
+
+- 🔒 **The scheduled AI tasks sent `<private>` content to an LLM API.** Two tasks ship in the
+  manifest — `cerebrum-reflection` (Sundays, reads `cerebrum.md`) and `project-suggestions`
+  (Mondays, reads `memory.md` and `anatomy.md`) — and until now the cron engine read those files
+  **raw**. Every other path that leaves the machine strips private regions first: `push`, `recall`
+  and `consolidate` all route through `blocksFor()`. This one did not, which made the README's
+  promise ("kept out of anything OpenWolf sends elsewhere") untrue once a week.
+
+  **Who was affected:** anyone whose daemon was running (`openwolf init` starts it automatically
+  when pm2 is installed), with the cron engine enabled, an API key exported in the daemon's
+  environment, and `<private>` blocks in `cerebrum.md`, `memory.md` or `anatomy.md`. If any of
+  those four is missing, nothing private was sent.
+
+  The fix strips at the read, and a regression test anchors on the read itself rather than on a
+  nearby symbol — so a second, unstripped context path fails the suite instead of shipping.
+
+- 🔒 **A `<private>` written *about* disabled the knowledge base.** Matching is fail-closed by
+  design (1.20.5): an opening tag with no closing tag redacts to end of file, because a forgotten
+  tag must never mean "not private". But the match did not distinguish a marker from a mention.
+  This project's own `MEMORY.md` describes a bug using the words `` `<private>` `` in backticks —
+  and that one mention silently hid **104 of its 114 lines** from `recall`, from the resume digest,
+  from the semantic index. Code spans and fences are now masked before tags are located. The
+  security property is unchanged and covered by four tests, including that a fenced mention does
+  not disarm a real marker later in the same file.
+
+### Changed
+
+- **The two AI cron tasks now ship disabled.** Something that sends project knowledge to a third
+  party should require a deliberate switch-on, not a deliberate switch-off. ⚠️ This only affects
+  **new** projects: `cron-manifest.json` is user data and `openwolf update` never rewrites it.
+- **`openwolf doctor` now warns an existing install** when scheduled tasks would send files and an
+  API key is present, naming the tasks and the files. That is how projects created before this
+  release find out.
+- **Corrected the upstream claims in the README.** It stated that `cytostack/openwolf` was
+  unmaintained and last released 1.0.4 in March 2026. That is false: upstream shipped a 2.x line
+  and is actively developed. The two are separate lineages — this package forked 1.x and never
+  adopted the 2.x rewrite — and the README now says so, in both languages.
+
+### Added
+
+- **Backlinks and a link graph.** Citations were one-way: you could open an entry by id but not ask
+  who leans on it. `recall --id` now lists "Referenced by", and a new **Links** panel in the
+  dashboard draws the graph, ranks notes by how often they are referenced, and names dead
+  references instead of swallowing them. The graph shows the 90 best-connected notes on purpose —
+  drawing all 324 produced a hairball, and the caption says what is not drawn.
+- The graph reads citation ids, `[[wikilinks]]` and markdown index links. Three calibration bugs
+  were found and fixed while building it: bracket patterns inside code were counted as links (10 of
+  17 reported dead links were Odoo array literals), the link-text bound was 160 characters against
+  a measured 473, and file keys collided between `.wolf/memory.md` and `native/MEMORY.md`.
+
 ## [1.21.0] — 2026-08-20
 
 The honest-ledger release. Three additions, and one number that stops flattering itself.
