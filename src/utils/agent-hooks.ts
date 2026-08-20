@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJSON, writeJSON, writeText } from "./fs-safe.js";
 import { ensureDir } from "./paths.js";
+import { upsertMarkerBlock, AGENTS_SNIPPET } from "./marker-block.js";
 
 // Deploys OpenWolf's hook scripts into whichever AI-coding CLIs a project uses. Claude Code is
 // always targeted; Codex CLI, Gemini CLI, and OpenCode are auto-detected (their config dir exists)
@@ -70,18 +71,65 @@ function claudeSettings(): HookSettings {
 // ---- Codex: same event names as Claude; edits arrive as `apply_patch`, shell as `Bash`.
 // Env var for the project dir is unconfirmed upstream, so we bake in the absolute path (stable per
 // machine → the trust-hash stays put until the next `openwolf update`). ----
+// [2026-08-20] Codex used to get only 4 of the 8 hooks: session-start, post-write, post-bash,
+// stop. Missing were pre-read, pre-write, post-read and precompact — exactly the ones carrying
+// read avoidance, the do-not-repeat warning and the compaction snapshot. OpenWolf ran on Codex
+// at half strength without anything ever failing.
+//
+// Matchers are a UNION of Claude and Codex tool names: which name Codex actually sends depends
+// on its version, and a matcher that misses fails silently. The earlier `^apply_patch$` would
+// never have seen a write reported as `Write`. `statusMessage` is Codex-specific and shows there
+// what is currently running.
 function codexSettings(projectRoot: string): HookSettings {
-  const c = (script: string) => ({ type: "command" as const, _managedBy: "openwolf", command: cmd(projectRoot, script, { literal: true, exportVar: true }), timeout: 15 });
+  const c = (script: string, statusMessage: string, timeout = 15) => ({
+    type: "command" as const, _managedBy: "openwolf", statusMessage,
+    command: cmd(projectRoot, script, { literal: true, exportVar: true }), timeout,
+  });
+  const WRITE = "^(Edit|Write|MultiEdit|apply_patch)$";
+  const READ = "^(Read|read_file)$";
   return {
     hooks: {
-      SessionStart: [{ hooks: [c("session-start.js")] }],
-      PostToolUse: [
-        { matcher: "^apply_patch$", hooks: [c("post-write.js")] },
-        { matcher: "^Bash$", hooks: [c("post-bash.js")] },
+      // [2026-08-20, review] NO matcher here on purpose. `startup|resume|clear` omits `compact`,
+      // and session-start.ts has a dedicated branch for source === "compact" that re-injects the
+      // post-compaction digest — which this same change newly makes reachable by deploying
+      // PreCompact to Codex. Claude's entry matches every source too (matcher: "").
+      SessionStart: [{ hooks: [c("session-start.js", "OpenWolf session bootstrap")] }],
+      PreToolUse: [
+        { matcher: READ, hooks: [c("pre-read.js", "OpenWolf read precheck")] },
+        { matcher: WRITE, hooks: [c("pre-write.js", "OpenWolf write precheck")] },
       ],
-      Stop: [{ hooks: [c("stop.js")] }],
+      PostToolUse: [
+        { matcher: READ, hooks: [c("post-read.js", "OpenWolf read tracking")] },
+        { matcher: WRITE, hooks: [c("post-write.js", "OpenWolf anatomy update", 20)] },
+        { matcher: "^(Bash|shell|local_shell)$", hooks: [c("post-bash.js", "OpenWolf shell tracking")] },
+      ],
+      PreCompact: [{ hooks: [c("precompact.js", "OpenWolf compaction snapshot")] }],
+      Stop: [{ hooks: [c("stop.js", "OpenWolf session wrap-up", 20)] }],
     },
   };
+}
+
+// Codex only reads hooks when `hooks = true` sits under `[features]`. Without that switch a
+// perfectly fine-looking hooks.json is there and none of it fires — so we create the file when it
+// is missing and WARN otherwise, rather than editing someone else's config.toml.
+function ensureCodexFeatureFlag(codexDir: string): string | null {
+  const p = path.join(codexDir, "config.toml");
+  if (!fs.existsSync(p)) {
+    writeText(p, "[features]\nhooks = true\n");
+    return null;
+  }
+  const existing = fs.readFileSync(p, "utf-8");
+  // Anchored AND table-scoped. [2026-08-20, review] Anchoring alone still accepted `hooks = true`
+  // under any other table (e.g. `[experimental]`), where Codex ignores it — the warning would be
+  // swallowed while the hooks stayed dead. So: find [features] and look only until the next table.
+  const lines = existing.split(/\r?\n/);
+  let inFeatures = false;
+  for (const line of lines) {
+    const table = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (table) { inFeatures = table[1].trim() === "features"; continue; }
+    if (inFeatures && /^\s*hooks\s*=\s*true\s*$/.test(line)) return null;
+  }
+  return 'set "hooks = true" under [features] in .codex/config.toml — otherwise Codex ignores the hooks';
 }
 
 // ---- Gemini: PostToolUse = AfterTool, Stop = SessionEnd; tools write_file/replace/run_shell_command.
@@ -186,8 +234,15 @@ export function deployAgentHooks(projectRoot: string): AgentDeployResult[] {
   for (const agent of detectAgents(projectRoot)) {
     try {
       if (agent === "codex") {
-        deployJsonAgent(path.join(projectRoot, ".codex"), "hooks.json", codexSettings(projectRoot));
-        results.push({ agent, deployed: true, detail: ".codex/hooks.json (re-approve trust in Codex)" });
+        const codexDir = path.join(projectRoot, ".codex");
+        deployJsonAgent(codexDir, "hooks.json", codexSettings(projectRoot));
+        const warn = ensureCodexFeatureFlag(codexDir);
+        const ctx = upsertMarkerBlock(path.join(projectRoot, "AGENTS.md"), AGENTS_SNIPPET);
+        const bits = [".codex/hooks.json (re-approve trust in Codex)"];
+        if (ctx.changed) bits.push("AGENTS.md block");
+        if (ctx.refused) bits.push(`AGENTS.md skipped: ${ctx.refused}`);
+        if (warn) bits.push(`⚠ ${warn}`);
+        results.push({ agent, deployed: true, detail: bits.join(" · ") });
       } else if (agent === "gemini") {
         deployJsonAgent(path.join(projectRoot, ".gemini"), "settings.json", geminiSettings());
         results.push({ agent, deployed: true, detail: ".gemini/settings.json" });
@@ -195,7 +250,10 @@ export function deployAgentHooks(projectRoot: string): AgentDeployResult[] {
         const dir = path.join(projectRoot, ".opencode", "plugin");
         ensureDir(dir);
         writeText(path.join(dir, "openwolf.js"), opencodePlugin(projectRoot));
-        results.push({ agent, deployed: true, detail: ".opencode/plugin/openwolf.js (compaction-only inject)" });
+        // OpenCode reads AGENTS.md as its context file — without the block it never sees the protocol.
+        const ctx = upsertMarkerBlock(path.join(projectRoot, "AGENTS.md"), AGENTS_SNIPPET);
+        results.push({ agent, deployed: true, detail: ".opencode/plugin/openwolf.js (compaction-only inject)"
+          + (ctx.changed ? " · AGENTS.md block" : "") + (ctx.refused ? ` · AGENTS.md skipped: ${ctx.refused}` : "") });
       }
     } catch (e) {
       results.push({ agent, deployed: false, detail: `failed: ${(e as Error).message}` });
@@ -205,4 +263,4 @@ export function deployAgentHooks(projectRoot: string): AgentDeployResult[] {
 }
 
 // Exposed for tests.
-export const _internal = { claudeSettings, codexSettings, geminiSettings, opencodePlugin, mergeManagedHooks };
+export const _internal = { claudeSettings, codexSettings, geminiSettings, opencodePlugin, mergeManagedHooks, ensureCodexFeatureFlag };

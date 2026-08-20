@@ -434,8 +434,10 @@ test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-det
   assert.ok(claude.hooks.SessionStart[0].hooks[0].command.includes("$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"));
 
   const codex = _internal.codexSettings("/abs/proj");
-  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^apply_patch$"));
-  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^Bash$"));
+  // [2026-08-20] Frueher standen hier "^apply_patch$" und "^Bash$" — beide zu eng. Codex sendet
+  // je nach Version auch Claude-Toolnamen, und ein danebenliegender Matcher faellt STILL aus.
+  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^(Edit|Write|MultiEdit|apply_patch)$"));
+  assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^(Bash|shell|local_shell)$"));
   assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("OPENWOLF_PROJECT_DIR='/abs/proj'"), "codex path single-quoted");
   assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("'/abs/proj/.wolf/hooks/session-start.js'"));
   // command injection: a malicious project path is fully single-quoted → inert to the shell
