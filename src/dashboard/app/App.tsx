@@ -14,6 +14,7 @@ const CronStatus = lazy(() => import("./components/panels/CronStatus.js").then(m
 const CerebrumViewer = lazy(() => import("./components/panels/CerebrumViewer.js").then(m => ({ default: m.CerebrumViewer })));
 const MemoryViewer = lazy(() => import("./components/panels/MemoryViewer.js").then(m => ({ default: m.MemoryViewer })));
 const NativeMemory = lazy(() => import("./components/panels/NativeMemory.js").then(m => ({ default: m.NativeMemory })));
+const LinkGraph = lazy(() => import("./components/panels/LinkGraph.js").then(m => ({ default: m.LinkGraph })));
 const ActivityLog = lazy(() => import("./components/panels/ActivityLog.js").then(m => ({ default: m.ActivityLog })));
 const AnatomyBrowser = lazy(() => import("./components/panels/AnatomyBrowser.js").then(m => ({ default: m.AnatomyBrowser })));
 const BugLog = lazy(() => import("./components/panels/BugLog.js").then(m => ({ default: m.BugLog })));
@@ -106,6 +107,7 @@ export default function App() {
           {activePanel === "memory" && <MemoryViewer data={data} />}
           {activePanel === "commands" && <ActivityLog data={data} />}
           {activePanel === "native" && <NativeMemory data={data} />}
+          {activePanel === "links" && <LinkGraph />}
           {activePanel === "anatomy" && <AnatomyBrowser data={data} initialFile={params.get("file") || undefined} />}
           {activePanel === "bugs" && <BugLog data={data} />}
           {activePanel === "suggestions" && <AISuggestions data={data} onNavigate={navigate} />}

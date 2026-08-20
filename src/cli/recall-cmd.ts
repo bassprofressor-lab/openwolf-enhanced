@@ -66,9 +66,27 @@ export async function recallCommand(query: string[], opts: RecallCliOpts): Promi
       for (const t of searchTargets) {
         const entry = resolveId(t.wolfDir, opts.id);
         if (entry) {
-          if (opts.json) { process.stdout.write(JSON.stringify({ ...entry, project: t.name }, null, 2) + "\n"); return; }
+          // [2026-08-20] Citations used to be a one-way street: you could open an entry but not
+          // ask who leans on it. The graph answers that from the same files, so an id here is the
+          // id `recall` hands out — no second index.
+          const { buildLinkGraph, backlinksFor } = await import("../utils/link-graph.js");
+          let back: Array<{ src: string; line: number; title: string }> = [];
+          try {
+            const g = buildLinkGraph(t.wolfDir);
+            back = backlinksFor(g, entry.id).map((n) => ({ src: n.src, line: n.line, title: n.title }));
+          } catch { /* the entry itself is worth more than its backlinks */ }
+
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({ ...entry, project: t.name, backlinks: back }, null, 2) + "\n");
+            return;
+          }
           console.log(`[${entry.id}]  ${label(t, entry.file)}:${entry.line}\n`);
           console.log(entry.text);
+          if (back.length > 0) {
+            console.log(`\n  Referenced by (${back.length}):`);
+            for (const b of back.slice(0, 10)) console.log(`    ${b.src}:${b.line}  ${b.title}`);
+            if (back.length > 10) console.log(`    … and ${back.length - 10} more`);
+          }
           return;
         }
       }

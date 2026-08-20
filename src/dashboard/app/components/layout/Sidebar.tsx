@@ -12,6 +12,7 @@ const navItems = [
   { id: "memory", label: "Memory", icon: "▤" },
   { id: "commands", label: "Command Log", icon: "⌘" },
   { id: "native", label: "Native Memory", icon: "🧠" },
+  { id: "links", label: "Links", icon: "⇄" },
   { id: "anatomy", label: "Anatomy", icon: "⊞" },
   { id: "bugs", label: "Bug Log", icon: "⚑" },
   { id: "suggestions", label: "AI Insights", icon: "✦" },

@@ -10,6 +10,7 @@ import { Logger } from "../utils/logger.js";
 import { CronEngine } from "./cron-engine.js";
 import { startFileWatcher } from "./file-watcher.js";
 import { DesignQCEngine } from "../designqc/designqc-engine.js";
+import { buildLinkGraph } from "../utils/link-graph.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
 import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
@@ -199,6 +200,50 @@ app.get("/api/native-memory", (_req, res) => {
     res.json({ available: true, health: nativeMemoryHealth(nd), files: nativeMemoryFiles(nd) });
   } catch {
     res.json({ available: false });
+  }
+});
+
+// Link graph over the knowledge base — who points at whom.
+//
+// Deliberately reduced to the FILE level before it leaves the server. The full graph on this
+// project is ~16k nodes (one per block); shipping that to a browser and laying it out would be
+// slow and unreadable, and the block level answers a different question anyway. Files plus the
+// edges between them is the structure a human wants to look at.
+app.get("/api/link-graph", (_req, res) => {
+  try {
+    const graph = buildLinkGraph(path.join(projectRoot, ".wolf"));
+    const files = graph.nodes.filter((n) => n.kind === "file");
+    const keys = new Set(files.map((n) => n.key));
+    // An edge counts when it ENDS at a file; blocks are the usual source, so map each edge back
+    // to the file its source block lives in — otherwise almost every edge would look orphaned.
+    const fileOfBlock = new Map(graph.nodes.map((n) => [n.key, n.src]));
+    const srcToFile = new Map(files.map((n) => [n.src, n.key]));
+    const seen = new Set<string>();
+    const edges: Array<{ from: string; to: string }> = [];
+    for (const e of graph.edges) {
+      if (!keys.has(e.to)) continue;
+      const from = srcToFile.get(fileOfBlock.get(e.from) ?? "") ?? e.from;
+      if (from === e.to) continue;
+      const k = `${from}>${e.to}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      edges.push({ from, to: e.to });
+    }
+    const degree = new Map<string, { in: number; out: number }>();
+    for (const f of files) degree.set(f.key, { in: 0, out: 0 });
+    for (const e of edges) {
+      const a = degree.get(e.from); if (a) a.out++;
+      const b = degree.get(e.to); if (b) b.in++;
+    }
+    res.json({
+      available: true,
+      nodes: files.map((n) => ({ key: n.key, title: n.title, src: n.src, ...degree.get(n.key)! })),
+      edges,
+      dangling: graph.dangling.slice(0, 100),
+      stats: { blocks: graph.nodes.length - files.length, files: files.length, edgesTotal: graph.edges.length },
+    });
+  } catch (e) {
+    res.json({ available: false, error: (e as Error).message });
   }
 });
 
