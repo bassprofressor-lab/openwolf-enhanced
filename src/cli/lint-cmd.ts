@@ -28,7 +28,11 @@ export function printLint(report: LintReport, opts: { strict?: boolean } = {}): 
   if (report.compliance !== null) {
     const pct = Math.round(report.compliance * 1000) / 10;
     const checked = report.scores.reduce((s, r) => s + r.checked, 0);
-    console.log(`  Protocol compliance: ${pct}%  (${checked.toLocaleString("en-US")} checkable items)`);
+    const omitted = report.skippedChecks.length ? `, ${report.skippedChecks.join(" + ")} checks skipped` : "";
+    console.log(`  Protocol compliance: ${pct}%  (${checked.toLocaleString("en-US")} checkable items${omitted})`);
+    // A partial run scores higher simply by checking less. Naming the omission is what keeps the
+    // two numbers from being quoted interchangeably.
+    if (omitted) console.log("  Partial run — not comparable with a full one, which checks more items.");
     // Say plainly what the number is not, so it does not get quoted as something larger.
     console.log("  Mechanically checkable conventions only — not whether the right thing was learned.");
   } else {

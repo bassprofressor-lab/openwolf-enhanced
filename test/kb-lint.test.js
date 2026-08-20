@@ -285,3 +285,16 @@ test("REGRESSION: a bug id is a link target, so live bug references are not repo
   assert.deepEqual(g.dangling, [], "the reference resolves");
   assert.equal(g.edges.length, 1);
 });
+
+test("a partial run says what it left out — otherwise it just scores higher by checking less", async () => {
+  // [2026-08-20] Found by smoke-testing the published 1.23.0 against this project: `--skip-links`
+  // printed 95.3% where the full run printed 86.7%, because skipping the link checks also drops
+  // ~1,270 of 1,612 items. Two numbers from one command, neither labelled.
+  const { lintKnowledgeBase } = await import("../dist/src/utils/kb-lint.js");
+  const w = tmp();
+  fs.writeFileSync(path.join(w, "cerebrum.md"), CANONICAL);
+  const partial = lintKnowledgeBase(w, { skipLinks: true });
+  assert.deepEqual(partial.skippedChecks, ["link"]);
+  const full = lintKnowledgeBase(w, {});
+  assert.deepEqual(full.skippedChecks, [], "a complete run omits nothing and says nothing");
+});

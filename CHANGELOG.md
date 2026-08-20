@@ -6,6 +6,17 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.23.1] — 2026-08-20
+
+### Fixed
+
+- 📏 **The compliance number changed with the flags and did not say so.** Smoke-testing the
+  published 1.23.0 against a real knowledge base: `lint --skip-links` reported **95.3%** where the
+  full run reported **86.7%** — skipping the link checks also drops ~1,270 of the 1,612 items, so a
+  partial run scores higher purely by checking less. Same command, same corpus, two numbers, no
+  label. A partial run now names what it omitted and states that it is not comparable with a full
+  one. Exactly the failure this command was built to remove, shipped inside it.
+
 ## [1.23.0] — 2026-08-20
 
 Prompted by a side-by-side comparison against a hand-curated, cross-project agent knowledge tree.

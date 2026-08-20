@@ -64,6 +64,15 @@ export interface LintReport {
   scores: RuleScore[];
   /** Item-weighted share of checkable conventions that hold, or null when nothing was checkable. */
   compliance: number | null;
+  /**
+   * Checks that did not run, so the headline number can say what it left out.
+   *
+   * [2026-08-20] Found by smoke-testing the published 1.23.0: `--skip-links` reported 95.3% where
+   * the full run reported 86.7%, because dropping the link checks also drops ~1,270 of the 1,612
+   * items. Same command, same corpus, two numbers, and nothing said which was which — the exact
+   * failure this command exists to remove.
+   */
+  skippedChecks: string[];
   maturity: Maturity | null;
 }
 
@@ -343,6 +352,7 @@ export function lintKnowledgeBase(wolfDir: string, opts: LintOptions = {}): Lint
   return {
     findings,
     scores,
+    skippedChecks: opts.skipLinks ? ["link"] : [],
     compliance: checked > 0 ? conforming / checked : null,
     maturity: stampMaturity(wolfDir, ["cerebrum.md"], opts.stableDays ?? 30, opts.now),
   };
