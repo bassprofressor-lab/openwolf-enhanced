@@ -6,6 +6,27 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.23.2] — 2026-08-23
+
+### Fixed
+
+- 🪟 **`npm install -g openwolf-enhanced` failed on Windows — the first install path the README
+  names.** The `postinstall` script was `chmod +x dist/bin/openwolf.js 2>/dev/null || true`. npm
+  runs scripts through `cmd.exe` there (`script-shell` is unset), and `cmd` knows neither `chmod`
+  nor `/dev/null` nor `true`, so the line exited 1 and npm aborted the install. Measured on
+  Windows 11: `The system cannot find the path specified.` followed by `'true' is not recognized as
+  an internal or external command`. Both `postinstall` and `build` now call
+  `node -e "try{require('fs').chmodSync('dist/bin/openwolf.js',0o755)}catch{}"` instead — the same
+  0755 on Linux and macOS, a no-op where the mode does not apply, and the `catch` covers the run
+  before the first build, when the file does not exist yet. The one-liner stays inline on purpose:
+  `files` ships only `dist/`, `src/templates/` and the docs, so a helper under `scripts/` would be
+  absent from the published tarball and `postinstall` would break for exactly the npm installs this
+  fixes.
+
+  Why it went unnoticed: pnpm ships its own POSIX shell emulation. Under `pnpm install` the same
+  line fails visibly and pnpm still reports `Done` with exit 0 — the supported install path was
+  broken while the development path stayed green.
+
 ## [1.23.1] — 2026-08-20
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.23.1",
+  "version": "1.23.2",
   "description": "A second brain for Claude Code, Codex & Gemini — persistent git-native project memory with searchable citations, an MCP server for Claude Desktop, and invisible hook-based context. No database.",
   "type": "module",
   "bin": {
@@ -8,8 +8,8 @@
   },
   "scripts": {
     "prebuild": "node -e \"const fs=require('fs');if(fs.existsSync('dist'))fs.rmSync('dist',{recursive:true})\"",
-    "build": "tsc && pnpm build:hooks && pnpm build:dashboard && chmod +x dist/bin/openwolf.js",
-    "postinstall": "chmod +x dist/bin/openwolf.js 2>/dev/null || true",
+    "build": "tsc && pnpm build:hooks && pnpm build:dashboard && node -e \"try{require('fs').chmodSync('dist/bin/openwolf.js',0o755)}catch{}\"",
+    "postinstall": "node -e \"try{require('fs').chmodSync('dist/bin/openwolf.js',0o755)}catch{}\"",
     "build:hooks": "tsc -p tsconfig.hooks.json",
     "build:dashboard": "cd src/dashboard/app && npx vite build --outDir ../../../dist/dashboard",
     "build:mcpb": "node scripts/build-mcpb.mjs",
