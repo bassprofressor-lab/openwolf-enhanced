@@ -395,6 +395,22 @@ app.post("/api/cron/run/:taskId", (req, res) => {
   });
 });
 
+// Graceful stop over the authenticated API — the only cross-platform way in.
+//
+// Windows has no signal delivery: `process.kill(pid, "SIGTERM")` and `taskkill /F` both terminate
+// the process outright, so the SIGTERM/SIGINT handlers below never run there. Everything shutdown()
+// does — marking cron-state "stopped", telling dashboard clients why they are about to lose the
+// socket — was therefore Linux-only, and `openwolf daemon stop` left cron-state.json claiming
+// "running". Asking the daemon to stop ITSELF works the same on every platform.
+//
+// 202 goes out before the shutdown starts so the caller gets an answer rather than a dropped
+// connection; the CLI then waits for the port to actually free up.
+app.post("/api/shutdown", (_req, res) => {
+  logger.info("Shutdown requested over the API");
+  res.status(202).json({ status: "stopping" });
+  setTimeout(shutdown, 50);
+});
+
 // SPA fallback
 app.get("/{*path}", (_req, res) => {
   const indexPath = path.join(dashboardDir, "index.html");

@@ -66,7 +66,7 @@ export function createProgram(): Command {
     .description("Stop daemon")
     .action(async () => {
       const { daemonStop } = await import("./daemon-cmd.js");
-      daemonStop();
+      await daemonStop();
     });
 
   daemon
@@ -74,7 +74,7 @@ export function createProgram(): Command {
     .description("Restart daemon")
     .action(async () => {
       const { daemonRestart } = await import("./daemon-cmd.js");
-      daemonRestart();
+      await daemonRestart();
     });
 
   daemon

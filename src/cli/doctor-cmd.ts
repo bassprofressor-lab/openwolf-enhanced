@@ -1,7 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { execFileSync } from "node:child_process";
 import { findProjectRoot } from "../scanner/project-root.js";
+import { isWindows } from "../utils/platform.js";
+import { dashboardTokenPath } from "../utils/dashboard-auth.js";
+import { remoteTokenPath } from "../utils/remote.js";
 import { readRegistry, getRegistryPath } from "./registry.js";
 import {
   getRetention,
@@ -21,6 +25,60 @@ import {
   type CompactResult,
 } from "../utils/maintenance.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
+
+// Does this file carry permissions of its own, or does it just inherit the folder's?
+//
+// OpenWolf writes its tokens with mode 0600, which on NTFS is a no-op: Node has no ACL to map the
+// POSIX bits onto, so the file ends up with whatever the containing directory hands down. The check
+// has to be language-independent — icacls prints localized principal names (BUILTIN\Users,
+// VORDEFINIERT\Benutzer, …) but marks inherited entries with a literal (I) flag in every locale.
+// All-inherited means nothing file-specific was ever applied.
+// Returns null when the question can't be answered (icacls missing, output unparsable).
+function hasOnlyInheritedAcl(filePath: string): boolean | null {
+  let out: string;
+  try {
+    out = execFileSync("icacls", [filePath], { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] });
+  } catch {
+    return null;
+  }
+  const aces: string[] = [];
+  for (const raw of out.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) break; // the ACE block ends at the first blank line; a summary line follows it
+    // First line is "<path> PRINCIPAL:(flags)"; the rest are the bare ACE, indented.
+    const ace = line.startsWith(filePath) ? line.slice(filePath.length).trim() : line;
+    if (ace.includes(":(")) aces.push(ace);
+  }
+  if (!aces.length) return null;
+  return aces.every((a) => a.includes("(I)"));
+}
+
+// Windows-only section: name the tokens whose 0600 did nothing, and hand over the command that
+// actually restricts them. Silent on Linux/macOS, where the mode bits do what they say.
+function reportWindowsTokenAcls(wolfDir: string): void {
+  if (!isWindows()) return;
+  const tokens = [
+    { label: "dashboard-token", file: dashboardTokenPath(wolfDir), what: "the daemon API and WebSocket" },
+    { label: "remote-token", file: remoteTokenPath(wolfDir), what: "your linked remote workspace" },
+  ].filter((t) => fs.existsSync(t.file));
+  if (!tokens.length) return;
+
+  const lines: string[] = [];
+  for (const t of tokens) {
+    const inherited = hasOnlyInheritedAcl(t.file);
+    if (inherited === null) {
+      lines.push(`  · ${t.label}: permissions not readable (icacls unavailable) — check it by hand`);
+    } else if (inherited) {
+      lines.push(`  ⚠ ${t.label} inherits the folder's ACL. The 0600 OpenWolf sets is a no-op on NTFS,`);
+      lines.push(`    so every account that can read this project can read the key to ${t.what}.`);
+      lines.push(`    Restrict it:  icacls "${t.file}" /inheritance:r /grant:r "%USERNAME%":R`);
+    } else {
+      lines.push(`  ✓ ${t.label} has explicit (non-inherited) permissions`);
+    }
+  }
+  console.log("\nWindows file permissions:");
+  for (const l of lines) console.log(l);
+}
 
 interface DoctorOpts {
   dryRun?: boolean;
@@ -81,6 +139,8 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
       console.log(`\nRegistry health: ${projects.length} projects — unique ports, no dead entries ✓`);
     }
   } catch { /* registry not readable — skip */ }
+
+  reportWindowsTokenAcls(wolfDir);
 
   // --- Claude native Auto Memory health (read-only interop) ---
   try {

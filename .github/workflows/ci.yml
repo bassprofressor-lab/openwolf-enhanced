@@ -13,7 +13,21 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    # Windows is in the matrix because the tool is used there, not only on servers. It earned its
+    # place: 1.23.1 shipped a `postinstall` chmod that broke `npm install -g` on Windows outright,
+    # and a green ubuntu-only CI reported that as fine. Anything platform-shaped — path separators,
+    # signals, file permissions, shell built-ins in npm scripts — is invisible without this row.
+    # `shell: bash` (Git Bash, present on the Windows runners) keeps the steps below identical on
+    # both; it does NOT hide Windows behaviour, because npm/pnpm run package scripts through their
+    # own script-shell (cmd.exe on Windows) no matter which shell invoked them.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
