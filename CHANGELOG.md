@@ -6,6 +6,56 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.24.0] — 2026-08-28
+
+### Fixed
+
+- 🪟 **Every hook was dead on Windows without Git for Windows.** We deployed the Claude hooks as a
+  shell string, `node "$CLAUDE_PROJECT_DIR/.wolf/hooks/x.js"`. Claude Code picks the hook shell
+  itself — `bash` when Git Bash is present, **PowerShell otherwise** — and PowerShell reads the
+  POSIX `$CLAUDE_PROJECT_DIR` as an undefined variable (`$null`). The path collapsed to
+  `/.wolf/hooks/x.js`, node exited with `MODULE_NOT_FOUND`, and because hook failures are
+  non-blocking the session simply carried on: no resume digest, no read avoidance, no
+  do-not-repeat warning, nothing that looked wrong. PowerShell-only is a supported Windows
+  install, not an exotic setup. The hooks now use the **exec form**
+  (`{"command": "node", "args": ["${CLAUDE_PROJECT_DIR}/.wolf/hooks/x.js"]}`), where Claude Code
+  substitutes the placeholder per argument and spawns the process directly — no shell, on any
+  platform. Requires Claude Code ≥ 2.1.139. [bug-291]
+
+- 🪟 **`post-bash.js` never ran on that same setup.** Without Git Bash the shell tool is the
+  PowerShell tool, and it is named `PowerShell`, not `Bash`; there is no alias between the two, so
+  the `PostToolUse` matcher matched nothing and shell-made edits went uncounted. The matcher is now
+  `Bash|PowerShell`, and `isFileWritingCommand()` recognises the PowerShell writers
+  (`Set-Content`, `Add-Content`, `Out-File`, `Copy-Item`, `[IO.File]::WriteAllText`, …) plus
+  `> $null` as a throwaway target. [bug-292]
+
+- 🪟 **Codex and Gemini hook commands carried POSIX-only syntax.** Both were emitted as
+  `OPENWOLF_PROJECT_DIR='<dir>' node '<path>'`. `cmd.exe` treats the assignment as the name of a
+  program to run, PowerShell rejects it outright, and single quotes are not quote characters in
+  `cmd.exe` at all. The env prefix is gone: hooks now derive their project root from **their own
+  location on disk** (the deployed copies always live at `<project>/.wolf/hooks/`), so no shell
+  cooperation is needed. Gemini additionally stopped using `$GEMINI_PROJECT_DIR`, which expanded on
+  neither Windows shell, and now bakes in the absolute path the way Codex already did. Quoting is
+  chosen per platform: single quotes on POSIX (inert against injection), double quotes on Windows.
+
+### Added
+
+- ✅ **Windows CI.** `ci.yml` had only ever run on `ubuntu-latest`, which is why both this release's
+  bugs and `bug-271` before them shipped unnoticed. There is now a `windows-latest` job that
+  builds, tests, and installs the **packed tarball through npm** — the published path, not the
+  development one.
+- ✅ `scripts/check-hook-portability.mjs`, run on both CI platforms: asserts the Claude hooks are
+  exec form and anchored to `${CLAUDE_PROJECT_DIR}`, that the matcher covers the PowerShell tool,
+  and that no Codex/Gemini command contains a POSIX env prefix or a shell variable.
+
+### Changed
+
+- `openwolf doctor` now says something when Claude's native Auto Memory directory is **not** found
+  instead of printing nothing. The guess reproduces Claude Code's project slug, which has known
+  blind spots (every non-alphanumeric character becomes `-`, paths past 200 characters are
+  truncated and hashed, and `CLAUDE_CODE_PROJECT_DIR_NAME` overrides the name when
+  `CLAUDE_CONFIG_DIR` is set), and a silent miss looked exactly like "no memory yet".
+
 ## [1.23.2] — 2026-08-23
 
 ### Fixed

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 // Resolve Claude Code's native Auto Memory directory for a project, so OpenWolf can read/search
 // it instead of maintaining a competing store. Claude stores it at
@@ -35,10 +36,31 @@ export function nativeMemoryDir(projectRoot?: string): string | null {
 
 export function getWolfDir(): string {
   // Prefer an explicit project dir so hooks work even if CWD changes during a session.
-  // CLAUDE_PROJECT_DIR is set by Claude Code; OPENWOLF_PROJECT_DIR is what our own hook
-  // commands set for other agents (Codex/Gemini/OpenCode) that don't export that variable.
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.env.OPENWOLF_PROJECT_DIR || process.cwd();
-  return path.join(projectDir, ".wolf");
+  // CLAUDE_PROJECT_DIR is set by Claude Code; OPENWOLF_PROJECT_DIR is still honoured because the
+  // OpenCode plugin sets it in the child environment (it spawns us directly, no shell involved).
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.env.OPENWOLF_PROJECT_DIR;
+  if (projectDir) return path.join(projectDir, ".wolf");
+
+  // [2026-08-28] Fall back to THIS SCRIPT's own location before cwd. The deployed hooks are
+  // per-project copies living at <project>/.wolf/hooks/, so the directory two levels up is the
+  // .wolf/ we want — no environment variable and no shell cooperation needed.
+  //
+  // Why this exists: the Codex and Gemini hook commands used to carry a POSIX env prefix
+  // (`OPENWOLF_PROJECT_DIR='…' node '…'`) to pass the project root. cmd.exe would have tried to
+  // RUN that assignment as a program, so it had to go; this is what replaces it.
+  //
+  // Deliberately NOT used by nativeMemoryDir(): that one has to reproduce the slug Claude Code
+  // derives from ITS cwd, and a root resolved through a symlinked script path can differ from the
+  // cwd. A mismatch there loses the native memory silently, which is exactly the failure class we
+  // keep tripping over.
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    if (path.basename(here) === "hooks" && path.basename(path.dirname(here)) === ".wolf") {
+      return path.dirname(here);
+    }
+  } catch { /* no import.meta (bundled/CJS) — fall through to cwd */ }
+
+  return path.join(process.cwd(), ".wolf");
 }
 
 /**
@@ -1257,6 +1279,9 @@ export function isNotableCommand(cmd: string): boolean {
 // counting it would make every `foo > /tmp/out` look like an authored change.
 function isThrowawayTarget(target: string): boolean {
   const t = target.replace(/^['"]|['"]$/g, "");
+  // `> $null` is PowerShell's /dev/null, and PowerShell commands reach this hook since the
+  // PostToolUse matcher covers the PowerShell tool (see agent-hooks.ts).
+  if (t === "$null" || t.toLowerCase() === "$env:temp") return true;
   return t.startsWith("/dev/") || t.startsWith("/tmp/") || t.startsWith("/var/tmp/") || t === "/dev/null";
 }
 
@@ -1293,6 +1318,13 @@ export function isFileWritingCommand(cmd: string): boolean {
   // bulk edits usually get made when the shell is already open.
   if (/\b(?:writeFileSync|appendFileSync|write_text|writelines|json\.dump|shutil\.(?:copy|move|copyfile))\b/.test(c)) return true;
   if (/\bopen\s*\([^)]*,\s*['"][wax]/.test(c)) return true;
+
+  // PowerShell writers. [2026-08-28] Reachable since the PostToolUse matcher was widened to
+  // "Bash|PowerShell" — on Windows without Git for Windows that tool IS the shell, so without
+  // these every shell-made edit there would go uncounted exactly as it did on Bash before
+  // [bug-149]. Cmdlet names are case-insensitive in PowerShell, hence the /i.
+  if (/(?:^|[\s;|(])(?:Set-Content|Add-Content|Out-File|Tee-Object|Copy-Item|Move-Item|Rename-Item|New-Item|Export-Csv|Export-Clixml|Set-ItemProperty)\b/i.test(c)) return true;
+  if (/\[(?:System\.)?IO\.File\]::(?:Write|Append|Copy|Move|Create)/i.test(c)) return true;
 
   return false;
 }

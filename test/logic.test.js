@@ -430,27 +430,56 @@ import { deployAgentHooks, detectAgents, _internal } from "../dist/src/utils/age
 test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-detect + deploy", () => {
   const claude = _internal.claudeSettings();
   assert.equal(claude.hooks.SessionStart.length, 1);
-  assert.equal(claude.hooks.PostToolUse.length, 3); // Read, Write|Edit, Bash
-  assert.ok(claude.hooks.SessionStart[0].hooks[0].command.includes("$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"));
+  assert.equal(claude.hooks.PostToolUse.length, 3); // Read, Write|Edit, Bash|PowerShell
+  // Exec form: `command` is the bare executable, the path travels in `args` and is never parsed by
+  // a shell. Shell form died on Windows without Git Bash, where PowerShell reads $CLAUDE_PROJECT_DIR
+  // as $null and the path collapses to "/.wolf/hooks/…". [bug-291]
+  const ss0 = claude.hooks.SessionStart[0].hooks[0];
+  assert.equal(ss0.command, "node", "exec form: command is the executable alone");
+  assert.deepEqual(ss0.args, ["${CLAUDE_PROJECT_DIR}/.wolf/hooks/session-start.js"]);
+  assert.ok(!/\s/.test(ss0.command), "command must not carry arguments in exec form");
+  for (const entry of Object.values(claude.hooks).flat()) {
+    for (const h of entry.hooks) {
+      assert.equal(h.command, "node", "every Claude hook uses exec form");
+      assert.equal(h.args.length, 1);
+      assert.ok(h.args[0].startsWith("${CLAUDE_PROJECT_DIR}/.wolf/hooks/"));
+    }
+  }
+  // The Windows shell tool is called "PowerShell", not "Bash" — a matcher of "Bash" alone never
+  // fired there and post-bash.js was dead on that platform. [bug-292]
+  assert.ok(claude.hooks.PostToolUse.some((e) => e.matcher === "Bash|PowerShell"), "matcher covers the PowerShell tool");
 
   const codex = _internal.codexSettings("/abs/proj");
   // [2026-08-20] Frueher standen hier "^apply_patch$" und "^Bash$" — beide zu eng. Codex sendet
   // je nach Version auch Claude-Toolnamen, und ein danebenliegender Matcher faellt STILL aus.
   assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^(Edit|Write|MultiEdit|apply_patch)$"));
   assert.ok(codex.hooks.PostToolUse.some((e) => e.matcher === "^(Bash|shell|local_shell)$"));
-  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("OPENWOLF_PROJECT_DIR='/abs/proj'"), "codex path single-quoted");
-  assert.ok(codex.hooks.SessionStart[0].hooks[0].command.includes("'/abs/proj/.wolf/hooks/session-start.js'"));
-  // command injection: a malicious project path is fully single-quoted → inert to the shell
-  const evil = _internal.codexSettings(`/tmp/x";$(touch /tmp/pwned)`).hooks.SessionStart[0].hooks[0].command;
-  assert.ok(evil.startsWith(`OPENWOLF_PROJECT_DIR='/tmp/x";$(touch /tmp/pwned)'`), "payload wrapped in single quotes");
-  // an embedded single-quote is escaped with the POSIX '\'' idiom (no break-out)
-  const q = _internal.codexSettings(`/a'b`).hooks.SessionStart[0].hooks[0].command;
-  assert.ok(q.includes(`'/a'\\''b'`), "embedded single-quote escaped");
+  // No OPENWOLF_PROJECT_DIR prefix any more: that is POSIX-only syntax and cmd.exe would have
+  // tried to RUN the assignment. The hooks derive their root from their own location instead.
+  const codexCmd = codex.hooks.SessionStart[0].hooks[0].command;
+  assert.ok(!codexCmd.includes("OPENWOLF_PROJECT_DIR="), "no POSIX env prefix (breaks cmd.exe/PowerShell)");
+  assert.ok(codexCmd.includes("/abs/proj/.wolf/hooks/session-start.js"));
+  if (process.platform !== "win32") {
+    // command injection: a malicious project path is fully single-quoted → inert to the shell
+    assert.ok(codexCmd.startsWith("node '/abs/proj/"), "POSIX: single-quoted");
+    const evil = _internal.codexSettings(`/tmp/x";$(touch /tmp/pwned)`).hooks.SessionStart[0].hooks[0].command;
+    assert.ok(evil.startsWith(`node '/tmp/x";$(touch /tmp/pwned)/`), "payload wrapped in single quotes");
+    // an embedded single-quote is escaped with the POSIX '\'' idiom (no break-out)
+    const q = _internal.codexSettings(`/a'b`).hooks.SessionStart[0].hooks[0].command;
+    assert.ok(q.includes(`'/a'\\''b/`), "embedded single-quote escaped");
+  } else {
+    // cmd.exe does not treat ' as a quote character at all — it would land in the filename.
+    assert.ok(codexCmd.startsWith('node "'), "Windows: double-quoted");
+    assert.ok(!codexCmd.includes("node '"), "no POSIX quoting on Windows");
+  }
 
-  const gem = _internal.geminiSettings();
+  const gem = _internal.geminiSettings("/abs/proj");
   assert.ok(gem.hooks.AfterTool.some((e) => e.matcher === "run_shell_command"));
   assert.ok(gem.hooks.SessionEnd, "Stop maps to SessionEnd");
-  assert.ok(gem.hooks.SessionStart[0].hooks[0].command.includes("$GEMINI_PROJECT_DIR"));
+  // Absolute path, not "$GEMINI_PROJECT_DIR": that shell expression expands in neither cmd.exe nor
+  // PowerShell, so node was handed a literal "$GEMINI_PROJECT_DIR/..." on Windows.
+  assert.ok(!gem.hooks.SessionStart[0].hooks[0].command.includes("$GEMINI_PROJECT_DIR"));
+  assert.ok(gem.hooks.SessionStart[0].hooks[0].command.includes("/abs/proj/.wolf/hooks/session-start.js"));
 
   const plugin = _internal.opencodePlugin("/abs/proj");
   assert.ok(plugin.includes("tool.execute.after") && plugin.includes("experimental.session.compacting"));
@@ -461,7 +490,7 @@ test("agent-hooks: per-agent config shapes, merge preserves user hooks, auto-det
   const existing = { hooks: { SessionStart: [
     { hooks: [{ type: "command", command: "echo user-hook" }] },
     { hooks: [{ type: "command", command: 'node "$X/.wolf/hooks/my-own.js"' }] }, // user's own — must survive
-    { hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"' }] },
+    { hooks: [{ type: "command", _managedBy: "openwolf", command: 'node "$CLAUDE_PROJECT_DIR/.wolf/hooks/session-start.js"' }] }, // old shell form — must be replaced, not kept
   ] } };
   const merged = _internal.mergeManagedHooks(existing, _internal.claudeSettings());
   const ss = merged.hooks.SessionStart;

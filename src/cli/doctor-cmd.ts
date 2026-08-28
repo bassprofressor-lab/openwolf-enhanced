@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readRegistry, getRegistryPath } from "./registry.js";
 import {
@@ -119,6 +120,22 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
       } else if (h.orphanCount && !opts.fixIndex) {
         console.log(`  · run \`openwolf doctor --fix-index\` to append the recent ones to MEMORY.md`);
       }
+    } else {
+      // [2026-08-28] A miss used to print NOTHING, which is the worst of both worlds: recall keeps
+      // working (it just never sees the native store) and nobody learns that half the memory is
+      // missing. nativeMemoryDir() guesses Claude Code's project slug, and the guess has known
+      // blind spots: Claude sanitizes EVERY non-alphanumeric character to "-" (so the plain
+      // slash→dash guess is POSIX-only), truncates past 200 characters and appends a hash, and
+      // honours CLAUDE_CODE_PROJECT_DIR_NAME when CLAUDE_CONFIG_DIR is set. Say so, and name the
+      // override rather than leaving the user to guess.
+      const base = path.join(os.homedir(), ".claude", "projects");
+      const known = fs.existsSync(base);
+      console.log("\nClaude native memory (~/.claude/…/memory):");
+      console.log(known
+        ? `  · not found for this project — Auto Memory may be off, or the project-slug guess missed`
+        : `  · ${base} does not exist — Claude Code Auto Memory has not run here`);
+      if (known)
+        console.log(`  · if it exists under a different name, point at it: OPENWOLF_NATIVE_MEMORY_DIR=<path>`);
     }
   } catch { /* native memory unreadable — skip */ }
 

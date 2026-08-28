@@ -28,6 +28,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      - run: node scripts/check-hook-portability.mjs
 
       # Pack the exact tarball npm would publish (no prepublishOnly on pack).
       - run: npm pack
@@ -43,3 +44,40 @@ jobs:
           npm install -g ./openwolf-enhanced-*.tgz
           openwolf --version
           openwolf --help >/dev/null
+
+  # Windows is not a second-class target: the hooks we write into .claude/settings.json and the
+  # lifecycle scripts npm runs both behave DIFFERENTLY there, and both have already shipped broken
+  # once — bug-271 (POSIX syntax in postinstall killed `npm install -g`) and bug-291 (POSIX
+  # `$CLAUDE_PROJECT_DIR` in hook commands killed every hook under PowerShell). Neither was caught,
+  # because CI only ever ran on Linux. This job exists so the next one is caught before release.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: node scripts/check-hook-portability.mjs
+
+      # The PUBLISHED install path, not the development one. pnpm brings its own shell emulation
+      # and reported success over a script that had visibly failed (bug-271), so the check has to
+      # go through npm and through the packed tarball.
+      - name: Pack and install the way a user installs it
+        shell: pwsh
+        run: |
+          npm pack
+          $tgz = (Get-ChildItem -Filter 'openwolf-enhanced-*.tgz' | Select-Object -First 1).FullName
+          if (-not $tgz) { throw 'npm pack produced no tarball' }
+          npm install -g $tgz
+          if ($LASTEXITCODE -ne 0) { throw "npm install -g failed with $LASTEXITCODE" }
+          openwolf --version
+          openwolf --help > $null

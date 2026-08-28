@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { readJSON, writeJSON, writeText } from "./fs-safe.js";
 import { ensureDir } from "./paths.js";
 import { upsertMarkerBlock, AGENTS_SNIPPET } from "./marker-block.js";
+import { isWindows } from "./platform.js";
 
 // Deploys OpenWolf's hook scripts into whichever AI-coding CLIs a project uses. Claude Code is
 // always targeted; Codex CLI, Gemini CLI, and OpenCode are auto-detected (their config dir exists)
@@ -16,7 +17,7 @@ import { upsertMarkerBlock, AGENTS_SNIPPET } from "./marker-block.js";
 export type AgentId = "claude" | "codex" | "gemini" | "opencode";
 export const NON_CLAUDE_AGENTS: AgentId[] = ["codex", "gemini", "opencode"];
 
-interface JsonHookEntry { matcher?: string; hooks: Array<{ type: "command"; command: string; timeout: number; _managedBy?: string; name?: string }>; }
+interface JsonHookEntry { matcher?: string; hooks: Array<{ type: "command"; command: string; args?: string[]; timeout: number; _managedBy?: string; name?: string }>; }
 type HookSettings = { hooks: Record<string, JsonHookEntry[]> };
 
 // A hook script referenced agent-neutrally. `matchers` maps an agent to the tool-name pattern it
@@ -33,36 +34,60 @@ const HOOKS: HookDef[] = [
   { script: "pre-write.js", claudeEvent: "PreToolUse", matcher: "Write|Edit|MultiEdit" },
   { script: "post-read.js", claudeEvent: "PostToolUse", matcher: "Read" },
   { script: "post-write.js", claudeEvent: "PostToolUse", matcher: "Write|Edit|MultiEdit" },
-  { script: "post-bash.js", claudeEvent: "PostToolUse", matcher: "Bash" },
+  // [2026-08-28] "Bash|PowerShell", not "Bash". On Windows WITHOUT Git for Windows, Claude Code
+  // ships the PowerShell tool instead, and it is named "PowerShell" (binary constants:
+  // `var Xe="Bash";var $t="PowerShell"`). There is no built-in alias between the two, so a matcher
+  // of "Bash" alone meant post-bash.js never ran on that platform. The docs recommend this exact
+  // pair. Both names are letters-only, so the matcher works whether it is read as a regex
+  // alternation or split on "|" into an exact name list.
+  { script: "post-bash.js", claudeEvent: "PostToolUse", matcher: "Bash|PowerShell" },
   { script: "stop.js", claudeEvent: "Stop", matcher: "" },
   { script: "precompact.js", claudeEvent: "PreCompact", matcher: "" },
 ];
 
-// POSIX single-quote a literal so shell metacharacters in a project path (spaces, ", $, `, ;, …)
-// can't break out of / inject into the generated command. Env-var expressions ($X) must stay in
-// double quotes instead so the shell still expands them.
-function shSingleQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+// Quote a literal path for the shell that will run it. Which shell that is depends on the platform
+// we DEPLOY on, which is the same machine the agent runs on.
+//
+// POSIX: single quotes, because they are inert — a project path containing a space, `"`, `$`,
+// a backtick or `;` cannot break out of them or inject into the command.
+// Windows: single quotes are not quote characters in cmd.exe at all, so they would be passed
+// through to node as part of the filename. Double quotes are the one form cmd.exe and PowerShell
+// both understand. Residual gap, deliberately not papered over: inside double quotes PowerShell
+// still expands `$`, and there is no single string that satisfies cmd.exe and PowerShell for a
+// path containing `$` or a backtick. Such paths are vanishingly rare on Windows, and the failure
+// is loud (node cannot find the file) rather than silent.
+function shQuote(p: string): string {
+  return isWindows() ? `"${p.replace(/"/g, '""')}"` : `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-// Build the hook command. `literal` = projectDir is a real path (single-quote-escaped, security);
-// otherwise it's a shell variable expression kept in double quotes for expansion. Non-Claude agents
-// also export OPENWOLF_PROJECT_DIR so getWolfDir() resolves the right .wolf/ regardless of cwd.
-function cmd(projectDir: string, script: string, opts: { literal?: boolean; exportVar?: boolean } = {}): string {
-  const dir = opts.literal ? shSingleQuote(projectDir) : `"${projectDir}"`;
-  const scriptArg = opts.literal ? shSingleQuote(`${projectDir}/.wolf/hooks/${script}`) : `"${projectDir}/.wolf/hooks/${script}"`;
-  const node = `node ${scriptArg}`;
-  return opts.exportVar ? `OPENWOLF_PROJECT_DIR=${dir} ${node}` : node;
+// Build a hook command for the agents that still take a shell STRING (Codex, Gemini). Claude gets
+// the exec form instead — see claudeSettings().
+//
+// [2026-08-28] This used to prefix `OPENWOLF_PROJECT_DIR='<dir>' ` so getWolfDir() found the right
+// .wolf/ regardless of cwd. That is POSIX-only syntax: cmd.exe tries to RUN a program called
+// `OPENWOLF_PROJECT_DIR=<dir>` and PowerShell rejects it outright, so every hook died on Windows.
+// The prefix is gone. The hooks now derive their project root from their own location on disk
+// (getWolfDir() in hooks/shared.ts), which needs no shell cooperation at all.
+function cmd(projectRoot: string, script: string): string {
+  return `node ${shQuote(`${projectRoot}/.wolf/hooks/${script}`)}`;
 }
 
-// ---- Claude: exactly the historical settings (7 hooks, $CLAUDE_PROJECT_DIR) ----
+// ---- Claude: all 8 hooks, exec form with ${CLAUDE_PROJECT_DIR} ----
 function claudeSettings(): HookSettings {
   const hooks: Record<string, JsonHookEntry[]> = { SessionStart: [], PreToolUse: [], PostToolUse: [], Stop: [], PreCompact: [] };
   for (const h of HOOKS) {
     const timeout = h.script === "post-write.js" || h.script === "stop.js" ? 10 : 5;
     hooks[h.claudeEvent].push({
       ...(h.matcher !== undefined ? { matcher: h.matcher } : {}),
-      hooks: [{ type: "command", _managedBy: "openwolf", command: cmd("$CLAUDE_PROJECT_DIR", h.script), timeout }],
+      // Exec form, not shell form. `command` is resolved as an executable and spawned directly
+      // with `args`; Claude Code substitutes ${CLAUDE_PROJECT_DIR} per element, so nothing is ever
+      // handed to a shell parser. This is what makes the hooks work on Windows: shell form would
+      // run under PowerShell whenever Git for Windows is absent, and PowerShell reads the POSIX
+      // `$CLAUDE_PROJECT_DIR` as an undefined variable ($null) — the path collapsed to
+      // "/.wolf/hooks/x.js" and every hook failed. `node` + script path is the pattern the docs
+      // name as portable, because node.exe is a real binary (.cmd/.bat shims cannot be spawned
+      // this way). Available since Claude Code 2.1.139.
+      hooks: [{ type: "command", _managedBy: "openwolf", command: "node", args: [`\${CLAUDE_PROJECT_DIR}/.wolf/hooks/${h.script}`], timeout }],
     });
   }
   return { hooks };
@@ -83,7 +108,7 @@ function claudeSettings(): HookSettings {
 function codexSettings(projectRoot: string): HookSettings {
   const c = (script: string, statusMessage: string, timeout = 15) => ({
     type: "command" as const, _managedBy: "openwolf", statusMessage,
-    command: cmd(projectRoot, script, { literal: true, exportVar: true }), timeout,
+    command: cmd(projectRoot, script), timeout,
   });
   const WRITE = "^(Edit|Write|MultiEdit|apply_patch)$";
   const READ = "^(Read|read_file)$";
@@ -133,10 +158,15 @@ function ensureCodexFeatureFlag(codexDir: string): string | null {
 }
 
 // ---- Gemini: PostToolUse = AfterTool, Stop = SessionEnd; tools write_file/replace/run_shell_command.
-// $GEMINI_PROJECT_DIR is documented. Timeouts are milliseconds here. ----
-function geminiSettings(): HookSettings {
-  const P = "$GEMINI_PROJECT_DIR";
-  const g = (name: string, script: string) => ({ type: "command" as const, name, _managedBy: "openwolf", command: cmd(P, script, { exportVar: true }), timeout: 15000 });
+// Timeouts are milliseconds here. ----
+//
+// [2026-08-28] The script path used to be written as "$GEMINI_PROJECT_DIR/.wolf/hooks/x.js". That
+// is a POSIX shell expression, and neither cmd.exe nor PowerShell expands it — on Windows node was
+// handed a path starting with a literal "$GEMINI_PROJECT_DIR" and found nothing. Baked in as an
+// absolute path now, the same way Codex already did it: stable per machine, rewritten on every
+// `openwolf update`.
+function geminiSettings(projectRoot: string): HookSettings {
+  const g = (name: string, script: string) => ({ type: "command" as const, name, _managedBy: "openwolf", command: cmd(projectRoot, script), timeout: 15000 });
   return {
     hooks: {
       SessionStart: [{ hooks: [g("openwolf-session-start", "session-start.js")] }],
@@ -244,7 +274,7 @@ export function deployAgentHooks(projectRoot: string): AgentDeployResult[] {
         if (warn) bits.push(`⚠ ${warn}`);
         results.push({ agent, deployed: true, detail: bits.join(" · ") });
       } else if (agent === "gemini") {
-        deployJsonAgent(path.join(projectRoot, ".gemini"), "settings.json", geminiSettings());
+        deployJsonAgent(path.join(projectRoot, ".gemini"), "settings.json", geminiSettings(projectRoot));
         results.push({ agent, deployed: true, detail: ".gemini/settings.json" });
       } else if (agent === "opencode") {
         const dir = path.join(projectRoot, ".opencode", "plugin");
