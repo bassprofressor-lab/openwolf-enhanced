@@ -13,21 +13,12 @@ on:
 
 jobs:
   build-test:
-    # Windows is in the matrix because the tool is used there, not only on servers. It earned its
-    # place: 1.23.1 shipped a `postinstall` chmod that broke `npm install -g` on Windows outright,
-    # and a green ubuntu-only CI reported that as fine. Anything platform-shaped — path separators,
-    # signals, file permissions, shell built-ins in npm scripts — is invisible without this row.
-    # `shell: bash` (Git Bash, present on the Windows runners) keeps the steps below identical on
-    # both; it does NOT hide Windows behaviour, because npm/pnpm run package scripts through their
-    # own script-shell (cmd.exe on Windows) no matter which shell invoked them.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
+    # Linux only on purpose. Windows is covered by the `windows:` job below, which exercises the
+    # *published* install path (npm pack + npm install -g through pwsh) rather than this one — that
+    # is the path that shipped broken twice, and running both would only duplicate it. Keep any
+    # platform-shaped change (path separators, signals, file permissions, shell built-ins in npm
+    # scripts) covered there, not here.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -93,5 +84,22 @@ jobs:
           if (-not $tgz) { throw 'npm pack produced no tarball' }
           npm install -g $tgz
           if ($LASTEXITCODE -ne 0) { throw "npm install -g failed with $LASTEXITCODE" }
+          openwolf --version
+          openwolf --help > $null
+
+      # Same Node 20 guard the Linux job runs, on Windows too: engines.node says >=20, and a
+      # Node 22-only runtime API would strand Windows users on 20 exactly as it would Linux ones.
+      # The reinstall is deliberate — setup-node swaps the global prefix, so the install above is
+      # no longer on PATH here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Runtime smoke on Node 20
+        shell: pwsh
+        run: |
+          $tgz = (Get-ChildItem -Filter 'openwolf-enhanced-*.tgz' | Select-Object -First 1).FullName
+          npm install -g $tgz
+          if ($LASTEXITCODE -ne 0) { throw "npm install -g failed on Node 20 with $LASTEXITCODE" }
           openwolf --version
           openwolf --help > $null
