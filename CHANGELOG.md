@@ -6,6 +6,64 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.25.0] — 2026-08-29
+
+Everything here was found by running the tool on a German Windows 11 machine, not by reading the
+code. Two of the three had been sitting in a shipped release for months, and neither produced an
+error message.
+
+### Fixed
+
+- 🪟 **`daemon stop` could not find the daemon on a non-English Windows.** `findPidOnPort()` looked
+  for the *word* `LISTENING` in netstat's output. Windows localizes that column — a German machine
+  prints `ABHÖREN`, a French one `ÉCOUTE` — and netstat writes the OEM codepage on top of it, which
+  Node decodes as UTF-8, so the word arrives mangled even in its own language. The daemon was never
+  found: `openwolf daemon stop` reported *"No daemon running"* while one was plainly listening, and
+  nothing was ever cleaned up. Matching the port anywhere in the line would have been worse — that
+  also hits `TIME_WAIT` rows, whose last column is a **foreign PID**, one `taskkill` away from
+  ending somebody else's process. The parse now keys off the *shape* of the row
+  (`TCP <local> <remote> <state> <pid>`, a listener being the row whose **remote** address is the
+  wildcard `:0`) and never off words in it. [bug-293]
+
+- 🪟 **A stopped daemon kept reporting itself as running.** What writes `engine_status: "stopped"`
+  is the daemon's own `SIGTERM`/`SIGINT` handler. Windows has no signal delivery — both
+  `process.kill(pid, "SIGTERM")` and `taskkill /F` terminate the process outright — so on Windows
+  that handler never ran, for *every* stop. `cron-state.json` kept claiming `"running"`, and both
+  `openwolf status` and the dashboard showed a daemon that was gone. Fixed from both ends: the CLI
+  now asks the daemon to stop **itself** through the new authenticated endpoint and waits for the
+  port to actually free up, and whoever hard-kills it writes the truth afterwards
+  (`markDaemonStopped()`, idempotent). pm2 keeps going first — a self-initiated exit reads as a
+  crash to pm2 and its autorestart brings the daemon straight back. [bug-294]
+
+### Added
+
+- 🔒 **`openwolf doctor` now reports token files whose `0600` did nothing.** OpenWolf writes
+  `dashboard-token` and `remote-token` with mode `0600`; on NTFS that is a no-op, because Node has
+  no ACL to map the POSIX bits onto and the file simply inherits the folder's permissions. Every
+  account that can read the project could read the key to the daemon API. It is *reported*, not
+  silently rewritten — rewriting an ACL behind the user's back is too blunt — and the check is
+  language-independent: it keys off the literal `(I)` inherited flag that `icacls` prints in every
+  locale, not off localized principal names (`BUILTIN\Users` vs `VORDEFINIERT\Benutzer`). Silent
+  on Linux and macOS, where the mode bits do what they say. [bug-295]
+
+- ✅ **`POST /api/shutdown`** — a graceful stop over the authenticated dashboard API. It sits behind
+  the same `dashboard-token` gate as every other `/api/*` route, answers `202` before the shutdown
+  starts so the caller gets a reply rather than a dropped connection, and is the only cross-platform
+  way to reach the daemon's own shutdown path.
+
+- ✅ **`test/netstat-parse.test.js`** — six regression tests on the exported, pure
+  `parseNetstatListenerPid()`. The fixtures are real bytes captured on Windows 11 Pro de-DE,
+  mojibake included; the `?` in `ABH?REN` is the bug, not a typo, and must not be "fixed". A parse
+  that can only be exercised through a live socket on a localized Windows is a parse nobody tests.
+
+### Changed
+
+- Windows runs **once** in CI now, not twice. The rebase had left a `windows-latest` matrix row next
+  to the dedicated `windows:` job; they looked interchangeable but were not — the matrix row was the
+  only one re-installing the packed tarball on **Node 20**. That guard moved into the `windows:`
+  job rather than disappearing with the row, so `engines.node >= 20` stays a promise that is checked
+  on both platforms.
+
 ## [1.24.0] — 2026-08-28
 
 ### Fixed
