@@ -6,6 +6,46 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.26.0] — 2026-08-29
+
+### Added
+
+- ✅ **`openwolf unregister` — projects can leave the registry the way they came in.** `openwolf
+  init` wrote a project into `~/.openwolf/registry.json` and nothing ever took it out again. A
+  throwaway project under `%TEMP%` stayed on the list for good, and `openwolf update` kept walking
+  to a path that no longer existed. `unregisterProject()` had been sitting in `registry.ts` since
+  the registry was introduced — exported, and called by nobody.
+
+  ```bash
+  openwolf unregister                  # the project you are standing in
+  openwolf unregister /path/to/project
+  openwolf unregister --prune          # every entry whose .wolf/ is gone
+  openwolf unregister --dry-run        # works with both
+  ```
+
+  It edits the registry and **nothing else** — the project's `.wolf/` stays exactly where it is,
+  and the command says so; a command that quietly took the knowledge base with it would be a nasty
+  surprise. `--prune` is not automatic on purpose: a root can be missing because a network share or
+  an external drive is not mounted right now, and pruning that would silently unregister a live
+  project.
+
+### Fixed
+
+- 🐧 **A path comparison folded case on every platform, so `unregister` could have removed a
+  project nobody named.** `normalizePath()` lowercased both sides before comparing. That is right
+  on NTFS, where `C:\Proj` and `c:\proj` really are one directory, and wrong everywhere else: on
+  Linux `openwolf unregister /srv/App` would have deleted the entry for `/srv/app`. The same
+  comparison decides whether `registerProject()` **updates** an entry or adds one, so the bug could
+  also overwrite a neighbouring project's record. Folding is now Windows-only, and paths are
+  resolved before comparison, so a relative argument, a trailing separator or a `..` segment still
+  names the same project. Reverting that one line turns two of the nine new tests red. [bug-296]
+
+### Changed
+
+- `openwolf doctor` now names the command for a dead registry entry
+  (`openwolf unregister "<root>"`, or `--prune` when there is more than one) instead of telling you
+  to edit `registry.json` by hand.
+
 ## [1.25.0] — 2026-08-29
 
 Everything here was found by running the tool on a German Windows 11 machine, not by reading the
