@@ -6,7 +6,7 @@ import { findProjectRoot } from "../scanner/project-root.js";
 import { isWindows } from "../utils/platform.js";
 import { dashboardTokenPath } from "../utils/dashboard-auth.js";
 import { remoteTokenPath } from "../utils/remote.js";
-import { readRegistry, getRegistryPath } from "./registry.js";
+import { readRegistry } from "./registry.js";
 import {
   getRetention,
   footprint,
@@ -130,7 +130,10 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
     if (dead.length || collisions.length) {
       console.log("\nRegistry health:");
       for (const d of dead) {
-        console.log(`  ⚠ dead entry: ${d.name} → ${d.root} (path gone). Remove it from ${getRegistryPath()}.`);
+        console.log(`  ⚠ dead entry: ${d.name} → ${d.root} (path gone). Remove it: openwolf unregister "${d.root}"`);
+      }
+      if (dead.length > 1) {
+        console.log(`    (or clear all ${dead.length} at once: openwolf unregister --prune)`);
       }
       for (const [port, names] of collisions) {
         console.log(`  ⚠ port ${port} shared by ${names.join(", ")} — their daemons will collide. Give each a unique dashboard.port in .wolf/config.json.`);

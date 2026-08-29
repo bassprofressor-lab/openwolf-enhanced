@@ -255,6 +255,43 @@ openwolf update --list
 
 ---
 
+## `openwolf unregister`
+
+Take a project out of the central registry at `~/.openwolf/registry.json`. `openwolf init` puts
+projects in; this is how they come back out.
+
+```bash
+openwolf unregister            # the project you are standing in
+openwolf unregister /path/to/project
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--prune` | Remove every registered project whose `.wolf/` is gone, instead of one path |
+| `--dry-run` | Show what would be removed without changing the registry |
+
+This edits the registry and nothing else — **the project's `.wolf/` directory is left exactly where
+it is.** Unregistering only means `openwolf update` will stop visiting it. Delete `.wolf/` by hand
+if you want the project's knowledge base gone too.
+
+`--prune` is not automatic, and deliberately so: a project root can be missing because a network
+share or an external drive is not mounted right now, and pruning that would quietly unregister a
+live project. Preview it first.
+
+```bash
+# What would go?
+openwolf unregister --prune --dry-run
+
+# Clear out throwaway projects that no longer exist
+openwolf unregister --prune
+```
+
+`openwolf doctor` reports dead registry entries and names the command to remove them.
+
+---
+
 ## `openwolf restore`
 
 Restore `.wolf/` from a backup created by `openwolf update`. Run this from the project directory.

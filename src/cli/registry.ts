@@ -5,6 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { isWindows } from "../utils/platform.js";
 
 export interface RegisteredProject {
   root: string;
@@ -51,10 +52,10 @@ export function writeRegistry(registry: Registry): void {
  */
 export function registerProject(projectRoot: string, name: string, version: string): void {
   const registry = readRegistry();
-  const normalized = normalizePath(projectRoot);
+  const normalized = normalizeProjectPath(projectRoot);
   const now = new Date().toISOString();
 
-  const existing = registry.projects.find(p => normalizePath(p.root) === normalized);
+  const existing = registry.projects.find(p => normalizeProjectPath(p.root) === normalized);
   if (existing) {
     existing.name = name;
     existing.last_updated = now;
@@ -73,13 +74,40 @@ export function registerProject(projectRoot: string, name: string, version: stri
 }
 
 /**
- * Remove a project from the registry (e.g., if the directory no longer exists).
+ * Remove a project from the registry. Returns the entries that were removed, so the caller can
+ * name them — an unregister that prints nothing is indistinguishable from one that missed.
+ *
+ * Nothing is written when nothing matched: a typo'd path must not create a registry file, nor
+ * rewrite an existing one for no reason.
+ *
+ * This touches the registry ONLY. The project's .wolf/ directory stays exactly where it is.
  */
-export function unregisterProject(projectRoot: string): void {
+export function unregisterProject(projectRoot: string): RegisteredProject[] {
   const registry = readRegistry();
-  const normalized = normalizePath(projectRoot);
-  registry.projects = registry.projects.filter(p => normalizePath(p.root) !== normalized);
+  const target = normalizeProjectPath(projectRoot);
+  const removed = registry.projects.filter(p => normalizeProjectPath(p.root) === target);
+  if (removed.length === 0) return [];
+  registry.projects = registry.projects.filter(p => normalizeProjectPath(p.root) !== target);
   writeRegistry(registry);
+  return removed;
+}
+
+/**
+ * Drop every entry whose project no longer has a .wolf/ — the same view `openwolf update` takes,
+ * so this removes exactly the entries update would otherwise keep failing on.
+ *
+ * Deliberately NOT automatic: a root can be missing because a network share or external drive
+ * is not mounted right now, and pruning that would quietly unregister a live project. The caller
+ * asks for this explicitly.
+ */
+export function pruneMissingProjects(): RegisteredProject[] {
+  const registry = readRegistry();
+  const isPresent = (p: RegisteredProject): boolean => fs.existsSync(path.join(p.root, ".wolf"));
+  const gone = registry.projects.filter(p => !isPresent(p));
+  if (gone.length === 0) return [];
+  registry.projects = registry.projects.filter(isPresent);
+  writeRegistry(registry);
+  return gone;
 }
 
 /**
@@ -110,6 +138,20 @@ export function getRegisteredProjects(validateExists: boolean = false): Register
   return valid;
 }
 
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, "/").toLowerCase();
+/**
+ * Canonical form for deciding whether two paths mean the same project.
+ *
+ * Case-folding is Windows-only on purpose. NTFS treats `C:\\Proj` and `c:\\proj` as one directory,
+ * so folding is the only way to recognise the same project there. On Linux they are two DIFFERENT
+ * directories, and folding meant `unregister /srv/App` also matched the entry for `/srv/app` — a
+ * removal of something the user never named. The same comparison decides whether `registerProject`
+ * updates an entry or adds one, so the bug could also overwrite a neighbouring project's record.
+ *
+ * `path.resolve` first, so a relative argument, a trailing separator or a `..` segment compares
+ * equal to the stored absolute root. Exported for the tests: this one line decides what a
+ * destructive command deletes.
+ */
+export function normalizeProjectPath(p: string): string {
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  return isWindows() ? resolved.toLowerCase() : resolved;
 }

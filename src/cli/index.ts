@@ -129,6 +129,16 @@ export function createProgram(): Command {
       }
     });
 
+  program
+    .command("unregister [path]")
+    .description("Remove a project from the central registry (leaves its .wolf/ untouched)")
+    .option("--prune", "Remove every registered project whose .wolf/ is gone, instead of one path")
+    .option("--dry-run", "Show what would be removed without changing the registry")
+    .action(async (target: string | undefined, opts: { prune?: boolean; dryRun?: boolean }) => {
+      const { unregisterCommand } = await import("./unregister.js");
+      unregisterCommand(target, opts);
+    });
+
   // --- Restore command ---
   program
     .command("restore [backup]")

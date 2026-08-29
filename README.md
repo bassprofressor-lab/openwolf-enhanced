@@ -293,6 +293,7 @@ openwolf cron <cmd>           list | run <id> | retry <id> — scheduled tasks
 openwolf designqc             Capture full-page screenshots for design evaluation
 openwolf bug search <term>    Search bug memory for known fixes
 openwolf update               Update registered projects [--project NAME] [--dry-run] [--list]
+openwolf unregister [path]    Drop a project from the registry, keeping its .wolf/ [--prune] [--dry-run]
 openwolf restore [backup]     Restore .wolf/ from a timestamped backup
 ```
 

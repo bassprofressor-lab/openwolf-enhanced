@@ -263,6 +263,7 @@ openwolf cron <cmd>           list | run <id> | retry <id> — geplante Tasks
 openwolf designqc             Full-Page-Screenshots zur Design-Bewertung erstellen
 openwolf bug search <term>    Bug-Gedächtnis nach bekannten Fixes durchsuchen
 openwolf update               Registrierte Projekte aktualisieren [--project NAME] [--dry-run] [--list]
+openwolf unregister [path]    Projekt aus der Registry nehmen, .wolf/ bleibt [--prune] [--dry-run]
 openwolf restore [backup]     .wolf/ aus einem zeitgestempelten Backup wiederherstellen
 ```
 
