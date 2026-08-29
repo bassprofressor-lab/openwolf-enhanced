@@ -41,28 +41,40 @@ function hasPm2(): boolean {
   }
 }
 
+// Pull the listening PID for `port` out of a `netstat -ano -p tcp` dump.
+//
+// Key off the SHAPE of the row, never off words in it. Two reasons, both of which made the
+// old `includes("LISTENING")` test fail on this machine:
+//   1. netstat localizes the state column — a German Windows prints ABHÖREN, a French one
+//      ÉCOUTE — so the daemon was never found and `daemon stop` reported "no daemon running"
+//      while one was plainly listening.
+//   2. netstat writes the OEM codepage, not UTF-8, so that word arrives mojibake'd anyway.
+// Row layout: TCP  <local>  <remote>  <state>  <pid>. A listener is the row whose REMOTE
+// address is the wildcard (0.0.0.0:0 / [::]:0); matching the port anywhere in the line also
+// hit TIME_WAIT rows, whose last column is a foreign PID — one taskkill away from killing
+// somebody else's process.
+//
+// Exported for the test, and pure on purpose: the bug lived in the PARSE, and a parse that can
+// only be exercised through a live socket on a localized Windows is a parse nobody tests.
+// Everything platform-bound — spawning netstat — stays in findPidOnPort below.
+export function parseNetstatListenerPid(output: string, port: number): number | null {
+  for (const line of output.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5 || parts[0] !== "TCP") continue;
+    const [, local, remote] = parts;
+    if (!local.endsWith(`:${port}`) || !remote.endsWith(":0")) continue;
+    const pid = parseInt(parts[parts.length - 1], 10);
+    if (pid > 0) return pid;
+  }
+  return null;
+}
+
 function findPidOnPort(port: number): number | null {
   try {
     if (isWindows()) {
       const output = execFileSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf-8" });
-      // Key off the SHAPE of the row, never off words in it. Two reasons, both of which made the
-      // old `includes("LISTENING")` test fail on this machine:
-      //   1. netstat localizes the state column — a German Windows prints ABHÖREN, a French one
-      //      ÉCOUTE — so the daemon was never found and `daemon stop` reported "no daemon running"
-      //      while one was plainly listening.
-      //   2. netstat writes the OEM codepage, not UTF-8, so that word arrives mojibake'd anyway.
-      // Row layout: TCP  <local>  <remote>  <state>  <pid>. A listener is the row whose REMOTE
-      // address is the wildcard (0.0.0.0:0 / [::]:0); matching the port anywhere in the line also
-      // hit TIME_WAIT rows, whose last column is a foreign PID — one taskkill away from killing
-      // somebody else's process.
-      for (const line of output.split("\n")) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 5 || parts[0] !== "TCP") continue;
-        const [, local, remote] = parts;
-        if (!local.endsWith(`:${port}`) || !remote.endsWith(":0")) continue;
-        const pid = parseInt(parts[parts.length - 1], 10);
-        if (pid > 0) return pid;
-      }
+      const pid = parseNetstatListenerPid(output, port);
+      if (pid !== null) return pid;
     } else {
       const output = execFileSync("lsof", ["-ti", `:${port}`], { encoding: "utf-8" });
       const pid = parseInt(output.trim(), 10);
