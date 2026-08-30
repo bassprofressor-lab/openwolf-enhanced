@@ -8,6 +8,29 @@ import { consolidateMemory } from "../utils/maintenance.js";
 import { stripPrivate } from "../hooks/shared.js";
 import { resolveLlmConfig, callLlmDetailed, requiresApiKey, unwrapFencedBlock } from "./llm-provider.js";
 
+/**
+ * Reduce a manifest task id to something that can only ever name a file INSIDE proposals/.
+ *
+ * cron-manifest.json is a committed file, so its `id` is repo-controlled text, and it used to be
+ * pasted straight into a path: an id of `../../../../etc/cron.d/openwolf` made the daemon write a
+ * file outside .wolf/ on a weekly schedule, with the daemon's own privileges. Separators, dots and
+ * anything non-portable are collapsed here, so the result cannot traverse, cannot be empty, and
+ * cannot be a Windows reserved device name.
+ */
+export function safeTaskSlug(taskId: string): string {
+  const slug = String(taskId)
+    .normalize("NFKD")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")   // separators, spaces, control chars, unicode → "-"
+    .replace(/\.{2,}/g, "")              // drop traversal runs outright, don't fold them to "."
+    .replace(/-{2,}/g, "-")              // …which leaves runs of dashes behind; collapse them
+    .replace(/^[-._]+|[-._]+$/g, "")     // no leading dot (hidden file) or trailing dot (Windows)
+    .slice(0, 64);
+  // CON, PRN, AUX, NUL, COM1-9, LPT1-9 are unopenable device names on Windows, with or without
+  // an extension. Prefixing is enough and keeps the id readable.
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) return `task-${slug}`;
+  return slug || "task";
+}
+
 export interface AiTaskParams {
   prompt: string;
   context_files: string[];
@@ -349,14 +372,29 @@ export class CronEngine {
   private async runAiTask(params: AiTaskParams, taskId: string): Promise<void> {
     const mode = params.mode ?? "proposal";
     const chunkBytes = params.chunk_bytes ?? 20 * 1024;
-    const rootPrefix = path.resolve(this.projectRoot) + path.sep;
+    const lexicalRoot = path.resolve(this.projectRoot);
+    // The root's OWN realpath, because a project directory is very often reached through a link
+    // (/root/proj -> /mnt/data/proj, macOS /tmp -> /private/tmp). Comparing a resolved file path
+    // against the unresolved root would then reject every legitimate file in the project.
+    let realRoot = lexicalRoot;
+    try { realRoot = fs.realpathSync(lexicalRoot); } catch { /* keep the lexical one */ }
 
     const files: Array<{ name: string; chunks: string[] }> = [];
     for (const file of params.context_files) {
       const filePath = path.resolve(this.projectRoot, file);
       // Reject paths that escape the project root (e.g. "../../etc/passwd") — the file
       // contents are fed to the model, so traversal would exfiltrate arbitrary files (#34).
-      if (filePath !== path.resolve(this.projectRoot) && !filePath.startsWith(rootPrefix)) {
+      //
+      // path.resolve() alone was not enough: it is pure string arithmetic and knows nothing about
+      // symlinks. A repo carrying `docs/notes -> /etc/shadow` plus a matching cron-manifest.json
+      // passed this check and shipped the target to the LLM — the same exfiltration the guard was
+      // written to stop, one indirection later. realpath() resolves the link and gets checked too.
+      // A file that does not exist yet has no realpath; fall back to the lexical path so a missing
+      // context file still reports "(not found)" rather than "(rejected)".
+      let realPath = filePath;
+      try { realPath = fs.realpathSync(filePath); } catch { /* not there — handled below */ }
+      const escapes = (p: string, root: string): boolean => p !== root && !p.startsWith(root + path.sep);
+      if (escapes(filePath, lexicalRoot) || escapes(realPath, realRoot)) {
         files.push({ name: file, chunks: ["(rejected: outside project root)"] });
         continue;
       }
@@ -437,7 +475,7 @@ export class CronEngine {
     const dir = path.join(this.wolfDir, "proposals");
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    const file = path.join(dir, `${taskId}-${stamp}.md`);
+    const file = path.join(dir, `${safeTaskSlug(taskId)}-${stamp}.md`);
     const header = [
       `# Proposal — ${taskId}`,
       ``,

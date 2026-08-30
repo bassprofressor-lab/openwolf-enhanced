@@ -7,11 +7,12 @@ import { scanProject } from "../scanner/anatomy-scanner.js";
 import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
 import { deployAgentHooks } from "../utils/agent-hooks.js";
 import { ensureDir } from "../utils/paths.js";
-import { isWindows } from "../utils/platform.js";
+import { isWindows, execShim } from "../utils/platform.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { detectProjectName, applyTemplatePlaceholders } from "../utils/seed.js";
 import { ensureWolfGitignore } from "../utils/wolf-gitignore.js";
 import { registerProject, getRegisteredProjects } from "./registry.js";
+import { deepMergeDefaults } from "./update.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,10 +28,15 @@ function getVersion(): string {
   }
 }
 
-// Files that are safe to overwrite on upgrade (config/protocol, not user data)
+// Files that are safe to overwrite on upgrade (protocol docs, not user data).
+//
+// config.json used to sit in this list, which made `openwolf init` in an existing project a
+// destructive command: it reset tuned retention limits, the assigned daemon/dashboard ports, the
+// designqc settings, and — worst — openwolf.remote.base_url/project, silently unlinking the project
+// from its team workspace. `openwolf update` had already learned to deep-merge it for exactly these
+// reasons and said so in a comment; init just didn't. It is merged here now, same helper.
 const ALWAYS_OVERWRITE = [
   "OPENWOLF.md",
-  "config.json",
   "reframe-frameworks.md",
 ];
 
@@ -88,6 +94,19 @@ export async function initCommand(): Promise<void> {
     writeTemplateFile(actualTemplatesDir, wolfDir, file);
     createdCount++;
   }
+
+  // config.json: template defaults UNDER the user's existing values, so a re-run adds keys a newer
+  // version introduced without touching anything already tuned. Created outright if absent.
+  const cfgTemplate = path.join(actualTemplatesDir, "config.json");
+  const cfgDest = path.join(wolfDir, "config.json");
+  if (fs.existsSync(cfgDest) && fs.existsSync(cfgTemplate)) {
+    const defaults = readJSON<Record<string, unknown>>(cfgTemplate, {});
+    const userCfg = readJSON<Record<string, unknown>>(cfgDest, {});
+    writeJSON(cfgDest, deepMergeDefaults(defaults, userCfg));
+  } else {
+    writeTemplateFile(actualTemplatesDir, wolfDir, "config.json");
+  }
+  createdCount++;
 
   const newlyCreated = new Set<string>();
   for (const file of CREATE_IF_MISSING) {
@@ -179,11 +198,11 @@ export async function initCommand(): Promise<void> {
     // Resolve daemon script relative to openwolf's install dir, not the target project
     const daemonScript = path.resolve(__dirname, "..", "daemon", "wolf-daemon.js");
     try {
-      execFileSync(pm2Bin, ["start", daemonScript, "--name", name, "--cwd", projectRoot], {
+      execShim(pm2Bin, ["start", daemonScript, "--name", name, "--cwd", projectRoot], {
         stdio: "ignore",
         env: { ...process.env, OPENWOLF_PROJECT_ROOT: projectRoot },
       });
-      execFileSync(pm2Bin, ["save"], { stdio: "ignore" });
+      execShim(pm2Bin, ["save"], { stdio: "ignore" });
       daemonStatus = "running via pm2";
     } catch {
       daemonStatus = "pm2 found but daemon start failed. Try: openwolf daemon start";
@@ -323,7 +342,7 @@ function generateTemplate(destPath: string, file: string): void {
         token_audit: { enabled: true, report_frequency: "weekly", waste_threshold_percent: 15, chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
         cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null, llm_provider: "anthropic", llm_base_url: null, llm_model: null },
         memory: { consolidation_after_days: 7, max_entries_before_consolidation: 200 },
-        retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288 },
+        retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288, proposals_keep: 20 },
         cerebrum: { max_tokens: 2000, reflection_frequency: "weekly" },
         daemon: { port: 18790, log_level: "info" },
         dashboard: { enabled: true, port: 18791, host: "127.0.0.1" },

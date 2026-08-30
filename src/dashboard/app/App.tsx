@@ -5,6 +5,7 @@ import { Header } from "./components/layout/Header.js";
 import { useWolfData } from "./hooks/useWolfData.js";
 import { useTheme } from "./hooks/useTheme.js";
 import { useHashRoute } from "./hooks/useHashRoute.js";
+import { PanelBoundary } from "./components/shared/PanelBoundary.js";
 
 const ProjectOverview = lazy(() => import("./components/panels/ProjectOverview.js").then(m => ({ default: m.ProjectOverview })));
 const ProjectsAggregate = lazy(() => import("./components/panels/ProjectsAggregate.js").then(m => ({ default: m.ProjectsAggregate })));
@@ -97,6 +98,7 @@ export default function App() {
             </button>
           </div>
         )}
+        <PanelBoundary panel={activePanel}>
         <Suspense fallback={<Skeleton />}>
           {activePanel === "overview" && <ProjectOverview data={data} />}
           {activePanel === "projects" && <ProjectsAggregate data={data} />}
@@ -113,6 +115,7 @@ export default function App() {
           {activePanel === "suggestions" && <AISuggestions data={data} onNavigate={navigate} />}
           {activePanel === "designqc" && <DesignQC data={data} />}
         </Suspense>
+        </PanelBoundary>
       </Layout>
     </div>
   );

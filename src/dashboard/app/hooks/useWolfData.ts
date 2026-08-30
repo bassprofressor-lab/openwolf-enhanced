@@ -74,6 +74,26 @@ export interface WolfData {
   retry: () => void;
 }
 
+/**
+ * Every .wolf/*.json the dashboard renders is written by an agent mid-session, and the panels index
+ * straight into the arrays inside them (`buglog.bugs.filter`, `cronState.execution_log.filter`,
+ * `tokenLedger.sessions.map`). JSON.parse was already guarded — what was not guarded is the SHAPE:
+ * a file that parses fine but is `{}`, or `[]`, or was caught half-written, produced `undefined`
+ * where an array was expected, and React unmounts the whole tree on a render throw. One truncated
+ * write and the dashboard is a white page.
+ *
+ * So the shape is enforced once, here at ingest, instead of at every use site.
+ */
+function parseJson(raw: string): Record<string, any> | null {
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+const asArray = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+const asObject = (v: unknown): Record<string, any> =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {};
+
 export function useWolfData(): WolfData {
   const [loading, setLoading] = useState(true);
   const [anatomy, setAnatomy] = useState<WolfData["anatomy"]>({ entries: [], metadata: { files: 0, hits: 0, misses: 0 } });
@@ -97,23 +117,44 @@ export function useWolfData(): WolfData {
     if (files["cerebrum.md"]) setCerebrum(parseCerebrum(files["cerebrum.md"]));
     if (files["memory.md"]) setMemory(parseMemory(files["memory.md"]));
     if (files["token-ledger.json"]) {
-      try { setTokenLedger(JSON.parse(files["token-ledger.json"])); } catch {}
+      const v = parseJson(files["token-ledger.json"]);
+      if (v) setTokenLedger((prev) => ({
+        ...prev, ...v,
+        lifetime: { ...prev.lifetime, ...asObject(v.lifetime) },
+        sessions: asArray(v.sessions),
+        waste_flags: asArray(v.waste_flags),
+      }));
     }
     if (files["cron-state.json"]) {
-      try { setCronState(JSON.parse(files["cron-state.json"])); } catch {}
+      const v = parseJson(files["cron-state.json"]);
+      if (v) setCronState((prev) => ({
+        ...prev, ...v,
+        engine_status: typeof v.engine_status === "string" ? v.engine_status : prev.engine_status,
+        execution_log: asArray(v.execution_log),
+        dead_letter_queue: asArray(v.dead_letter_queue),
+      }));
     }
     if (files["cron-manifest.json"]) {
-      try { setCronManifest(JSON.parse(files["cron-manifest.json"])); } catch {}
+      const v = parseJson(files["cron-manifest.json"]);
+      if (v) setCronManifest({ ...v, tasks: asArray(v.tasks) });
     }
     if (files["buglog.json"]) {
-      try { setBuglog(JSON.parse(files["buglog.json"])); } catch {}
+      const v = parseJson(files["buglog.json"]);
+      if (v) setBuglog({ ...v, bugs: asArray(v.bugs) });
     }
     if (typeof files["activity.log"] === "string") setActivityLog(files["activity.log"]);
     if (files["suggestions.json"]) {
-      try { setSuggestions(JSON.parse(files["suggestions.json"])); } catch {}
+      const v = parseJson(files["suggestions.json"]);
+      if (v) setSuggestions(v);
     }
     if (files["designqc-report.json"]) {
-      try { setDesignqcReport(JSON.parse(files["designqc-report.json"])); } catch {}
+      const v = parseJson(files["designqc-report.json"]);
+      if (v) setDesignqcReport({
+        captured_at: typeof v.captured_at === "string" ? v.captured_at : null,
+        captures: asArray(v.captures),
+        total_size_kb: Number(v.total_size_kb) || 0,
+        estimated_tokens: Number(v.estimated_tokens) || 0,
+      });
     }
     if (files["identity.md"]) {
       const nameMatch = files["identity.md"].match(/\*\*Name:\*\*\s*(.+)/);
@@ -130,7 +171,11 @@ export function useWolfData(): WolfData {
   // REST snapshot fetch — also the "retry" action for the daemon-down banner.
   const refresh = useCallback(() => {
     authedFetch("/api/files")
-      .then(r => r.json())
+      // A 401 (wrong or missing dashboard token) has a JSON body too — `{"error":"unauthorized"}`.
+      // Without this check it was fed to processFiles as if it were the file map, which contains
+      // no known keys, so nothing was set and the UI rendered its empty initial state: a dashboard
+      // that looks like an idle project rather than one that says "not authorised".
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(files => {
         processFiles(files);
         setLoading(false);
@@ -138,13 +183,13 @@ export function useWolfData(): WolfData {
       .catch(() => setLoading(false));
 
     authedFetch("/api/health")
-      .then(r => r.json())
-      .then(h => setHealth(h))
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(h => setHealth({ status: String(h?.status ?? "unknown"), uptime_seconds: Number(h?.uptime_seconds) || 0 }))
       .catch(() => {});
 
     authedFetch("/api/project")
-      .then(r => r.json())
-      .then(p => setProject(p))
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(p => setProject({ name: String(p?.name ?? ""), description: String(p?.description ?? ""), root: String(p?.root ?? "") }))
       .catch(() => {});
   }, [processFiles]);
 

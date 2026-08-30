@@ -15,9 +15,23 @@ export function readJSON<T = unknown>(filePath: string, fallback: T): T {
   try {
     return JSON.parse(raw) as T;
   } catch (e) {
-    process.stderr.write(`[openwolf] ${path.basename(filePath)} exists but is not valid JSON — using defaults (${(e as Error).message})\n`);
+    // The caller is about to treat this file as empty and, in a read-modify-write, overwrite it
+    // with defaults — so a corrupt token-ledger.json meant months of usage history vanished on the
+    // next Stop hook, with one line on stderr as the only trace. Move it aside first. Recovery is
+    // then a possibility rather than a hope, and because the path no longer exists, the next read
+    // takes the ordinary "missing file" branch instead of warning forever.
+    quarantineCorrupt(filePath);
+    process.stderr.write(`[openwolf] ${path.basename(filePath)} was not valid JSON — moved aside, using defaults (${(e as Error).message})\n`);
     return fallback;
   }
+}
+
+/** Rename a corrupt file to <name>.corrupt-<stamp>. Best-effort: never throws, never blocks a read. */
+function quarantineCorrupt(filePath: string): void {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    fs.renameSync(filePath, `${filePath}.corrupt-${stamp}`);
+  } catch { /* unwritable directory, race with another process — defaults still apply */ }
 }
 
 // Shared tmp+rename write. Never throws (hooks must not kill a session over a failed journal

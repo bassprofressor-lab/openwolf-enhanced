@@ -17,6 +17,20 @@ export class WolfClient {
 
   connect(): void {
     try {
+      // Drop whatever is already open first. The daemon-down banner's Retry button calls connect()
+      // on the SAME client, and a socket that was merely reconnecting (or already live) was left
+      // dangling with its handlers still attached — so every broadcast arrived twice, and each
+      // further retry added another copy. Clearing onclose first stops the old socket from
+      // scheduling a reconnect of its own on the way out.
+      if (this.ws) {
+        this.ws.onopen = this.ws.onmessage = this.ws.onclose = this.ws.onerror = null;
+        try { this.ws.close(); } catch { /* already closing */ }
+        this.ws = null;
+      }
+      if (this.reconnectTimer !== null) {
+        window.clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       this.ws = new WebSocket(this.url);
       this.ws.onopen = () => {
         for (const h of this.statusHandlers) h(true);

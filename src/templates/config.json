@@ -72,7 +72,8 @@
       "backups_keep": 10,
       "memory_consolidate_after_days": 7,
       "memory_max_bytes": 262144,
-      "daemon_log_max_bytes": 524288
+      "daemon_log_max_bytes": 524288,
+      "proposals_keep": 20
     },
     "cerebrum": {
       "max_tokens": 2000,

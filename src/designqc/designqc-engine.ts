@@ -9,6 +9,8 @@ import {
   detectDevServer,
   detectDeployedUrl,
   startDevServer,
+  stopDevServer,
+  isSafeCaptureUrl,
 } from "./designqc-capture.js";
 import type { DesignQCOptions, Screenshot, CaptureResult } from "./designqc-types.js";
 import { DEFAULT_VIEWPORTS } from "./designqc-types.js";
@@ -25,6 +27,12 @@ export class DesignQCEngine {
   }
 
   async capture(): Promise<CaptureResult> {
+    // A URL the operator supplied themselves (--url, or the token-gated daemon route). Loopback and
+    // LAN are fine here; a non-http scheme is not, because file:/// would turn a screenshot run into
+    // a local file read whose output lands in a committed directory.
+    if (this.options.devServerUrl && !isSafeCaptureUrl(this.options.devServerUrl, "user")) {
+      throw new Error(`Refusing to capture ${this.options.devServerUrl} — only http:// and https:// URLs can be screenshotted.`);
+    }
     let baseUrl = this.options.devServerUrl;
     let serverProc: ChildProcess | null = null;
     let weStartedServer = false;
@@ -76,7 +84,7 @@ export class DesignQCEngine {
 
       // 4. Launch browser
       console.log("  Launching browser...");
-      const chromePath = findChromePath(this.options.chromePath);
+      const chromePath = findChromePath(this.options.chromePath, this.projectRoot);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let puppeteer: any;
       try {
@@ -170,7 +178,7 @@ export class DesignQCEngine {
       // 8. Kill dev server if we started it
       if (weStartedServer && serverProc) {
         console.log("  Stopping dev server...");
-        serverProc.kill();
+        stopDevServer(serverProc);
       }
     }
   }

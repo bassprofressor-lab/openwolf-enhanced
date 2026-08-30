@@ -33,8 +33,10 @@ async function main(): Promise<void> {
   const continuing = (source === "compact" || source === "resume") && fs.existsSync(sessionFile);
 
   if (!continuing) {
-    // Create fresh session state
-    writeJSON(sessionFile, {
+    // Create fresh session state. Under the lock like every other writer of this file: the reset is
+    // a whole-file replacement, so an unlocked write here could land in the middle of another
+    // hook's read-modify-write and hand it a half-written file to parse.
+    withLock(sessionFile, () => writeJSON(sessionFile, {
       session_id: sessionId,
       started: timestamp(),
       files_read: {},
@@ -45,7 +47,7 @@ async function main(): Promise<void> {
       repeated_reads_warned: 0,
       cerebrum_warnings: 0,
       stop_count: 0,
-    });
+    }));
 
     // Append session header to memory.md
     const memoryPath = path.join(wolfDir, "memory.md");

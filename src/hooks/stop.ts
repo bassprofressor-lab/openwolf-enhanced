@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, updateSession, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 interface FileRead {
@@ -147,7 +147,11 @@ async function main(): Promise<void> {
   const totalWrites = writeCount + unnamedWrites;
 
   if (readCount === 0 && totalWrites === 0) {
-    writeJSON(sessionFile, session);
+    // Only stop_count moved; apply it as a delta so an idle turn cannot overwrite a sibling
+    // hook's concurrent update with this hook's stale snapshot.
+    updateSession<SessionData>(sessionFile, session, (s) => {
+      s.stop_count = Math.max(s.stop_count ?? 0, session.stop_count);
+    });
     process.exit(0);
     return;
   }
@@ -293,8 +297,15 @@ async function main(): Promise<void> {
     lt.real_api_calls = (lt.real_api_calls ?? 0) + delta(realUsage.api_calls, booked.real_api_calls);
   }
 
-  // Mark what is now booked. Set inside the lock, right after the numbers went in, so a crash
-  // between the two writes cannot leave the ledger credited and the session unmarked.
+  // Mark what is now booked.
+  //
+  // [fix] Setting this field inside the lock was never the point — PERSISTING it was. The write to
+  // _session.json used to sit ~30 lines further down, past two memory.md appends and a memory
+  // compaction, outside this lock. Anything that ended the process in that window (a hook timeout,
+  // the user quitting, a full disk during compactMemoryIfLarge) left the ledger credited and the
+  // session file still carrying the OLD booked values, so the next Stop re-booked every delta on
+  // top. The comment claimed that could not happen. It is now written under the same lock, one
+  // statement after the ledger, which is what the comment always described.
   session.booked = {
     reads: Math.max(readCount, booked.reads),
     writes: Math.max(totalWritesNow, booked.writes),
@@ -311,6 +322,17 @@ async function main(): Promise<void> {
   };
 
   writeJSON(ledgerPath, ledger);
+
+  // Persist the session's own bookkeeping here, still holding the ledger lock. The deltas are
+  // re-applied to whatever is on disk right now, so a PostToolUse hook that wrote between this
+  // hook's initial read and this line does not lose its update.
+  const bookedNow = session.booked;
+  const remindersNow = session.reminders_shown;
+  updateSession<SessionData>(sessionFile, session, (s) => {
+    s.booked = bookedNow;
+    s.reminders_shown = remindersNow;
+    s.stop_count = Math.max(s.stop_count ?? 0, session.stop_count);
+  });
   });
 
   // Write a session summary line to memory.md if there was meaningful activity
@@ -340,8 +362,6 @@ async function main(): Promise<void> {
   // Opportunistic self-maintenance: keep memory.md bounded even when the daemon
   // (which normally runs the consolidation cron) isn't running. Stat-gated → cheap.
   try { compactMemoryIfLarge(wolfDir, ret.memory_max_bytes); } catch {}
-
-  writeJSON(sessionFile, session);
 
   // Surface reminders into Claude's next context window (Stop hooks can inject via stdout JSON).
   if (reminders.length > 0) {

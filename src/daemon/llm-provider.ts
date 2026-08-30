@@ -95,7 +95,7 @@ function isPrivateIpv6(host: string): boolean {
  * `startsWith("fc")` / `startsWith("fd")` rejected every ordinary hostname beginning with those two
  * letters — fc2.com, fdisk.example.com, fd-api.vendor.io — as if it were an IPv6 ULA. [bug-212]
  */
-function isPrivateHost(host: string): boolean {
+export function isPrivateHost(host: string): boolean {
   switch (net.isIP(host)) {
     case 4: return isPrivateIpv4(host);
     case 6: return isPrivateIpv6(host);
@@ -121,18 +121,21 @@ export function requiresApiKey(cfg: LlmConfig): boolean {
 // Refuse an llm_base_url that would exfiltrate the API key or reach internal services. Since the URL
 // comes from a project's config.json (which a cloned/untrusted repo can carry), require https except
 // for explicit loopback (local models), and block private/link-local/metadata addresses.
-export function assertSafeBaseUrl(baseUrl: string): void {
+// `label` names the config key in the error text. The embeddings client reuses this function, and
+// telling someone to fix "llm_base_url" when the offending value sits under
+// recall.embeddings.base_url sends them to the wrong line of config.json.
+export function assertSafeBaseUrl(baseUrl: string, label = "llm_base_url"): void {
   let u: URL;
-  try { u = new URL(baseUrl); } catch { throw new Error(`invalid llm_base_url: ${baseUrl}`); }
+  try { u = new URL(baseUrl); } catch { throw new Error(`invalid ${label}: ${baseUrl}`); }
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   const isLoopback = isLocalEndpoint(baseUrl);
   if (u.protocol === "http:") {
-    if (!isLoopback) throw new Error(`llm_base_url must use https:// for non-loopback hosts (got http://${host})`);
+    if (!isLoopback) throw new Error(`${label} must use https:// for non-loopback hosts (got http://${host})`);
   } else if (u.protocol !== "https:") {
-    throw new Error(`llm_base_url must be http(s), got ${u.protocol}`);
+    throw new Error(`${label} must be http(s), got ${u.protocol}`);
   }
   if (!isLoopback && isPrivateHost(host)) {
-    throw new Error(`llm_base_url points at a private/link-local address (${host}) — refused to protect your API key`);
+    throw new Error(`${label} points at a private/link-local address (${host}) — refused to protect your API key`);
   }
 }
 

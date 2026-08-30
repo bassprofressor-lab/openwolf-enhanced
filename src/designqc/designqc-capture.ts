@@ -2,10 +2,50 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as http from "node:http";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { isPrivateHost } from "../daemon/llm-provider.js";
 import type { Viewport, Screenshot } from "./designqc-types.js";
 
-export function findChromePath(configPath?: string | null): string {
-  if (configPath && fs.existsSync(configPath)) return configPath;
+// The browser binaries designqc is willing to launch, matched on the file name alone (case-
+// insensitive, .exe stripped). Anything else is not a browser and has no business being started
+// with the user's privileges.
+const BROWSER_BINARIES = new Set([
+  "chrome", "google-chrome", "google-chrome-stable", "google-chrome-beta", "google-chrome-unstable",
+  "chromium", "chromium-browser", "msedge", "microsoft-edge", "microsoft-edge-stable",
+  "brave", "brave-browser", "thorium", "thorium-browser",
+]);
+
+/**
+ * Validate a configured `designqc.chrome_path` before it becomes puppeteer's `executablePath`.
+ *
+ * This value comes from .wolf/config.json, which is committed by design — so on a cloned repo it is
+ * attacker-controlled text that used to be handed to a process launcher verbatim. Two rules close
+ * that: the file must be NAMED like a browser, and it must live outside the project, because a
+ * binary a repo ships with itself is never the user's local Chrome install no matter what it is
+ * called. A rejected value falls through to auto-detection rather than failing the run.
+ */
+export function isAllowedBrowserPath(configPath: string, projectRoot?: string): boolean {
+  // Split on BOTH separators rather than path.basename(): on POSIX, basename() does not treat "\"
+  // as a separator, so a Windows-style value in config.json came back whole and never matched the
+  // allow-list. The check has to read the same way wherever it runs.
+  const base = (configPath.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.exe$/, "");
+  if (!BROWSER_BINARIES.has(base)) return false;
+  if (projectRoot) {
+    const root = path.resolve(projectRoot);
+    const resolved = path.resolve(configPath);
+    if (resolved === root || resolved.startsWith(root + path.sep)) return false;
+  }
+  return true;
+}
+
+export function findChromePath(configPath?: string | null, projectRoot?: string): string {
+  if (configPath && fs.existsSync(configPath)) {
+    if (isAllowedBrowserPath(configPath, projectRoot)) return configPath;
+    console.error(
+      `  Ignoring designqc.chrome_path (${configPath}): not a recognised browser binary, or it lives inside the project.\n` +
+      `  .wolf/config.json is a committed file, so an arbitrary path there would let a cloned repo choose what gets launched.\n` +
+      `  Falling back to auto-detection.`,
+    );
+  }
 
   if (process.platform === "win32") {
     const candidates = [
@@ -147,11 +187,36 @@ export async function probePort(port: number): Promise<boolean> {
  * (package.json homepage, .env* URL vars, vercel.json aliases). Returns null if none —
  * the caller then falls back to a local dev server (upstream #4, bug 4).
  */
+/**
+ * Decide whether headless Chrome may be pointed at this URL.
+ *
+ * Everything designqc navigates to is screenshotted into .wolf/designqc-captures/, a directory that
+ * gets committed and read back by a model. That makes the browser a read primitive, so where the URL
+ * came from matters:
+ *
+ *   "repo"  — derived from package.json `homepage`, a .env var or vercel.json, i.e. text a cloned
+ *             repository controls. Only public http(s) is allowed. `file:///` would photograph the
+ *             user's home directory and http://169.254.169.254/ the cloud instance's credentials,
+ *             both into a file destined for a commit.
+ *   "user"  — typed as `--url` or sent to the (token-gated) daemon route by the person running it.
+ *             Loopback and LAN addresses are legitimate here (that is where dev servers live), so
+ *             only the scheme is enforced: no file:, data:, blob: or chrome:.
+ */
+export function isSafeCaptureUrl(raw: string, origin: "repo" | "user"): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (origin === "user") return true;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  return !isPrivateHost(host);
+}
+
 export function detectDeployedUrl(projectRoot: string): string | null {
   // 1. package.json "homepage"
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
-    if (typeof pkg.homepage === "string" && pkg.homepage.startsWith("http")) return pkg.homepage;
+    if (typeof pkg.homepage === "string" && isSafeCaptureUrl(pkg.homepage, "repo")) return pkg.homepage;
   } catch { /* ignore */ }
 
   // 2. Common env files — a production URL variable
@@ -166,7 +231,7 @@ export function detectDeployedUrl(projectRoot: string): string | null {
       const content = fs.readFileSync(path.join(projectRoot, envFile), "utf-8");
       for (const varName of urlVarNames) {
         const match = content.match(new RegExp(`^${varName}=["']?([^"'\\s]+)["']?`, "m"));
-        if (match && match[1].startsWith("http")) return match[1].trim();
+        if (match && isSafeCaptureUrl(match[1].trim(), "repo")) return match[1].trim();
       }
     } catch { /* ignore */ }
   }
@@ -177,7 +242,8 @@ export function detectDeployedUrl(projectRoot: string): string | null {
     const aliases: unknown = vercelJson.alias ?? vercelJson.aliases;
     if (Array.isArray(aliases) && aliases.length > 0 && typeof aliases[0] === "string") {
       const alias = aliases[0] as string;
-      return alias.startsWith("http") ? alias : `https://${alias}`;
+      const url = /^https?:\/\//i.test(alias) ? alias : `https://${alias}`;
+      if (isSafeCaptureUrl(url, "repo")) return url;
     }
   } catch { /* ignore */ }
 
@@ -239,6 +305,34 @@ export function detectDevCommand(projectRoot: string): { command: string; expect
 }
 
 /**
+ * Stop a dev server started by startDevServer(), including everything it spawned.
+ *
+ * `proc.kill()` signals only the direct child. The child is a shell (`shell: true`, needed for
+ * "pnpm dev"), and on Windows a signal to cmd.exe does not propagate at all — so the actual dev
+ * server (node/vite/next) survived every designqc run and kept holding its port. The next run then
+ * found "a server already running" and screenshotted the STALE build. `taskkill /T` walks the
+ * process tree; on POSIX the process group gets the signal instead, and killing the child alone
+ * remains the fallback.
+ */
+export function stopDevServer(proc: ChildProcess): void {
+  if (proc.pid === undefined) return;
+  if (process.platform === "win32") {
+    try {
+      execSync(`taskkill /pid ${proc.pid} /T /F`, { stdio: "ignore" });
+      return;
+    } catch { /* already gone, or no permission — fall through */ }
+  } else {
+    try {
+      // Negative pid = the whole process group. spawn() with shell:true puts the shell and its
+      // children in one group, so this reaches the dev server itself.
+      process.kill(-proc.pid, "SIGTERM");
+      return;
+    } catch { /* no group (detached not set on this platform) — fall through */ }
+  }
+  try { proc.kill(); } catch { /* nothing left to kill */ }
+}
+
+/**
  * Start the dev server, wait for it to be ready, return the process handle.
  * Caller is responsible for killing the process.
  */
@@ -258,6 +352,10 @@ export async function startDevServer(
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    // POSIX: make the shell its own process-group leader, so stopDevServer() can signal the group
+    // (pgid === pid) and reach the dev server itself. Without this the group id is OUR group, and
+    // a group kill would take down the openwolf process too.
+    detached: process.platform !== "win32",
   });
 
   // Wait for server to be ready (poll port)

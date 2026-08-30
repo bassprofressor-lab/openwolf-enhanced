@@ -15,6 +15,7 @@ import {
   consolidateMemory,
   dedupeAndCapBuglog,
   pruneBackups,
+  pruneProposals,
   cleanTmp,
   rotateDaemonLog,
   dirSize,
@@ -240,6 +241,7 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
     consolidateMemory(wolfDir, ret.memory_consolidate_after_days),
     dedupeAndCapBuglog(wolfDir, ret.buglog_max_entries),
     pruneBackups(wolfDir, ret.backups_keep),
+    pruneProposals(wolfDir, ret.proposals_keep),
     rotateDaemonLog(wolfDir, ret.daemon_log_max_bytes),
     cleanTmp(wolfDir),
   ];

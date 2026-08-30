@@ -3,7 +3,7 @@ import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, writeAtomic, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateFileTokens, getTokenRatios, appendMarkdown, timeShort, readStdin, normalizePath,
-  getRetention, loadIgnore, readBugLog, isSecretFile
+  getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject
 } from "./shared.js";
 
 interface SessionData {
@@ -66,10 +66,10 @@ async function main(): Promise<void> {
   // nothing happened, and the STATUS.md reminder never fires. That is exactly how a handoff doc goes
   // stale for eleven slices without anyone noticing. The counter is a number only: no path, no name,
   // so #56 still holds.
-  if (relPath === "" || relPath.startsWith("..")) {
-    const session = readJSON<SessionData>(sessionFile, { files_written: [], edit_counts: {} });
-    session.external_writes = (session.external_writes ?? 0) + 1;
-    writeJSON(sessionFile, session);
+  if (isOutsideProject(relPath)) {
+    updateSession<SessionData>(sessionFile, { files_written: [], edit_counts: {} }, (session) => {
+      session.external_writes = (session.external_writes ?? 0) + 1;
+    });
     process.exit(0);
     return;
   }
@@ -166,29 +166,31 @@ async function main(): Promise<void> {
 
   // 3. Record in session tracker + track edit counts
   try {
-    const session = readJSON<SessionData>(sessionFile, { files_written: [], edit_counts: {} });
-    if (!session.edit_counts) session.edit_counts = {};
-
     const normalizedFile = normalizePath(filePath);
     const action = toolName === "Write" ? "create" : "edit";
     const fileContent = input.tool_input?.content ?? "";
     const tokens = estimateFileTokens(fileContent || writtenText, absolutePath, getTokenRatios(wolfDir));
+    const editKey = normalizePath(path.relative(projectRoot, absolutePath));
 
-    session.files_written.push({
-      file: normalizedFile,
-      action,
-      tokens,
-      at: new Date().toISOString(),
+    let edits = 0;
+    updateSession<SessionData>(sessionFile, { files_written: [], edit_counts: {} }, (session) => {
+      if (!session.files_written) session.files_written = [];
+      if (!session.edit_counts) session.edit_counts = {};
+
+      session.files_written.push({
+        file: normalizedFile,
+        action,
+        tokens,
+        at: new Date().toISOString(),
+      });
+
+      session.edit_counts[editKey] = (session.edit_counts[editKey] || 0) + 1;
+      edits = session.edit_counts[editKey];
     });
 
-    const editKey = normalizePath(path.relative(projectRoot, absolutePath));
-    session.edit_counts[editKey] = (session.edit_counts[editKey] || 0) + 1;
-
-    writeJSON(sessionFile, session);
-
-    if (session.edit_counts[editKey] >= 3) {
+    if (edits >= 3) {
       process.stderr.write(
-        `⚠️ OpenWolf: ${baseName} has been edited ${session.edit_counts[editKey]} times this session. If you're fixing a bug, remember to log it to .wolf/buglog.json.\n`
+        `⚠️ OpenWolf: ${baseName} has been edited ${edits} times this session. If you're fixing a bug, remember to log it to .wolf/buglog.json.\n`
       );
     }
   } catch {}

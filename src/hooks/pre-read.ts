@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy,
-  estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile
+  getWolfDir, ensureWolfDir, readJSON, updateSession, readMarkdown, parseAnatomy,
+  estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry
 } from "./shared.js";
+
+const SESSION_FALLBACK: SessionData = {
+  session_id: "", files_read: {}, anatomy_hits: 0, anatomy_misses: 0, repeated_reads_warned: 0,
+};
 
 interface SessionData {
   session_id: string;
@@ -59,10 +63,9 @@ async function main(): Promise<void> {
   // _session.json and from there in token-ledger.json.
   if (isSecretFile(normalizedFile)) { process.exit(0); return; }
 
-  const session = readJSON<SessionData>(sessionFile, {
-    session_id: "", files_read: {}, anatomy_hits: 0, anatomy_misses: 0,
-    repeated_reads_warned: 0,
-  });
+  // Snapshot read, used only to DECIDE what to print. Every mutation below re-reads under the lock
+  // and applies a delta, so a concurrent hook's update is never overwritten with this snapshot.
+  const session = readJSON<SessionData>(sessionFile, SESSION_FALLBACK);
 
   // Check if already read this session
   if (session.files_read[normalizedFile]) {
@@ -70,19 +73,21 @@ async function main(): Promise<void> {
     // If the file changed since we last read it (e.g. it was edited during the session),
     // a re-read is legitimate — refresh state and don't warn about a repeated read (upstream #41).
     if (fileMtime !== undefined && prev.mtime !== undefined && fileMtime !== prev.mtime) {
-      prev.count++;
-      prev.mtime = fileMtime;
-      writeJSON(sessionFile, session);
+      updateSession<SessionData>(sessionFile, SESSION_FALLBACK, (s) => {
+        const e = s.files_read[normalizedFile];
+        if (e) { e.count++; e.mtime = fileMtime; }
+      });
       process.exit(0);
       return;
     }
     process.stderr.write(
       `⚡ OpenWolf: ${path.basename(normalizedFile)} was already read this session (~${prev.tokens} tokens). Consider using your existing knowledge of this file.\n`
     );
-    prev.count++;
-    prev.mtime = fileMtime ?? prev.mtime;
-    session.repeated_reads_warned++;
-    writeJSON(sessionFile, session);
+    updateSession<SessionData>(sessionFile, SESSION_FALLBACK, (s) => {
+      const e = s.files_read[normalizedFile];
+      if (e) { e.count++; e.mtime = fileMtime ?? e.mtime; }
+      s.repeated_reads_warned++;
+    });
     process.exit(0);
     return;
   }
@@ -100,7 +105,7 @@ async function main(): Promise<void> {
     for (const entry of entries) {
       // Build the full relative path from the section key + filename for accurate matching
       const entryRelPath = normalizePath(path.join(sectionKey, entry.file));
-      if (normalizedFile.endsWith(entryRelPath) || normalizedFile.endsWith("/" + entryRelPath)) {
+      if (matchesAnatomyEntry(normalizedFile, entryRelPath)) {
         process.stderr.write(
           `📋 OpenWolf anatomy: ${entry.file} — ${entry.description} (~${entry.tokens} tok)\n`
         );
@@ -121,24 +126,21 @@ async function main(): Promise<void> {
     if (found) break;
   }
 
-  if (found) {
-    session.anatomy_hits++;
-  } else {
-    session.anatomy_misses++;
-  }
+  updateSession<SessionData>(sessionFile, SESSION_FALLBACK, (s) => {
+    if (found) s.anatomy_hits++;
+    else s.anatomy_misses++;
 
-  // Record initial read entry (tokens will be updated in post-read)
-  session.files_read[normalizedFile] = {
-    count: 1,
-    tokens: 0,
-    first_read: new Date().toISOString(),
-    // Whether anatomy.md already described this file. The ledger used to hardcode this as
-    // false, which made the waste detector's "anatomy would have sufficed" pattern unreachable.
-    anatomy_had_description: found,
-    mtime: fileMtime,
-  };
-
-  writeJSON(sessionFile, session);
+    // Record initial read entry (tokens will be updated in post-read)
+    s.files_read[normalizedFile] = {
+      count: 1,
+      tokens: 0,
+      first_read: new Date().toISOString(),
+      // Whether anatomy.md already described this file. The ledger used to hardcode this as
+      // false, which made the waste detector's "anatomy would have sufficed" pattern unreachable.
+      anatomy_had_description: found,
+      mtime: fileMtime,
+    };
+  });
   process.exit(0);
 }
 

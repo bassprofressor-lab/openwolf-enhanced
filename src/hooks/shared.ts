@@ -108,6 +108,31 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
   }
 }
 
+/**
+ * Read-modify-write `_session.json` under the lock, in one place.
+ *
+ * Every hook in a session mutates this one file, and until now only two of the seven writers took
+ * the lock at all: the rest did `readJSON` … `writeJSON` around unrelated work, so a PostToolUse
+ * hook finishing while PreToolUse was mid-cycle silently dropped one of the two updates. Reads and
+ * writes get counted for the token ledger, so a lost update is a wrong number in a report nobody
+ * can audit afterwards.
+ *
+ * The mutator receives the state as it is ON DISK at the moment the lock is held — not a snapshot
+ * taken earlier — and must apply a DELTA (increment, add a key), never assign a whole object it
+ * captured before. That is what makes the update safe against a concurrent writer.
+ */
+export function updateSession<T extends object>(
+  sessionFile: string,
+  fallback: T,
+  mutate: (session: T) => void,
+): void {
+  withLock(sessionFile, () => {
+    const session = readJSON<T>(sessionFile, fallback);
+    mutate(session);
+    writeJSON(sessionFile, session);
+  });
+}
+
 // A missing file is normal (first run) and silently yields the fallback. An EXISTING file that
 // fails to parse is a different situation: whatever it held is about to be treated as empty, and
 // a read-modify-write caller would then overwrite it with defaults. That must at least be visible.
@@ -176,9 +201,23 @@ export function readJSON<T = unknown>(filePath: string, fallback: T): T {
   try {
     return JSON.parse(raw) as T;
   } catch (e) {
-    process.stderr.write(`[openwolf] ${path.basename(filePath)} exists but is not valid JSON — using defaults (${(e as Error).message})\n`);
+    // The caller is about to treat this file as empty and, in a read-modify-write, overwrite it
+    // with defaults — so a corrupt token-ledger.json meant months of usage history vanished on the
+    // next Stop hook, with one line on stderr as the only trace. Move it aside first. Recovery is
+    // then a possibility rather than a hope, and because the path no longer exists, the next read
+    // takes the ordinary "missing file" branch instead of warning forever.
+    quarantineCorrupt(filePath);
+    process.stderr.write(`[openwolf] ${path.basename(filePath)} was not valid JSON — moved aside, using defaults (${(e as Error).message})\n`);
     return fallback;
   }
+}
+
+/** Rename a corrupt file to <name>.corrupt-<stamp>. Best-effort: never throws, never blocks a read. */
+function quarantineCorrupt(filePath: string): void {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    fs.renameSync(filePath, `${filePath}.corrupt-${stamp}`);
+  } catch { /* unwritable directory, race with another process — defaults still apply */ }
 }
 
 // Duplicated from utils/fs-safe.ts (separate build roots). Never throws — a hook must not kill a
@@ -276,13 +315,18 @@ export function makeIgnoreMatcher(patterns: string[]): (relPath: string) => bool
       if (base === pat || parts.includes(pat)) return true;
       if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
     }
-    if (pat.includes("*")) {
+    // `?` is a gitignore wildcard for exactly one character, and it also has to be handled BEFORE
+    // this becomes a regex — it used to be neither escaped nor translated, so it survived into the
+    // pattern as a regex quantifier and made the preceding character OPTIONAL. `build?/*.js` then
+    // matched `buil/x.js` and missed `build2/x.js`: the rule silently covered the wrong files.
+    if (pat.includes("*") || pat.includes("?")) {
       const re = new RegExp(
         "^" +
           pat
             .replace(/[.+^${}()|[\]\\]/g, "\\$&")
             .replace(/\*\*/g, "\u0000")
             .replace(/\*/g, "[^/]*")
+            .replace(/\?/g, "[^/]")
             .replace(/\u0000/g, ".*") +
           "$"
       );
@@ -1037,6 +1081,46 @@ export function readStdin(): Promise<string> {
 
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
+}
+
+/**
+ * Does an absolute (forward-slashed) file path correspond to this anatomy.md entry?
+ *
+ * anatomy entries are project-relative ("src/api/client.ts"); the hooks see an absolute path. The
+ * old test was `abs.endsWith(rel) || abs.endsWith("/" + rel)`, and the first half of that had no
+ * path-segment boundary: `/home/me/vendor/src/api/client.ts` and `/tmp/other-src/api/client.ts`
+ * both "matched" an entry for `src/api/client.ts`, so the hook printed another file's description
+ * and token estimate and booked an anatomy HIT for a file anatomy.md had never seen. The second
+ * half of the old expression was already correct, so this keeps that and drops the loose one — an
+ * exact equality covers the case where the path is already relative.
+ */
+export function matchesAnatomyEntry(filePath: string, entryRelPath: string): boolean {
+  return filePath === entryRelPath || filePath.endsWith("/" + entryRelPath);
+}
+
+/**
+ * Does this project-relative path point OUTSIDE the project root?
+ *
+ * Input is the output of `normalizePath(path.relative(root, file))`. The obvious test —
+ * "does it start with `..`" — is complete on POSIX and wrong on Windows, because `path.relative`
+ * cannot express a route between two drives and gives up by returning the target ABSOLUTE:
+ *
+ *   path.win32.relative("C:\\proj", "F:\\secrets\\x")  ===  "F:\\secrets\\x"
+ *
+ * That has no leading `..`, so the guard passed it and the full foreign path was written into
+ * anatomy.md and memory.md — precisely the leak (upstream #56) the guard exists to prevent, on the
+ * one platform nobody tested it on. An absolute result means "no relative route exists", i.e. the
+ * strongest possible outside-the-root signal.
+ *
+ * The `..` test is also anchored to a whole segment now: a file genuinely named `..config` in the
+ * root is inside the project, and used to be counted as external.
+ */
+export function isOutsideProject(relPath: string): boolean {
+  if (relPath === "") return true;                       // the path IS the root, not a file in it
+  if (relPath === ".." || relPath.startsWith("../")) return true;
+  if (path.isAbsolute(relPath)) return true;             // win32 cross-drive ("F:/secrets/x")
+  if (/^[a-zA-Z]:/.test(relPath)) return true;           // drive-relative ("F:x"), also not ours
+  return false;
 }
 
 // Count non-mechanical (semantic) entries written to memory.md today. Mechanical rows

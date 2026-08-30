@@ -1375,7 +1375,7 @@ test("writeJSON: returns true on success, false + stderr warning when serializat
   assert.deepEqual(JSON.parse(fs.readFileSync(p, "utf8")), { a: 1 }, "previous content untouched");
 });
 
-test("readJSON: missing file is silent, corrupt existing file warns on stderr", () => {
+test("readJSON: missing file is silent; a corrupt one is reported AND preserved, not overwritten", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wolf-readjson-"));
   const missing = path.join(dir, "missing.json");
   const corrupt = path.join(dir, "corrupt.json");
@@ -1389,7 +1389,15 @@ test("readJSON: missing file is silent, corrupt existing file warns on stderr", 
     assert.equal(warned, "", "missing file stays silent");
     assert.deepEqual(fsSafeReadJSON(corrupt, { d: 1 }), { d: 1 }, "corrupt → fallback");
   } finally { process.stderr.write = orig; }
-  assert.match(warned, /corrupt\.json exists but is not valid JSON/, "corrupt file is reported");
+  assert.match(warned, /corrupt\.json was not valid JSON/, "corrupt file is reported");
+
+  // The caller's next step is a read-modify-write that would overwrite this path with the
+  // fallback. The original bytes have to survive that, or a damaged token-ledger.json takes
+  // the whole usage history with it.
+  const kept = fs.readdirSync(dir).filter((f) => f.startsWith("corrupt.json.corrupt-"));
+  assert.equal(kept.length, 1, "corrupt file was moved aside exactly once");
+  assert.equal(fs.readFileSync(path.join(dir, kept[0]), "utf8"), "{ not json !", "original bytes intact");
+  assert.equal(fs.existsSync(corrupt), false, "the path itself is free for a clean rewrite");
 });
 
 // --- waste detector: silent-blind detection when read tracking is dead ---

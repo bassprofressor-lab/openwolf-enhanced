@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, parseAnatomy, estimateFileTokens, getTokenRatios, readStdin, normalizePath, loadIgnore, isSecretFile } from "./shared.js";
+import { getWolfDir, ensureWolfDir, updateSession, readMarkdown, parseAnatomy, estimateFileTokens, getTokenRatios, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry } from "./shared.js";
 
 interface SessionData {
   files_read: Record<string, { count: number; tokens: number; first_read: string; anatomy_had_description?: boolean }>;
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     for (const [sectionKey, entries] of sections) {
       for (const entry of entries) {
         const entryRelPath = normalizePath(path.join(sectionKey, entry.file));
-        if (normalizedFile.endsWith(entryRelPath) || normalizedFile.endsWith("/" + entryRelPath)) {
+        if (matchesAnatomyEntry(normalizedFile, entryRelPath)) {
           tokens = entry.tokens;
           break;
         }
@@ -68,24 +68,23 @@ async function main(): Promise<void> {
     }
   }
 
-  const session = readJSON<SessionData>(sessionFile, { files_read: {} });
-  if (session.files_read[normalizedFile]) {
-    // Never let a re-read shrink the estimate to zero. A repeat read often arrives with an
-    // empty tool_output.content, and if the file has no anatomy entry the fallback above
-    // cannot recover a number — overwriting unconditionally would wipe the good first-read
-    // estimate. That deflates inputTokens in stop.ts and, because savedFromRepeats multiplies
-    // by (count - 1), silently zeroes the repeat-savings metric too.
-    const prev = session.files_read[normalizedFile].tokens ?? 0;
-    session.files_read[normalizedFile].tokens = Math.max(prev, tokens);
-  } else {
-    session.files_read[normalizedFile] = {
-      count: 1,
-      tokens,
-      first_read: new Date().toISOString(),
-    };
-  }
-
-  writeJSON(sessionFile, session);
+  updateSession<SessionData>(sessionFile, { files_read: {} }, (session) => {
+    if (session.files_read[normalizedFile]) {
+      // Never let a re-read shrink the estimate to zero. A repeat read often arrives with an
+      // empty tool_output.content, and if the file has no anatomy entry the fallback above
+      // cannot recover a number — overwriting unconditionally would wipe the good first-read
+      // estimate. That deflates inputTokens in stop.ts and, because savedFromRepeats multiplies
+      // by (count - 1), silently zeroes the repeat-savings metric too.
+      const prev = session.files_read[normalizedFile].tokens ?? 0;
+      session.files_read[normalizedFile].tokens = Math.max(prev, tokens);
+    } else {
+      session.files_read[normalizedFile] = {
+        count: 1,
+        tokens,
+        first_read: new Date().toISOString(),
+      };
+    }
+  });
   process.exit(0);
 }
 

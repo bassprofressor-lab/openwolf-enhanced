@@ -12,6 +12,13 @@ export function toCSV(rows: Array<Record<string, unknown>>): string {
   const esc = (v: unknown): string => {
     if (v === null || v === undefined) return "";
     let s = Array.isArray(v) ? v.join("; ") : String(v);
+    // Neutralise spreadsheet formulas before quoting. Excel, LibreOffice and Sheets EXECUTE a cell
+    // that starts with = + - @ (and, in Excel, tab/CR), so a bug whose error_message begins with
+    // `=HYPERLINK(...)` becomes a live formula the moment someone opens the export. The values here
+    // come from buglog.json and the token ledger — files an agent writes from whatever it read in
+    // the repo. A leading apostrophe is the conventional fix: spreadsheets treat the cell as text
+    // and hide the marker, and a plain-text reader sees one extra character.
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
     return s;
   };

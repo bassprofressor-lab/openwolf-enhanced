@@ -13,7 +13,7 @@ import { DesignQCEngine } from "../designqc/designqc-engine.js";
 import { buildLinkGraph } from "../utils/link-graph.js";
 import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
-import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles } from "../utils/maintenance.js";
+import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles, getRetention, rotateDaemonLog, pruneProposals } from "../utils/maintenance.js";
 import { resolveLlmConfig, requiresApiKey } from "./llm-provider.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 
@@ -555,6 +555,13 @@ function switchProject(newRoot: string): void {
   projectMeta = detectProjectMeta();
   config = loadConfig(wolfDir);
 
+  // The log has to follow the project too, at the new project's level. Everything below this line
+  // (and every later cron failure) would otherwise be written into the previous project's file.
+  logger.retarget(
+    path.join(wolfDir, "daemon.log"),
+    config.openwolf.daemon.log_level as "debug" | "info" | "warn" | "error",
+  );
+
   // Restart subsystems for the new project.
   if (config.openwolf.cron.enabled) {
     cronEngine = new CronEngine(wolfDir, projectRoot, logger, broadcast);
@@ -562,8 +569,18 @@ function switchProject(newRoot: string): void {
   }
   fileWatcher = startFileWatcher(wolfDir, logger, broadcast);
 
-  // Mark the new project as running.
-  markCronState({ engine_status: "running", last_heartbeat: new Date().toISOString() });
+  // Re-arm the heartbeat at the NEW project's interval. It was set once at boot from the boot
+  // project's config and never touched again, so a project configured for a 5-minute heartbeat
+  // silently kept the previous project's 30.
+  armHeartbeat();
+
+  // Report the status the new project actually has. This said "running" unconditionally, so a
+  // project with cron disabled showed a live engine and a ticking heartbeat while no scheduler
+  // existed — cron-state.json is what the dashboard and `openwolf status` read.
+  markCronState({
+    engine_status: cronEngine ? "running" : "disabled",
+    last_heartbeat: new Date().toISOString(),
+  });
 
   // Push the new project's state to all connected dashboard clients (trimmed via the helper).
   const files: Record<string, string> = {};
@@ -583,15 +600,42 @@ function markCronState(patch: Record<string, unknown>): void {
   });
 }
 
-// Health heartbeat
-const heartbeatInterval = config.openwolf.cron.heartbeat_interval_minutes * 60 * 1000;
-const heartbeatTimer = setInterval(() => {
-  markCronState({ last_heartbeat: new Date().toISOString() });
-  broadcast({ type: "health", status: "healthy", uptime: Math.floor((Date.now() - startTime) / 1000) });
-}, heartbeatInterval);
+// Health heartbeat. Re-armed on every project switch, because the interval is per-project config.
+let heartbeatTimer: NodeJS.Timeout | null = null;
+function armHeartbeat(): void {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  const heartbeatInterval = config.openwolf.cron.heartbeat_interval_minutes * 60 * 1000;
+  heartbeatTimer = setInterval(() => {
+    markCronState({ last_heartbeat: new Date().toISOString() });
+    broadcast({ type: "health", status: "healthy", uptime: Math.floor((Date.now() - startTime) / 1000) });
+    selfMaintain();
+  }, heartbeatInterval);
+}
 
-// Update cron-state to running
-markCronState({ engine_status: "running", last_heartbeat: new Date().toISOString() });
+/**
+ * Keep the daemon's own footprint bounded.
+ *
+ * Both limits existed in config.json and both were only ever enforced by `openwolf doctor` — a
+ * command a person has to remember to type. The daemon is the process that WRITES daemon.log and
+ * proposals/, and it runs for months at a time, so a retention rule it never applies to itself is
+ * a setting that describes nothing. Cheap: a stat and a directory listing per heartbeat.
+ */
+function selfMaintain(): void {
+  try {
+    const ret = getRetention(wolfDir);
+    rotateDaemonLog(wolfDir, ret.daemon_log_max_bytes);
+    pruneProposals(wolfDir, ret.proposals_keep);
+  } catch { /* housekeeping must never take the daemon down */ }
+}
+
+armHeartbeat();
+selfMaintain();
+
+// Update cron-state to whatever this project's engine actually is.
+markCronState({
+  engine_status: cronEngine ? "running" : "disabled",
+  last_heartbeat: new Date().toISOString(),
+});
 
 logger.info("OpenWolf daemon started");
 
@@ -600,7 +644,7 @@ function shutdown(): void {
   logger.info("Daemon shutting down...");
   broadcast({ type: "daemon_stopping", timestamp: new Date().toISOString() });
 
-  clearInterval(heartbeatTimer);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (cronEngine) cronEngine.stop();
 
   // markCronState uses the LIVE wolfDir: after a project switch, shutdown must mark the

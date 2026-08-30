@@ -16,6 +16,7 @@ export interface Retention {
   memory_consolidate_after_days: number;
   memory_max_bytes: number;
   daemon_log_max_bytes: number;
+  proposals_keep: number;
 }
 
 export const DEFAULT_RETENTION: Retention = {
@@ -26,6 +27,7 @@ export const DEFAULT_RETENTION: Retention = {
   memory_consolidate_after_days: 7,
   memory_max_bytes: 262144, // 256 KB
   daemon_log_max_bytes: 524288, // 512 KB
+  proposals_keep: 20,
 };
 
 export function getRetention(wolfDir: string): Retention {
@@ -65,13 +67,18 @@ export function makeIgnoreMatcher(patterns: string[]): (relPath: string) => bool
       if (base === pat || parts.includes(pat)) return true;
       if (pat.startsWith("*.") && norm.endsWith(pat.slice(1))) return true;
     }
-    if (pat.includes("*")) {
+    // `?` is a gitignore wildcard for exactly one character, and it also has to be handled BEFORE
+    // this becomes a regex — it used to be neither escaped nor translated, so it survived into the
+    // pattern as a regex quantifier and made the preceding character OPTIONAL. `build?/*.js` then
+    // matched `buil/x.js` and missed `build2/x.js`: the rule silently covered the wrong files.
+    if (pat.includes("*") || pat.includes("?")) {
       const re = new RegExp(
         "^" +
           pat
             .replace(/[.+^${}()|[\]\\]/g, "\\$&")
             .replace(/\*\*/g, "\u0000")
             .replace(/\*/g, "[^/]*")
+            .replace(/\?/g, "[^/]")
             .replace(/\u0000/g, ".*") +
           "$"
       );
@@ -782,6 +789,36 @@ export function rotateDaemonLog(wolfDir: string, maxBytes: number): CompactResul
   }
   const after = fileSize(p);
   return { changed: true, before, after, detail: `daemon.log: rotated ${humanBytes(before)} → ${humanBytes(after)}` };
+}
+
+/**
+ * Keep .wolf/proposals/ bounded.
+ *
+ * Every AI cron task writes one proposal per run and nothing ever removed them: two enabled tasks
+ * on a weekly schedule leave ~100 files a year, each holding a model's full answer over cerebrum.md
+ * and memory.md. Backups and the daemon log had a retention rule; this directory was simply missed.
+ * Newest are kept — a proposal is a review item, and an unreviewed one from last spring is not.
+ */
+export function pruneProposals(wolfDir: string, keep: number): CompactResult {
+  const dir = path.join(wolfDir, "proposals");
+  if (!fs.existsSync(dir)) return noop("proposals");
+  const before = dirSize(dir);
+  const files = safeReaddir(dir)
+    .map((n) => ({ name: n, full: path.join(dir, n) }))
+    .filter((e) => {
+      try { return fs.statSync(e.full).isFile(); } catch { return false; }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name)); // "<task>-<ISO stamp>.md" sorts chronologically
+
+  if (files.length <= keep) {
+    return { changed: false, before, after: before, detail: `proposals: ${files.length} kept, within limit (${keep})` };
+  }
+  const toRemove = files.slice(0, files.length - keep);
+  for (const f of toRemove) {
+    try { fs.rmSync(f.full, { force: true }); } catch {}
+  }
+  const after = dirSize(dir);
+  return { changed: true, before, after, detail: `proposals: removed ${toRemove.length}, kept ${keep} (${humanBytes(before)} → ${humanBytes(after)})` };
 }
 
 // ---------------------------------------------------------------------------

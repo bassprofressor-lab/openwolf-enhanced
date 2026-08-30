@@ -39,7 +39,7 @@ const ALWAYS_OVERWRITE = ["OPENWOLF.md", "reframe-frameworks.md"];
 
 // Deep-merge template defaults UNDER existing user config: user values win, and any
 // new keys introduced by a newer OpenWolf version (e.g. openwolf.retention) are added.
-function deepMergeDefaults(
+export function deepMergeDefaults(
   base: Record<string, unknown>,
   override: Record<string, unknown>
 ): Record<string, unknown> {
@@ -427,8 +427,16 @@ export function restoreCommand(backupName?: string): void {
     return;
   }
 
+  // `backupName` is a CLI argument pasted into a path. `openwolf restore ../../something` resolved
+  // outside .wolf/backups/ and then copied every file it found there over the project's knowledge
+  // base — a typo (or a copy-pasted line) could overwrite cerebrum.md and memory.md from an
+  // arbitrary directory. A backup is a single directory entry under backups/, nothing else.
   const backupDir = path.join(backupsDir, backupName);
-  if (!fs.existsSync(backupDir)) {
+  if (path.dirname(path.resolve(backupDir)) !== path.resolve(backupsDir)) {
+    console.log(`"${backupName}" is not a backup name. Run \`openwolf restore\` to list them.`);
+    return;
+  }
+  if (!fs.existsSync(backupDir) || !fs.statSync(backupDir).isDirectory()) {
     console.log(`Backup "${backupName}" not found.`);
     return;
   }

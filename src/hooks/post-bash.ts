@@ -72,7 +72,12 @@ async function main(): Promise<void> {
   // COMMAND position of each shell segment, not the whole string — the old `\bopenwolf\b` skipped
   // every command that merely mentioned an openwolf PATH, which made the write counter blind for
   // exactly the sessions that work on an openwolf checkout.
-  const invokesOpenwolf = cmd.split(/&&|\|\||[;|]/).some(segmentInvokesOpenwolf);
+  // Newlines separate commands exactly like `;` does, and they were missing from this split: a
+  // two-line Bash block whose second line ran `openwolf push` was tested as ONE segment starting
+  // with the first line's command, so the filter saw no openwolf invocation and captured the whole
+  // thing. Multi-line blocks are the normal shape of an agent's shell call, so this was the common
+  // case, not the edge one.
+  const invokesOpenwolf = cmd.split(/&&|\|\||[;|\n\r]/).some(segmentInvokesOpenwolf);
   if (invokesOpenwolf) { process.exit(0); return; }
 
   const failed = classifyOutcome(input.tool_response) === "error";

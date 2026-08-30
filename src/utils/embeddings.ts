@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { readJSON } from "./fs-safe.js";
-import { isLocalEndpoint } from "../daemon/llm-provider.js";
+import { isLocalEndpoint, assertSafeBaseUrl } from "../daemon/llm-provider.js";
 
 // Embeddings for semantic recall. Provider-agnostic: talks to any OpenAI-compatible /embeddings
 // endpoint. Defaults to a local LM Studio server (keyless), so semantic memory stays local — the
@@ -37,6 +37,13 @@ export function resolveEmbedConfig(wolfDir: string): EmbedConfig {
 /** Embed a batch of texts. Loopback endpoints run keyless; remote ones require the configured key. */
 export async function embedTexts(cfg: EmbedConfig, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
+  // Same gate the chat path has carried since 1.15.1 (bug-130), and for the same reason: base_url
+  // comes out of .wolf/config.json, a committed file, so a cloned repo picks the host. What goes out
+  // here is the knowledge base itself — cerebrum, memory, anatomy — plus the bearer token, which is
+  // strictly more than a chat prompt. It had no guard at all: no https requirement, no private/
+  // metadata-address check, and default redirect handling, so a 307 replayed the whole POST body
+  // (and the Authorization header) at whatever host the first one named.
+  assertSafeBaseUrl(cfg.baseUrl, "recall.embeddings.base_url");
   const key = process.env[cfg.apiKeyEnv] ?? "";
   if (!key && !isLocalEndpoint(cfg.baseUrl)) {
     throw new Error(`${cfg.apiKeyEnv} is not set — a remote embeddings endpoint needs a key. Point openwolf.recall.embeddings.base_url at a local server (LM Studio http://localhost:1234/v1) to run keyless.`);
@@ -46,6 +53,7 @@ export async function embedTexts(cfg: EmbedConfig, texts: string[]): Promise<num
     headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify({ model: cfg.model, input: texts }),
     signal: AbortSignal.timeout(120_000),
+    redirect: "error",
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");

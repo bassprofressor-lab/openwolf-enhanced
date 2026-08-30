@@ -7,7 +7,7 @@ import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
 import { readDashboardToken } from "../utils/dashboard-auth.js";
 import { isPortFree } from "../utils/ports.js";
-import { isWindows } from "../utils/platform.js";
+import { isWindows, execShim } from "../utils/platform.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,7 +22,9 @@ function getDashboardPort(): number {
   return config.openwolf.dashboard.port;
 }
 
-// On Windows the pm2 shim is pm2.cmd; execFileSync needs the exact name (no shell).
+// On Windows the pm2 shim is pm2.cmd. Node cannot spawn a .cmd without a shell (CVE-2024-27980
+// hardening), so every call goes through execShim(), which routes it via cmd.exe with the
+// arguments still quoted individually rather than joined into a parseable string.
 const PM2 = isWindows() ? "pm2.cmd" : "pm2";
 
 function getPm2Name(): string {
@@ -160,11 +162,11 @@ export function daemonStart(): void {
   const daemonScript = path.resolve(__dirname, "..", "daemon", "wolf-daemon.js");
 
   try {
-    execFileSync(PM2, ["start", daemonScript, "--name", name, "--cwd", projectRoot, "--", "--env", `OPENWOLF_PROJECT_ROOT=${projectRoot}`], {
+    execShim(PM2, ["start", daemonScript, "--name", name, "--cwd", projectRoot, "--", "--env", `OPENWOLF_PROJECT_ROOT=${projectRoot}`], {
       stdio: "inherit",
       env: { ...process.env, OPENWOLF_PROJECT_ROOT: projectRoot },
     });
-    execFileSync(PM2, ["save"], { stdio: "ignore" });
+    execShim(PM2, ["save"], { stdio: "ignore" });
     console.log(`\n  ✓ Daemon started: ${name}`);
     if (isWindows()) {
       console.log("  Tip: Run 'pm2-windows-startup' for boot persistence.");
@@ -190,7 +192,7 @@ export async function daemonStop(): Promise<void> {
   if (hasPm2()) {
     const name = getPm2Name();
     try {
-      execFileSync(PM2, ["stop", name], { stdio: "ignore" });
+      execShim(PM2, ["stop", name], { stdio: "ignore" });
       markDaemonStopped(wolfDir);
       console.log(`  ✓ Daemon stopped (PM2): ${name}`);
       return;
@@ -234,7 +236,7 @@ export async function daemonRestart(): Promise<void> {
   if (hasPm2()) {
     const name = getPm2Name();
     try {
-      execFileSync(PM2, ["restart", name], { stdio: "ignore" });
+      execShim(PM2, ["restart", name], { stdio: "ignore" });
       console.log(`  ✓ Daemon restarted (PM2): ${name}`);
       return;
     } catch {
@@ -274,7 +276,7 @@ export function daemonLogs(): void {
 
   const name = getPm2Name();
   try {
-    execFileSync(PM2, ["logs", name, "--lines", "50", "--nostream"], { stdio: "inherit" });
+    execShim(PM2, ["logs", name, "--lines", "50", "--nostream"], { stdio: "inherit" });
   } catch {
     console.error("Failed to get daemon logs.");
   }

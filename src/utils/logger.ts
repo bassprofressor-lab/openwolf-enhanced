@@ -17,12 +17,27 @@ export class Logger {
   constructor(logFile: string | null, level: LogLevel = "info") {
     this.logFile = logFile;
     this.level = level;
-    if (logFile) {
-      const dir = path.dirname(logFile);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-    }
+    this.ensureDir();
+  }
+
+  private ensureDir(): void {
+    if (!this.logFile) return;
+    const dir = path.dirname(this.logFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
+
+  /**
+   * Point the logger at another project's .wolf/daemon.log.
+   *
+   * The daemon can hot-switch projects without restarting, and the logger was the one binding that
+   * never moved: after a switch, project B's cron runs, task failures and LLM errors kept appending
+   * to project A's daemon.log, under A's log level. `openwolf daemon logs` in B then showed nothing
+   * at all, which reads like a daemon that stopped working.
+   */
+  retarget(logFile: string | null, level: LogLevel = this.level): void {
+    this.logFile = logFile;
+    this.level = level;
+    this.ensureDir();
   }
 
   private shouldLog(level: LogLevel): boolean {

@@ -6,6 +6,181 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.27.0] — 2026-08-30
+
+A security and robustness pass. An external AI audit of 1.26.0 was checked claim by claim against
+the code first: of its 24 findings, 15 held, 7 were weaker or wrong in their reasoning, and 2 were
+simply wrong. Two more issues turned up during that check that the audit had missed — including the
+one that actually mattered on the Design QC path. Everything below is a fix; nothing new was added
+except the retention limit and the process helper that the fixes needed.
+
+Minor rather than patch, because three changes are visible to existing installs: a new
+`retention.proposals_keep` key, a changed pm2 start path on Windows, and remote embedding endpoints
+now requiring `https`.
+
+### Fixed — values from committed files were treated as trusted input
+
+`.wolf/config.json` and `.wolf/cron-manifest.json` are committed by design; that is the point of a
+shared brain. It also means that on a cloned repository, their contents are written by whoever wrote
+the repository. Four places took them at face value.
+
+- 🔒 **A cron task id became a file path.** `writeProposal()` built
+  `.wolf/proposals/${taskId}-${stamp}.md` straight from the manifest, so an `id` of
+  `../../../../etc/cron.d/openwolf` wrote outside `.wolf/`, with the daemon's privileges, on a
+  schedule. Ids are now reduced to a single path segment that cannot traverse, cannot be empty, and
+  cannot be a Windows device name.
+
+- 🔒 **The `context_files` guard could be walked around with a symlink.** It compared resolved path
+  *strings*, which knows nothing about links: a repo carrying `docs/notes -> /etc/shadow` passed the
+  check and shipped the target to the LLM API — the exact exfiltration the guard was written to
+  stop. The real path is resolved and checked too, against the project root's own real path, so a
+  project reached through a link (`/root/x -> /mnt/x`, macOS `/tmp`) still works.
+
+- 🔒 **`designqc.chrome_path` chose which executable was launched.** The configured value went to
+  puppeteer's `executablePath` if the file merely existed. It must now be *named* like a browser and
+  live outside the project; anything else is refused with an explanation and auto-detection runs
+  instead.
+
+- 🔒 **`package.json` `homepage` chose what Design QC photographed.** `detectDeployedUrl()` also
+  reads `.env*` and `vercel.json`, all unvalidated — so `"homepage":
+  "http://169.254.169.254/latest/meta-data/"` made a plain `openwolf designqc` screenshot the cloud
+  instance's metadata into `.wolf/designqc-captures/`, a directory that gets committed and read back
+  by a model. Repo-derived URLs are now restricted to public http(s); a URL you pass yourself
+  (`--url`, or the token-gated daemon route) may still be loopback or LAN, but never `file:`,
+  `data:` or `chrome:`.
+
+- 🔒 **The embeddings endpoint had no egress guard at all.** The chat path has had one since 1.15.1;
+  this one never did, although what leaves through it is the knowledge base itself — cerebrum,
+  memory, anatomy — plus the bearer token. No https requirement, no private/metadata-address check,
+  and default redirect handling, so a 307 replayed the whole POST body at whatever host the first
+  one named. It now uses the same `assertSafeBaseUrl` as the chat path, with `redirect: "error"`.
+
+  **Breaking for one setup:** a remote `recall.embeddings.base_url` over plain `http://` is now
+  refused. Loopback stays keyless and cleartext as before. Point it at `https://`, or at a local
+  model server.
+
+### Fixed — data loss
+
+- 💾 **`openwolf init` in an existing project reset `config.json`.** It sat in `ALWAYS_OVERWRITE`, so
+  a re-run wiped tuned retention limits, assigned daemon/dashboard ports, Design QC settings and —
+  worst — `openwolf.remote.base_url`/`project`, silently unlinking the project from its team
+  workspace. `openwolf update` had already learned to deep-merge it for exactly these reasons, and
+  said so in a comment. `init` now uses the same merge: your values win, new default keys are added.
+
+- 💾 **Five of the seven writers of `_session.json` took no lock.** `post-read`, `post-write`,
+  `pre-read`, `stop` and `session-start` did read-modify-write around unrelated work, so a
+  PostToolUse hook finishing while PreToolUse was mid-cycle silently dropped one of the two updates.
+  Reads and writes feed the token ledger, so a lost update is a wrong number in a report nobody can
+  audit afterwards. A single `updateSession()` helper now re-reads under the lock and applies a
+  delta, and every writer goes through it.
+
+- 💾 **The Stop hook's crash-safety comment was not true.** `session.booked` was *set* inside the
+  ledger lock but *persisted* about thirty lines later, outside it, past two `memory.md` appends and
+  a memory compaction. Anything ending the process in that window left the ledger credited and the
+  session unmarked, so the next Stop booked every delta again — the exact over-count the comment
+  said was impossible. It is written under the same lock now, one statement after the ledger.
+
+- 💾 **A corrupt `.json` was overwritten instead of preserved.** `readJSON` fell back to defaults and
+  the caller's read-modify-write then replaced the file, so a damaged `token-ledger.json` took the
+  usage history with it and left one stderr line as the only trace. The file is moved aside as
+  `<name>.corrupt-<timestamp>` first.
+
+### Fixed — Windows
+
+- 🪟 **The "never track files outside the project" guard did not hold across drives.**
+  `path.relative("C:\\proj", "F:\\x")` cannot express a route between two drives and returns
+  `F:\x` — no leading `..`, so the guard passed it and the absolute foreign path leaked into
+  `anatomy.md` and `memory.md` (upstream #56), on the one platform nobody had tested it on. An
+  absolute or drive-relative result is now recognised as "outside". The `..` test is also anchored
+  to a whole segment, so a file genuinely named `..config` in the project root stops counting as
+  external.
+
+- 🪟 **pm2 could not be started at all.** Since the fix for CVE-2024-27980 (Node 18.20.2 / 20.12.2 /
+  21.7.3), Node refuses to spawn a `.cmd` without `shell: true` and throws `EINVAL`. Both pm2 call
+  sites wrapped that in a bare `catch`, so Windows users were told "pm2 found but daemon start
+  failed" — a message that reads like a pm2 problem and is not one. `shell: true` is *not* the fix,
+  since it joins the arguments back into a parseable string; calls now go through `cmd.exe /d /s /c`
+  with `windowsVerbatimArguments` and quoting we control. A path containing `%` (which cannot be
+  escaped on a command line) is refused loudly rather than launched wrongly.
+
+- 🪟 **The Design QC dev server survived every run.** `proc.kill()` signals only the direct child,
+  which is a shell, and on Windows a signal to `cmd.exe` does not propagate — so the dev server kept
+  holding its port and the next run screenshotted the stale build. The process tree is killed via
+  `taskkill /T` on Windows and via the process group on POSIX.
+
+### Fixed — daemon
+
+- 🔧 **The logger never followed a project switch.** It was built once at boot, so after
+  `/api/switch` project B's cron runs, task failures and LLM errors kept appending to project A's
+  `daemon.log`, under A's log level — and `openwolf daemon logs` in B showed nothing at all, which
+  reads like a daemon that stopped working.
+
+- 🔧 **The heartbeat kept the boot project's interval**, and `engine_status` was written as
+  `"running"` regardless of the new project's `cron.enabled`, so a project with cron switched off
+  showed a live engine and a ticking heartbeat with no scheduler behind it. It now reports
+  `disabled`, and the timer is re-armed at the new project's cadence.
+
+- 🔧 **`daemon.log` and `proposals/` grew without bound.** Both limits existed in `config.json` and
+  were only ever enforced by `openwolf doctor`, a command you have to remember to type — while the
+  daemon is the process that writes both and runs for months. It now applies them to itself on each
+  heartbeat. `proposals/` had no limit at all before; the new `retention.proposals_keep` (default 20)
+  gives it one, added to existing configs by the deep merge.
+
+### Fixed — dashboard
+
+- 🖥️ **One malformed `.wolf` file blanked the whole dashboard.** Not through `JSON.parse` — every one
+  of those was already guarded — but through shape: a file that parses fine but is `{}` or `[]` gave
+  `undefined` where a panel indexed an array, and with no error boundary anywhere, React unmounted
+  the entire tree. Shapes are normalised once at ingest, and a `PanelBoundary` now contains a render
+  error to the panel that caused it.
+
+- 🖥️ **A 401 rendered as an empty project.** `refresh()` ignored `r.ok` and fed
+  `{"error":"unauthorized"}` to the file processor, which found no known keys and left the initial
+  empty state on screen — indistinguishable from a project that had done nothing.
+
+- 🖥️ **The retry button opened a second WebSocket** without closing the first, so every broadcast
+  arrived twice, and each further retry added another copy.
+
+### Fixed — smaller things
+
+- 📊 **CSV export could carry a live formula.** Spreadsheets execute a cell starting with `=`, `+`,
+  `-` or `@`, and the values come from `buglog.json` and the token ledger, which an agent writes
+  from whatever it read in the repo. Such values are now prefixed with an apostrophe.
+
+- 🧩 **`?` in a `.gitignore`/`.wolfignore` pattern was neither escaped nor translated**, so it
+  survived into the compiled regex as a quantifier and made the preceding character optional:
+  `build?/*.js` matched `buil/x.js` and missed `build2/x.js`. It now means exactly one character, in
+  both copies of the matcher.
+
+- 🧩 **An anatomy entry matched on a bare suffix**, with no path-segment boundary, so
+  `/tmp/other-src/api/client.ts` "matched" an entry for `src/api/client.ts` — printing another
+  file's description and booking an anatomy hit for a file `anatomy.md` had never seen.
+
+- 🧩 **A newline bypassed the openwolf self-invocation filter** in the Bash hook. Newlines separate
+  commands exactly like `;` does and were missing from the split, so a multi-line block — the normal
+  shape of an agent's shell call — whose second line ran `openwolf push` was captured anyway.
+
+- 🧩 **`openwolf restore ../../something` resolved outside `backups/`** and copied whatever it found
+  there over the project's knowledge base. A backup name must now be a single entry under
+  `backups/`.
+
+### Notes on the audit
+
+Recorded here because the corrections matter as much as the fixes. The report's `pm2 --cwd`
+"cmd.exe metacharacter injection" does not exist — those calls use `execFileSync` with an argument
+array, so no shell is involved; the real defect there was the `EINVAL` above. "`backups/` accumulate
+forever" is wrong: `pruneBackups` runs in `update` and `doctor`. The dashboard finding had the right
+conclusion with the wrong cause. And the finding filed as LOW — the cron task id — was the most
+serious one in the report, while the Design QC SSRF filed as MEDIUM sits behind the dashboard token
+and is largely self-directed; the repo-controlled path it missed is the one that was worth fixing.
+
+### Tests
+
+15 new tests in `test/hardening.test.js`, each pinned so that reverting a fix turns it red for the
+same reason the bug was reported. 211 total, all green. They found two mistakes in these fixes
+before release: a slug that came out unreadable, and a browser-path check that failed on Linux for
+Windows-style paths because POSIX `path.basename()` does not treat `\` as a separator.
+
 ## [1.26.0] — 2026-08-29
 
 ### Added
