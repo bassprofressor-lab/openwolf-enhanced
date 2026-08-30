@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, getCaptureConfig, redactSecrets, isFileWritingCommand,
-  isNotableCommand, tailWithinBytes, timeShort, readStdin, withLock, readJSON, writeJSON,
+  isNotableCommand, tailWithinBytes, timeShort, readStdin, withLock, tryWithLock, readJSON, writeJSON, sessionFileFor,
 } from "./shared.js";
 
 // PostToolUse:Bash — two jobs.
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   const wolfDir = getWolfDir();
 
   const raw = await readStdin();
-  let input: { tool_input?: { command?: string }; tool_response?: unknown };
+  let input: { session_id?: string; tool_input?: { command?: string }; tool_response?: unknown };
   try { input = JSON.parse(raw); } catch { process.exit(0); return; }
 
   const cmd = (input.tool_input?.command ?? "").trim();
@@ -89,8 +89,8 @@ async function main(): Promise<void> {
   // install exactly as blind as the bug it fixes. [bug-149]
   if (!failed && isFileWritingCommand(cmd)) {
     try {
-      const sessionFile = path.join(wolfDir, "hooks", "_session.json");
-      withLock(sessionFile, () => {
+      const sessionFile = sessionFileFor(path.join(wolfDir, "hooks"), input.session_id);
+      tryWithLock(sessionFile, () => {
         const session = readJSON<SessionData>(sessionFile, { files_written: [], edit_counts: {} });
         session.bash_writes = (session.bash_writes ?? 0) + 1;
         writeJSON(sessionFile, session);
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   // concurrent Bash hooks don't clobber each other's read-modify-write.
   try {
     const logPath = path.join(wolfDir, "activity.log");
-    withLock(logPath, () => {
+    tryWithLock(logPath, () => {
       let existing = "";
       try { existing = fs.readFileSync(logPath, "utf8"); } catch { /* first write */ }
       fs.writeFileSync(logPath, tailWithinBytes(existing + line + "\n", cap.logMaxBytes), "utf8");

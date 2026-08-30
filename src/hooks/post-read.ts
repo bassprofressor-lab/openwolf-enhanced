@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, updateSession, readMarkdown, parseAnatomy, estimateFileTokens, getTokenRatios, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry } from "./shared.js";
+import { getWolfDir, ensureWolfDir, updateSession, readMarkdown, parseAnatomy, estimateFileTokens, getTokenRatios, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry, relativeToProject, sessionFileFor } from "./shared.js";
 
 interface SessionData {
   files_read: Record<string, { count: number; tokens: number; first_read: string; anatomy_had_description?: boolean }>;
@@ -10,16 +10,16 @@ async function main(): Promise<void> {
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");
-  const sessionFile = path.join(hooksDir, "_session.json");
 
   const raw = await readStdin();
-  let input: { tool_input?: { file_path?: string; path?: string }; tool_output?: { content?: string } };
+  let input: { session_id?: string; tool_input?: { file_path?: string; path?: string }; tool_output?: { content?: string } };
   try {
     input = JSON.parse(raw);
   } catch {
     process.exit(0);
     return;
   }
+  const sessionFile = sessionFileFor(hooksDir, input.session_id);
 
   const filePath = input.tool_input?.file_path ?? input.tool_input?.path ?? "";
   const content = input.tool_output?.content ?? "";
@@ -29,11 +29,9 @@ async function main(): Promise<void> {
 
   // Skip tracking for .wolf/ internal files — consistent with pre-read
   const projectDir = normalizePath(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  // Separator required after the root — see pre-read (sibling-prefix directories, e.g.
-  // /root/orderflow2, must not count as inside /root/orderflow).
-  const relToProject = normalizedFile.startsWith(projectDir + "/")
-    ? normalizedFile.slice(projectDir.length + 1)
-    : "";
+  // Shared with pre-read: separator-anchored, with a realpath second opinion so a project reached
+  // through a symlink is not silently dropped from tracking.
+  const relToProject = relativeToProject(filePath, projectDir);
   // Don't track reads of files outside the project root (upstream #56). relToProject is ""
   // both when the path is outside projectDir and when it equals the root itself — neither
   // is a trackable project file.

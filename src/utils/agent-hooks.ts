@@ -246,10 +246,44 @@ export function detectAgents(projectRoot: string): AgentId[] {
   return found;
 }
 
+/**
+ * Merge OpenWolf's hook entries into an agent's config file — or refuse, loudly.
+ *
+ * This used to call readJSON, whose contract on an unparseable file is "warn and hand back the
+ * fallback". The fallback here is `{}`, so a settings.json or hooks.json with one stray comma was
+ * treated as an empty config: OpenWolf's entries were written over the user's file, every hook the
+ * user had configured themselves was gone, and deployment reported success. A merge that cannot
+ * read the existing side is not a merge.
+ *
+ * The file is now left byte-identical and the caller is told what to do about it. Losing the hooks
+ * for one agent until a typo is fixed beats silently replacing someone's configuration.
+ */
+class MalformedAgentConfigError extends Error {
+  constructor(public readonly file: string, cause: string) {
+    super(`${file} is not valid JSON (${cause}) — left untouched. Fix or remove it, then run \`openwolf update\` to register the hooks.`);
+    this.name = "MalformedAgentConfigError";
+  }
+}
+
 function deployJsonAgent(dir: string, file: string, settings: HookSettings): void {
   ensureDir(dir);
   const p = path.join(dir, file);
-  const existing = fs.existsSync(p) ? readJSON<Record<string, unknown>>(p, {}) : {};
+  let existing: Record<string, unknown> = {};
+  if (fs.existsSync(p)) {
+    let raw = "";
+    try { raw = fs.readFileSync(p, "utf-8"); } catch { /* unreadable — treat as absent below */ }
+    if (raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("top level is not an object");
+        }
+        existing = parsed as Record<string, unknown>;
+      } catch (e) {
+        throw new MalformedAgentConfigError(path.join(path.basename(dir), file), (e as Error).message);
+      }
+    }
+  }
   writeJSON(p, mergeManagedHooks(existing, settings));
 }
 
@@ -258,8 +292,14 @@ export function deployAgentHooks(projectRoot: string): AgentDeployResult[] {
   const results: AgentDeployResult[] = [];
 
   // Claude — always.
-  deployJsonAgent(path.join(projectRoot, ".claude"), "settings.json", claudeSettings());
-  results.push({ agent: "claude", deployed: true, detail: ".claude/settings.json" });
+  try {
+    deployJsonAgent(path.join(projectRoot, ".claude"), "settings.json", claudeSettings());
+    results.push({ agent: "claude", deployed: true, detail: ".claude/settings.json" });
+  } catch (e) {
+    // Reported, not thrown: a malformed .claude/settings.json must not abort `openwolf init` for
+    // everything else it does — but it must not be silently overwritten either.
+    results.push({ agent: "claude", deployed: false, detail: (e as Error).message });
+  }
 
   for (const agent of detectAgents(projectRoot)) {
     try {

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock, tryWithLock, sessionFileFor } from "./shared.js";
 
 interface BugEntry {
   id: string;
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const wolfDir = getWolfDir();
 
   const raw = await readStdin();
-  let input: { tool_input?: { content?: string; old_string?: string; new_string?: string; file_path?: string; path?: string } };
+  let input: { session_id?: string; tool_input?: { content?: string; old_string?: string; new_string?: string; file_path?: string; path?: string } };
   try {
     input = JSON.parse(raw);
   } catch {
@@ -44,8 +44,8 @@ async function main(): Promise<void> {
   // ever incremented it, so the ledger/dashboard always showed 0.
   if (cerebrumWarnings > 0) {
     try {
-      const sessionFile = path.join(wolfDir, "hooks", "_session.json");
-      withLock(sessionFile, () => {
+      const sessionFile = sessionFileFor(path.join(wolfDir, "hooks"), input.session_id);
+      tryWithLock(sessionFile, () => {
         const session = readJSON<{ cerebrum_warnings?: number; [k: string]: unknown }>(sessionFile, {});
         session.cerebrum_warnings = (session.cerebrum_warnings ?? 0) + cerebrumWarnings;
         writeJSON(sessionFile, session);

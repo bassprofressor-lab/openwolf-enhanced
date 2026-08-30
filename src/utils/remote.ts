@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readJSON, writeJSON, withLock } from "./fs-safe.js";
+import { readJSON, writeJSON, withLock, tryWithLock } from "./fs-safe.js";
 import { blocksFor, entryId } from "./recall.js";
 import { assertSafeBaseUrl } from "../daemon/llm-provider.js";
 
@@ -305,7 +305,7 @@ export function readPushed(wolfDir: string): Set<string> {
 export function markPushed(wolfDir: string, ids: string[]): void {
   // Lock the push-state file so two concurrent `openwolf push` runs can't drop each other's ids
   // (read-modify-write must be atomic, or a whole batch reappears as duplicates next push).
-  withLock(pushStatePath(wolfDir), () => {
+  tryWithLock(pushStatePath(wolfDir), () => {
     const cur = readPushed(wolfDir);
     for (const id of ids) cur.add(id);
     writeJSON(pushStatePath(wolfDir), { pushed: [...cur] });

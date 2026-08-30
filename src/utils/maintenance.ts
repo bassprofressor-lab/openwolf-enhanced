@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readJSON, writeJSON, readText, writeText, withLock } from "./fs-safe.js";
+import { readJSON, writeJSON, readText, writeText, withLock, withLockOr } from "./fs-safe.js";
 import { nativeMemoryDir } from "../hooks/shared.js";
 import { blocksFor } from "./recall.js";
 
@@ -124,6 +124,55 @@ export interface IgnoreSuggestion {
   reason: string;  // human-readable why
   files: number;
   bytes: number;
+}
+
+/**
+ * The one list of directories and files the anatomy index never covers.
+ *
+ * There were four of these: the config template, `init`'s inline fallback, and two copies inside
+ * the scanner — and they disagreed. A project initialised from one path got a different index from
+ * a project that fell back to another, which is a difference nobody can see and nobody expects.
+ *
+ * Missing entries had a real cost. `.venv` and `site-packages` were absent, so on a mixed
+ * Python/JS project the index filled up with dependency source: the indexed file budget is spent,
+ * the descriptions are of somebody else's code, and every anatomy lookup for the project's OWN
+ * files misses. Agent-config directories (.claude, .codex, …) were indexed too, which points the
+ * model at its own harness configuration — noise that ranked HIGH because those files are small
+ * and densely worded.
+ */
+export const DEFAULT_ANATOMY_EXCLUDES: string[] = [
+  // VCS and tooling
+  ".git", ".svn", ".hg", ".wolf",
+  // JS/TS
+  "node_modules", "dist", "build", ".next", ".nuxt", ".turbo", ".vercel", ".netlify", ".output",
+  "coverage", ".parcel-cache", ".svelte-kit",
+  // Python — see also isPythonVenv() for virtualenvs under a non-standard name
+  "__pycache__", ".venv", "venv", "site-packages", ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+  // JVM / Rust / Go
+  "target", ".gradle", "gradle", ".m2",
+  // Editors and OS
+  ".vscode", ".idea", ".cache", ".DS_Store", "Thumbs.db",
+  // Agent config: steering the model toward its own harness config is noise, and these files
+  // topped the importance ranking in real projects because they are short and keyword-dense.
+  ".claude", ".codex", ".opencode", ".gemini", ".cursor", ".aider",
+  // Generated artefacts
+  "*.min.js", "*.min.css", "*.map", "*.lock",
+];
+
+/**
+ * A Python virtualenv, whatever it is called.
+ *
+ * Excluding the NAMES `.venv` and `venv` catches the convention and misses the reality: envs get
+ * called `env`, `.env310`, `pyenv`, or the project's own name. `pyvenv.cfg` at the root of the
+ * directory is what actually defines one, and it is present in every venv created by the stdlib
+ * module since 3.3.
+ */
+export function isPythonVenv(dirPath: string): boolean {
+  try {
+    return fs.existsSync(path.join(dirPath, "pyvenv.cfg"));
+  } catch {
+    return false;
+  }
 }
 
 const SUGGEST_DEFAULT_EXCLUDES = new Set([
@@ -562,13 +611,16 @@ export interface CompactResult {
 }
 
 const noop = (name: string): CompactResult => ({ changed: false, before: 0, after: 0, detail: `${name}: nothing to do` });
+// Distinct from noop on purpose: "in use by another process, try again" is a different answer
+// from "there was nothing to do", and conflating them hides a contended maintenance run.
+const skipped = (name: string): CompactResult => ({ changed: false, before: 0, after: 0, detail: `${name}: skipped, file is locked by another process` });
 
 export function compactLedger(wolfDir: string, ret: Retention): CompactResult {
   const p = path.join(wolfDir, "token-ledger.json");
   if (!fs.existsSync(p)) return noop("token-ledger");
   // Hold the same file lock as the daemon/stop-hook ledger writers (withLock on the ledger path)
   // so a doctor-compaction and a live write can't clobber each other → no lost updates.
-  return withLock(p, () => {
+  return withLockOr(p, () => skipped("token-ledger"), () => {
   const before = fileSize(p);
   const ledger = readJSON<{ sessions?: Array<{ reads?: unknown[]; writes?: unknown[] }> }>(p, {});
   if (!Array.isArray(ledger.sessions)) return noop("token-ledger");
@@ -599,7 +651,7 @@ export function compactLedger(wolfDir: string, ret: Retention): CompactResult {
 // Mirrors the daemon's consolidateMemory so it also runs without the daemon.
 export function consolidateMemory(wolfDir: string, olderThanDays: number): CompactResult {
   const p = path.join(wolfDir, "memory.md");
-  return withLock(p, () => {
+  return withLockOr(p, () => skipped("memory"), () => {
   const content = readText(p);
   if (!content) return noop("memory");
   const before = Buffer.byteLength(content, "utf-8");
@@ -663,7 +715,7 @@ interface Bug {
 export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult {
   const p = path.join(wolfDir, "buglog.json");
   if (!fs.existsSync(p)) return noop("buglog");
-  return withLock(p, () => {
+  return withLockOr(p, () => skipped("buglog"), () => {
   const before = fileSize(p);
   // Tolerate legacy bare-array buglogs ([...]) as well as {version, bugs:[]}.
   const raw = readJSON<unknown>(p, { version: 1, bugs: [] as Bug[] });
@@ -994,6 +1046,6 @@ export function repairNativeMemoryIndex(
   const next = base.includes(heading)
     ? `${base}\n${added.map((a) => a.line).join("\n")}\n`
     : `${base}\n\n${heading}\n${added.map((a) => a.line).join("\n")}\n`;
-  const wrote = withLock(indexPath, () => writeText(indexPath, next));
+  const wrote = withLockOr(indexPath, () => false, () => writeText(indexPath, next));
   return { added, skippedStale, skippedBudget, deadLinks, wrote };
 }

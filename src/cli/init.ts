@@ -12,7 +12,8 @@ import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { detectProjectName, applyTemplatePlaceholders } from "../utils/seed.js";
 import { ensureWolfGitignore } from "../utils/wolf-gitignore.js";
 import { registerProject, getRegisteredProjects } from "./registry.js";
-import { deepMergeDefaults } from "./update.js";
+import { deepMergeDefaults, unionAnatomyExcludes } from "./update.js";
+import { DEFAULT_ANATOMY_EXCLUDES } from "../utils/maintenance.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -102,7 +103,7 @@ export async function initCommand(): Promise<void> {
   if (fs.existsSync(cfgDest) && fs.existsSync(cfgTemplate)) {
     const defaults = readJSON<Record<string, unknown>>(cfgTemplate, {});
     const userCfg = readJSON<Record<string, unknown>>(cfgDest, {});
-    writeJSON(cfgDest, deepMergeDefaults(defaults, userCfg));
+    writeJSON(cfgDest, unionAnatomyExcludes(deepMergeDefaults(defaults, userCfg), DEFAULT_ANATOMY_EXCLUDES));
   } else {
     writeTemplateFile(actualTemplatesDir, wolfDir, "config.json");
   }
@@ -143,7 +144,12 @@ export async function initCommand(): Promise<void> {
   copyHookScripts(wolfDir);
 
   // --- Register hooks with Claude (always) + any detected agent (Codex/Gemini/OpenCode) ---
-  deployAgentHooks(projectRoot);
+  // Report any agent whose config could NOT be written. A malformed settings.json is now left
+  // untouched instead of being replaced (which is right), but silence about it would be worse than
+  // the old behaviour: the user would believe the hooks are registered when they are not.
+  for (const r of deployAgentHooks(projectRoot)) {
+    if (!r.deployed) console.log(`  ⚠ ${r.agent}: ${r.detail}`);
+  }
   const claudeDir = path.join(projectRoot, ".claude");
 
   // --- Claude rules: always update ---
@@ -338,7 +344,7 @@ function generateTemplate(destPath: string, file: string): void {
       openwolf: {
         enabled: true,
         lang: "en",
-        anatomy: { auto_scan_on_init: true, rescan_interval_hours: 6, max_description_length: 100, max_files: 500, exclude_patterns: ["node_modules", ".git", "dist", "build", ".wolf", ".next", ".nuxt", "coverage", "__pycache__", ".cache", "target", ".vscode", ".idea", ".turbo", ".vercel", ".netlify", ".output", "*.min.js", "*.min.css"] },
+        anatomy: { auto_scan_on_init: true, rescan_interval_hours: 6, max_description_length: 100, max_files: 500, exclude_patterns: DEFAULT_ANATOMY_EXCLUDES },
         token_audit: { enabled: true, report_frequency: "weekly", waste_threshold_percent: 15, chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
         cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null, llm_provider: "anthropic", llm_base_url: null, llm_model: null },
         memory: { consolidation_after_days: 7, max_entries_before_consolidation: 200 },

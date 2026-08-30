@@ -16,7 +16,18 @@ export function ensureDashboardToken(wolfDir: string): string {
   const p = dashboardTokenPath(wolfDir);
   try {
     const existing = fs.readFileSync(p, "utf-8").trim();
-    if (existing) return existing;
+    if (existing) {
+      // A token created before this check — or restored from a backup, or copied with a umask that
+      // let the group bits through — kept whatever mode it had, and 0600 was only ever applied to
+      // files this function CREATED. A token readable by other local users is a token they can use.
+      //
+      // Repaired in place, never rotated: this is the token a live dashboard tab is already
+      // holding, and rotating it would log the user out to fix a permission bit.
+      try {
+        if ((fs.statSync(p).mode & 0o077) !== 0) fs.chmodSync(p, 0o600);
+      } catch { /* no chmod on this platform, or a race — the token is still valid */ }
+      return existing;
+    }
   } catch { /* fall through to create */ }
   const token = crypto.randomBytes(24).toString("hex");
   try {

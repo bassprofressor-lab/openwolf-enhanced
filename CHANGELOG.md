@@ -6,6 +6,137 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.28.0] — 2026-08-31
+
+Upstream OpenWolf published 2.5.1 on 2026-08-30, the same day as our 1.27.0, and independently
+fixed two of the same classes: multi-writer state and project boundaries. Its sixteen findings were
+checked one at a time against **this** fork rather than adopted from a changelog. Ten applied and
+are fixed here. Six did not, and are listed at the end so nobody "fixes" something that was never
+broken. No 2.x features were ported — this release is fixes only.
+
+Minor rather than patch: the anatomy exclusion defaults change what gets indexed, `daemon stop`
+refuses cases it used to act on, and hook state moves to one file per session.
+
+### Fixed — the lock now actually locks
+
+- 🔒 **`withLock` ran the callback anyway when it could not acquire the lock.** That defeats the
+  lock for every writer that respects it: the point is that exactly one process is inside the
+  critical section, and a participant who proceeds regardless makes the guarantee vacuous for
+  everyone else. Under contention this was not a rare fallback but the common path — contention is
+  precisely when the timeout fires. It now fails closed and says so; `tryWithLock` and
+  `withLockOr` give callers that must not throw (every hook) a reported skip instead of a silent
+  overwrite. This is the finding an external audit of 1.27.0 raised as "locking is largely
+  illusory"; 1.27.0 brought all the writers under the lock and left this half undone.
+
+- ⚡ **Lock polling started at a flat 25 ms.** With seven hooks around one file a herd needs several
+  rounds to drain and each waiter burned 25 ms per attempt whether or not the lock had been free a
+  microsecond earlier. It starts at 2 ms and backs off, so the common case — a lock held for the
+  duration of one write — is picked up almost immediately.
+
+- 🔒 **Three shared files still had no lock at all.** 1.27.0 covered `_session.json`; `buglog.json`,
+  `anatomy.md` and the machine-wide registry were still plain read-modify-write. For the buglog
+  that meant two edits in one turn computing the same next id from the same snapshot and the second
+  write erasing the first entry while reusing its number. For `anatomy.md`, `writeAtomic` prevents
+  a torn file but not a lost update: both hooks produce valid markdown and the second silently
+  drops the first one's entry, which surfaces much later as an anatomy miss for a file that was
+  indexed.
+
+- 🔒 **`~/.openwolf/registry.json` was neither locked nor written atomically.** It is the one piece
+  of state every project on the machine shares, and `openwolf init` in several projects at once —
+  which is how a machine gets set up — had each process read the same snapshot and write its own
+  back. Measured here with 30 concurrent registrations: entries were lost on every run before the
+  fix, none after. The non-atomic write was its own bug: a reader arriving mid-write got a partial
+  file, and the catch in `readRegistry` turned that into "no projects registered".
+
+### Fixed — one state file per session
+
+- 👥 **Two agents in the same project shared one `_session.json`.** The second one's SessionStart
+  reset the first one's in-flight tracking, and from then on both wrote to the same file: reads
+  counted against the wrong session, and the ledger entry for the first ended with whatever the
+  second had accumulated. State is now keyed by the harness `session_id` that every hook payload
+  already carried; an agent that supplies none keeps the shared path exactly as before. Files are
+  garbage collected after seven days, since a finished session is already folded into the ledger.
+  The daemon's file watcher no longer broadcasts them either — per-session hook state was read and
+  pushed to every websocket client on every tool call, and consumed by nothing.
+
+### Fixed — project boundaries
+
+- 🔗 **A project reached through a symlink was silently dropped from tracking.** Containment was
+  lexical only. `/home/me/work` is a link to `/mnt/data/work`, the agent opens
+  `/mnt/data/work/src/a.ts`, the prefix does not match, and every read in that project goes
+  unrecorded with no error anywhere — the default situation for anything under `/tmp` on macOS.
+  A lexical miss now gets a second opinion from `realpath` on both sides, so the common path still
+  costs nothing.
+
+### Fixed — `daemon stop` could kill an unrelated process
+
+- 🎯 **Port occupancy was treated as ownership.** The last-resort stop killed whatever was listening
+  on the configured dashboard port. That port is a number in a committed config file, the daemon
+  may have been moved off it by `openwolf dashboard`, and on a developer machine it is just as
+  likely to be a dev server or another project's daemon — killed, and then reported as
+  "✓ Daemon stopped". The daemon now records its pid, project root and hostname after a successful
+  bind, and stop kills only a process that record vouches for: same host, same project, still
+  alive. Anything else on the port is named and left alone. `daemon restart` had the same bug and
+  the same fix.
+
+### Fixed — smaller, still real
+
+- 🔑 **An existing dashboard token kept whatever permissions it had.** 0600 was applied only to
+  tokens this code created, so one restored from a backup, or written before that check existed,
+  stayed readable by other local users. It is repaired in place and never rotated — this is the
+  token a live browser tab is holding, and rotating it would log the user out to fix a permission
+  bit.
+
+- 🧾 **A malformed agent config was destroyed and the failure reported as success.** `readJSON`
+  hands back `{}` for an unparseable file, so a `settings.json` or `hooks.json` with one stray
+  comma was treated as empty: OpenWolf's entries were written over it, every hook the user had
+  configured themselves was gone, and deployment printed a checkmark. The file is now left
+  byte-identical and one actionable warning explains how to recover. `openwolf update` also stopped
+  claiming "Claude settings updated" in the case where it had not updated them.
+
+- 📋 **An unknown cron task id reported success.** `runTask` logged a warning and resolved, so the
+  API answered `202 Accepted` and the CLI printed "triggered" for a task that does not exist — a
+  typo looked exactly like a task that ran. Existence is now checked before the 202; the API
+  answers 404 with the list of known ids, and the CLI exits nonzero.
+
+- 🗂️ **The anatomy index filled with other people's code.** `.venv`, `site-packages`, `.gradle` and
+  `.DS_Store` were missing from the defaults, and the exclusions existed in *four* places that
+  disagreed: the config template, `init`'s inline fallback, and two copies inside the scanner. On a
+  mixed Python/JS project the indexed-file budget went to dependency source, so every anatomy
+  lookup for the project's own files missed. There is now one shared list; virtualenvs are detected
+  by `pyvenv.cfg` under any directory name, not by convention; and agent-config directories
+  (`.claude`, `.codex`, `.opencode`, `.gemini`, `.cursor`) are excluded, since steering the model
+  toward its own harness config is noise that ranks high precisely because those files are short
+  and keyword-dense. Existing projects pick the new entries up on `openwolf update` as a **union** —
+  a plain deep merge would have replaced the array, so either the new defaults or the user's own
+  additions would have been lost.
+
+### Checked and not applicable
+
+Recorded so these are not "fixed" later on the strength of an upstream changelog:
+
+- **Read tracking escaping the root via a `startsWith` prefix** — already fixed here; the separator
+  has been required since the sibling-directory bug. Only the symlink half applied.
+- **The Bash governor's deleted output log** and **benchmark arms on a moving HEAD** — 2.x features
+  this fork does not have.
+- **Scan freshness advanced by a skipped write** — depends on the 2.4.0 `_scan-state.json`
+  mechanism, which this fork does not have.
+- **The scanner reading every file twice** — this fork reads once in the scan loop.
+- **A bare-array `buglog.json`** — `readBugLog` has normalised both shapes for some time, and the
+  dashboard gained shape normalisation plus an error boundary in 1.27.0.
+- **`detectAgent` keying on `CLAUDE_PROJECT_DIR`, which is "never set"** — disproved empirically
+  here rather than argued: this project's ledger holds 110 sessions attributed to `claude` against
+  one `default`, today's included. The variable is absent from the Bash tool's environment but
+  present in the hook environment, which is likely how the upstream conclusion was reached.
+
+### Tests
+
+13 new tests in `test/upstream-parity.test.js`, 224 total, all green. The two load-bearing ones were
+verified against the *unfixed* build first: the lock test fails without the fail-closed change, and
+the registry test loses entries on five runs out of five with the lock removed and passes on five
+out of five with it. The concurrency test spawns real processes, because a lost update between OS
+processes cannot be reproduced by a single-threaded loop.
+
 ## [1.27.0] — 2026-08-30
 
 A security and robustness pass. An external AI audit of 1.26.0 was checked claim by claim against

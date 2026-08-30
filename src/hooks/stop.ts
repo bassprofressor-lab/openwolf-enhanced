@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, updateSession, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, tryWithLock, updateSession, sessionFileFor, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 interface FileRead {
@@ -112,13 +112,16 @@ async function main(): Promise<void> {
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");
-  const sessionFile = path.join(hooksDir, "_session.json");
 
   // Stop payload carries the harness transcript path — the source of real, measured token usage.
-  let hookInput: { transcript_path?: string } = {};
+  let hookInput: { transcript_path?: string; session_id?: string } = {};
   try {
     hookInput = JSON.parse(await readStdin());
   } catch {}
+  // Must be resolved from the payload, like every other hook — this hook is what folds the
+  // session into the ledger, so reading a different session's file here would attribute one
+  // session's whole turn to another.
+  const sessionFile = sessionFileFor(hooksDir, hookInput.session_id);
 
   const session = readJSON<SessionData>(sessionFile, {
     session_id: "",
@@ -218,7 +221,10 @@ async function main(): Promise<void> {
   // token report don't clobber each other (M1).
   const ret = getRetention(wolfDir);
   const ledgerPath = path.join(wolfDir, "token-ledger.json");
-  withLock(ledgerPath, () => {
+  // A contended ledger write is skipped, not forced: this hook's numbers are cumulative and the
+  // next Stop re-books the same deltas, so one skipped turn costs nothing. Forcing it would
+  // overwrite whichever process is inside the critical section right now.
+  tryWithLock(ledgerPath, () => {
   const ledger = readJSON(ledgerPath, {
     version: 1,
     created_at: "",

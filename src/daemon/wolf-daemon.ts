@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, withLock, tryWithLock } from "../utils/fs-safe.js";
+import { writeDaemonRecord, clearDaemonRecord } from "../utils/daemon-pid.js";
 import { ensureDashboardToken, tokenMatches } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "./cron-engine.js";
@@ -386,6 +387,15 @@ app.post("/api/cron/run/:taskId", (req, res) => {
     res.status(503).json({ error: "Cron engine not running" });
     return;
   }
+  // Existence is checked BEFORE the 202. "Accepted" is a promise that the work was queued, and a
+  // task id that is not in the manifest can never be queued — answering 202 there meant the CLI
+  // printed "triggered" and the dashboard showed a running task for something that does not exist.
+  // Everything after this point is genuinely asynchronous and keeps the 202.
+  const known = cronEngine.listTaskIds();
+  if (!known.includes(taskId)) {
+    res.status(404).json({ error: `no cron task with id "${taskId}"`, known_tasks: known });
+    return;
+  }
   // Return 202 immediately — the task runs in the background; results arrive via the
   // WebSocket / file-watcher. A failure is broadcast as task_error (upstream #4, bug 1).
   res.status(202).json({ status: "accepted", task_id: taskId });
@@ -429,6 +439,9 @@ const port = Number(process.env.OPENWOLF_DASHBOARD_PORT) || config.openwolf.dash
 const host = config.openwolf.dashboard.host || "127.0.0.1";
 const server = app.listen(port, host, () => {
   logger.info(`Dashboard server listening on ${host}:${port}`);
+  // Written only after the bind SUCCEEDS: a record for a daemon that never came up would point
+  // `daemon stop` at whatever process actually owns the port — the very thing it prevents.
+  writeDaemonRecord(wolfDir, projectRoot, port);
 });
 
 // WebSocket server. Reject the upgrade before it completes if the token is missing/wrong,
@@ -496,7 +509,7 @@ function handleDashboardCommand(msg: { type: string; task_id?: string }): void {
         // Same lock as the cron engine's execution_log writes: this read-modify-write must not
         // race a concurrent writer (engine entry, CLI `cron retry`) and clobber it.
         const statePath = path.join(wolfDir, "cron-state.json");
-        withLock(statePath, () => {
+        tryWithLock(statePath, () => {
           const state = readJSON<{ dead_letter_queue: Array<{ task_id: string }> }>(statePath, {
             dead_letter_queue: [],
           });
@@ -594,7 +607,7 @@ function switchProject(newRoot: string): void {
 // Always derives the path from the LIVE wolfDir (correct across project switches).
 function markCronState(patch: Record<string, unknown>): void {
   const statePath = path.join(wolfDir, "cron-state.json");
-  withLock(statePath, () => {
+  tryWithLock(statePath, () => {
     const state = readJSON<Record<string, unknown>>(statePath, {});
     writeJSON(statePath, { ...state, ...patch });
   });
@@ -646,6 +659,7 @@ function shutdown(): void {
 
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (cronEngine) cronEngine.stop();
+  clearDaemonRecord(wolfDir);
 
   // markCronState uses the LIVE wolfDir: after a project switch, shutdown must mark the
   // actual project "stopped", not the boot project.

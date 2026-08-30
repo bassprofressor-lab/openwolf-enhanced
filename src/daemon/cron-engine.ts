@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import cron, { type ScheduledTask } from "node-cron";
-import { readJSON, writeJSON, readText, writeText, withLock } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, readText, writeText, withLock, tryWithLock } from "../utils/fs-safe.js";
 import { scanProject } from "../scanner/anatomy-scanner.js";
 import { detectWaste } from "../tracker/waste-detector.js";
 import { consolidateMemory } from "../utils/maintenance.js";
@@ -29,6 +29,14 @@ export function safeTaskSlug(taskId: string): string {
   // an extension. Prefixing is enough and keeps the id readable.
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) return `task-${slug}`;
   return slug || "task";
+}
+
+/** A cron task id that is not in the manifest. Carries the known ids so the caller can say what IS available. */
+export class TaskNotFoundError extends Error {
+  constructor(public readonly taskId: string, public readonly known: string[]) {
+    super(`no cron task with id "${taskId}"`);
+    this.name = "TaskNotFoundError";
+  }
 }
 
 export interface AiTaskParams {
@@ -180,10 +188,18 @@ export class CronEngine {
     const manifest = this.readManifest();
     const task = manifest.tasks.find((t) => t.id === taskId);
     if (!task) {
+      // Logging a warning and resolving made every caller report success: the API answered 202
+      // "accepted" and the CLI printed "triggered" for a task that does not exist, so a typo in a
+      // task id looked exactly like a task that ran. Whoever asked for it has to hear no.
       this.logger.warn(`Task not found: ${taskId}`);
-      return;
+      throw new TaskNotFoundError(taskId, manifest.tasks.map((t) => t.id));
     }
     await this.executeTask(task);
+  }
+
+  /** Task ids currently in the manifest — so a caller can validate before promising to run one. */
+  listTaskIds(): string[] {
+    return this.readManifest().tasks.map((t) => t.id);
   }
 
   private readManifest(): CronManifest {
@@ -215,7 +231,7 @@ export class CronEngine {
 
       // Log success. Re-read under a lock and write immediately: a concurrent task (or its long LLM
       // await) could otherwise read the same snapshot and clobber this entry on write — lost logs.
-      withLock(path.join(this.wolfDir, "cron-state.json"), () => {
+      tryWithLock(path.join(this.wolfDir, "cron-state.json"), () => {
         const state = this.readState();
         state.execution_log.push({
           task_id: task.id,
@@ -258,7 +274,7 @@ export class CronEngine {
       } else {
         // Dead letter or skip. Same lock as the success path — read-modify-write under it so a
         // concurrent task cannot overwrite this failure record with its own stale snapshot.
-        withLock(path.join(this.wolfDir, "cron-state.json"), () => {
+        tryWithLock(path.join(this.wolfDir, "cron-state.json"), () => {
           const state = this.readState();
           state.execution_log.push({
             task_id: task.id,
@@ -340,7 +356,7 @@ export class CronEngine {
     const flags = detectWaste(this.wolfDir);
     const ledgerPath = path.join(this.wolfDir, "token-ledger.json");
     // Lock the read-modify-write — the stop hook writes the same ledger from another process (M1).
-    withLock(ledgerPath, () => {
+    tryWithLock(ledgerPath, () => {
       const ledger = readJSON<Record<string, unknown>>(ledgerPath, {});
       // Keep waste_flags bounded (defensive — detectWaste could in principle return many).
       (ledger as { waste_flags: unknown[] }).waste_flags =

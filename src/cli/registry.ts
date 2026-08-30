@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { isWindows } from "../utils/platform.js";
+import { writeJSON, withLock } from "../utils/fs-safe.js";
 
 export interface RegisteredProject {
   root: string;
@@ -43,7 +44,32 @@ export function writeRegistry(registry: Registry): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(getRegistryPath(), JSON.stringify(registry, null, 2), "utf-8");
+  // Atomic: a plain writeFileSync truncates first, so a reader arriving mid-write got a partial
+  // file and readRegistry()'s catch turned that into "no projects registered". This registry is
+  // the list `openwolf update` walks — an empty read is not a harmless glitch.
+  writeJSON(getRegistryPath(), registry);
+}
+
+/**
+ * Read-modify-write the registry under a lock.
+ *
+ * ~/.openwolf/registry.json is the one piece of state shared by EVERY project on the machine, and
+ * it was the only shared file with neither a lock nor an atomic write. `openwolf init` in several
+ * projects at once — which is exactly how a machine gets set up — had each process read the same
+ * snapshot and write its own back, so all but the last registration were lost silently.
+ *
+ * The lock lives next to the registry, not in a project, because the contention is between
+ * projects.
+ */
+function updateRegistry(mutate: (registry: Registry) => boolean): void {
+  const dir = getRegistryDir();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  withLock(getRegistryPath(), () => {
+    const registry = readRegistry();
+    // The mutator says whether anything actually changed. A lookup that matched nothing must not
+    // rewrite the file — nor create one, which would turn a typo'd path into a new registry.
+    if (mutate(registry)) writeRegistry(registry);
+  });
 }
 
 /**
@@ -51,26 +77,26 @@ export function writeRegistry(registry: Registry): void {
  * Updates existing entry if the project root matches.
  */
 export function registerProject(projectRoot: string, name: string, version: string): void {
-  const registry = readRegistry();
   const normalized = normalizeProjectPath(projectRoot);
   const now = new Date().toISOString();
 
-  const existing = registry.projects.find(p => normalizeProjectPath(p.root) === normalized);
-  if (existing) {
-    existing.name = name;
-    existing.last_updated = now;
-    existing.version = version;
-  } else {
-    registry.projects.push({
-      root: projectRoot,
-      name,
-      registered_at: now,
-      last_updated: now,
-      version,
-    });
-  }
-
-  writeRegistry(registry);
+  updateRegistry((registry) => {
+    const existing = registry.projects.find(p => normalizeProjectPath(p.root) === normalized);
+    if (existing) {
+      existing.name = name;
+      existing.last_updated = now;
+      existing.version = version;
+    } else {
+      registry.projects.push({
+        root: projectRoot,
+        name,
+        registered_at: now,
+        last_updated: now,
+        version,
+      });
+    }
+    return true;
+  });
 }
 
 /**
@@ -83,12 +109,14 @@ export function registerProject(projectRoot: string, name: string, version: stri
  * This touches the registry ONLY. The project's .wolf/ directory stays exactly where it is.
  */
 export function unregisterProject(projectRoot: string): RegisteredProject[] {
-  const registry = readRegistry();
   const target = normalizeProjectPath(projectRoot);
-  const removed = registry.projects.filter(p => normalizeProjectPath(p.root) === target);
-  if (removed.length === 0) return [];
-  registry.projects = registry.projects.filter(p => normalizeProjectPath(p.root) !== target);
-  writeRegistry(registry);
+  let removed: RegisteredProject[] = [];
+  updateRegistry((registry) => {
+    removed = registry.projects.filter(p => normalizeProjectPath(p.root) === target);
+    if (removed.length === 0) return false;
+    registry.projects = registry.projects.filter(p => normalizeProjectPath(p.root) !== target);
+    return true;
+  });
   return removed;
 }
 
@@ -101,12 +129,14 @@ export function unregisterProject(projectRoot: string): RegisteredProject[] {
  * asks for this explicitly.
  */
 export function pruneMissingProjects(): RegisteredProject[] {
-  const registry = readRegistry();
   const isPresent = (p: RegisteredProject): boolean => fs.existsSync(path.join(p.root, ".wolf"));
-  const gone = registry.projects.filter(p => !isPresent(p));
-  if (gone.length === 0) return [];
-  registry.projects = registry.projects.filter(isPresent);
-  writeRegistry(registry);
+  let gone: RegisteredProject[] = [];
+  updateRegistry((registry) => {
+    gone = registry.projects.filter(p => !isPresent(p));
+    if (gone.length === 0) return false;
+    registry.projects = registry.projects.filter(isPresent);
+    return true;
+  });
   return gone;
 }
 
@@ -129,10 +159,13 @@ export function getRegisteredProjects(validateExists: boolean = false): Register
     }
   }
 
-  // Clean up stale entries
+  // Clean up stale entries — through the lock, since another process may be registering right now
+  // and a snapshot written from here would drop its brand-new entry.
   if (removed.length > 0) {
-    registry.projects = valid;
-    writeRegistry(registry);
+    updateRegistry((reg) => {
+      reg.projects = reg.projects.filter((p) => fs.existsSync(path.join(p.root, ".wolf")));
+      return true;
+    });
   }
 
   return valid;

@@ -74,19 +74,39 @@ export function ensureWolfDir(): void {
   }
 }
 
-// Best-effort advisory lock around a read-modify-write cycle so concurrent hook/daemon
-// processes don't clobber each other's updates to the same file (M1). It NEVER blocks a hook
-// for long: it waits up to ~1s for the lock, steals a stale lock (>5s old), and if it still
-// can't acquire it, runs unlocked rather than risk a hook timeout.
+// Advisory lock around a read-modify-write cycle so concurrent hook/daemon processes don't clobber
+// each other's updates to the same file (M1). It waits, steals a lock left behind by a dead process
+// (>5s old), and — if it still cannot acquire — FAILS instead of proceeding.
+//
+// [2026-08-31] It used to run the callback unlocked after the wait expired, which defeats the lock
+// for every writer that respects it: the whole point is that exactly one process is inside the
+// critical section, and a participant that proceeds anyway makes the guarantee vacuous for
+// everybody else. Under contention that is not a rare fallback, it is the common path — contention
+// is precisely when the timeout fires. Failing closed loses one update; proceeding unlocked loses
+// somebody else's, and can hand a half-written file to the next reader.
+//
+// The poll also started at a flat 25ms. With seven hooks around one file, a herd needs several
+// rounds to drain and each waiter burned 25ms per attempt whether or not the lock was free a
+// microsecond later. It now starts at 2ms and backs off, so the common case (a lock held for the
+// microseconds of one write) is picked up almost immediately and a herd drains inside the budget.
+export class LockTimeoutError extends Error {
+  constructor(public readonly targetPath: string, public readonly waitedMs: number) {
+    super(`could not acquire the lock on ${path.basename(targetPath)} within ${waitedMs}ms — update skipped`);
+    this.name = "LockTimeoutError";
+  }
+}
+
 function sleepSync(ms: number): void {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no-op */ }
 }
+
 export function withLock<T>(targetPath: string, fn: () => T): T {
   const lockPath = targetPath + ".lock";
-  const MAX_WAIT_MS = 1000;
+  const MAX_WAIT_MS = 1500;   // well inside the tightest hook budget (5s)
   const STALE_MS = 5000;
   const start = Date.now();
   let held = false;
+  let backoff = 2;
   while (Date.now() - start < MAX_WAIT_MS) {
     try {
       const fd = fs.openSync(lockPath, "wx");
@@ -98,13 +118,78 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
       try {
         if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_MS) { fs.unlinkSync(lockPath); continue; }
       } catch { continue; } // lock vanished — retry immediately
-      sleepSync(25);
+      sleepSync(backoff);
+      backoff = Math.min(backoff * 2, 50);
     }
   }
+  if (!held) throw new LockTimeoutError(targetPath, Date.now() - start);
   try {
     return fn();
   } finally {
-    if (held) { try { fs.unlinkSync(lockPath); } catch { /* ignore */ } }
+    try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * withLock for callers that must never throw — a hook that dies takes the tool call with it.
+ * Returns whether the callback ran; a lost update is reported on stderr rather than silently
+ * dropped, because "the number is wrong and nobody knows why" is the failure this whole lock
+ * exists to prevent.
+ */
+export function tryWithLock(targetPath: string, fn: () => void): boolean {
+  try {
+    withLock(targetPath, fn);
+    return true;
+  } catch (e) {
+    if (e instanceof LockTimeoutError) {
+      process.stderr.write(`[openwolf] ${e.message}\n`);
+      return false;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Where this session's tracking state lives.
+ *
+ * There used to be exactly one `_session.json` per project, shared by every session running in it.
+ * Two agents in the same repo — two terminals, or an agent plus a scripted run — meant the second
+ * one's SessionStart reset the first one's tracking mid-flight, and from then on both wrote into
+ * the same file: reads counted against the wrong session, the ledger entry for the first one
+ * ending with whatever the second had accumulated.
+ *
+ * Every harness hands each hook invocation a `session_id`, so the state is keyed by it. When there
+ * is none (an agent that does not provide one), the legacy shared path is used exactly as before —
+ * no worse than it was, and consistent within that agent.
+ */
+export function sessionFileFor(hooksDir: string, sessionId?: unknown): string {
+  if (typeof sessionId === "string") {
+    // Same reasoning as the cron task slug: this string becomes a file name and arrives from
+    // outside, so it is reduced to something that can only ever name a file in this directory.
+    const safe = sessionId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 64);
+    if (safe) return path.join(hooksDir, `_session-${safe}.json`);
+  }
+  return path.join(hooksDir, "_session.json");
+}
+
+/**
+ * Delete per-session state files nobody will read again.
+ *
+ * One file per session means the directory grows with every session, forever. The stop hook has
+ * already folded a finished session into token-ledger.json, so the file is spent; a week is
+ * generous room for a session that is somehow still live. The legacy shared `_session.json` is
+ * never removed — it has no session it belongs to, so age says nothing about it.
+ */
+export function pruneOldSessionFiles(hooksDir: string, maxAgeDays = 7): void {
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let names: string[];
+  try { names = fs.readdirSync(hooksDir); } catch { return; }
+  for (const name of names) {
+    if (!/^_session-.+\.json(\.lock)?$/.test(name)) continue;
+    const f = path.join(hooksDir, name);
+    try {
+      if (fs.statSync(f).mtimeMs < cutoff) fs.unlinkSync(f);
+    } catch { /* vanished or unreadable — nothing to clean */ }
   }
 }
 
@@ -125,8 +210,11 @@ export function updateSession<T extends object>(
   sessionFile: string,
   fallback: T,
   mutate: (session: T) => void,
-): void {
-  withLock(sessionFile, () => {
+): boolean {
+  // tryWithLock, not withLock: a hook that throws takes the tool call with it. Under contention
+  // the update is dropped and SAID SO on stderr — the alternative (writing anyway) is what made
+  // the lock decorative in the first place.
+  return tryWithLock(sessionFile, () => {
     const session = readJSON<T>(sessionFile, fallback);
     mutate(session);
     writeJSON(sessionFile, session);
@@ -151,7 +239,7 @@ export function bookInjection(wolfDir: string, tokens: number): void {
   if (!Number.isFinite(tokens) || tokens <= 0) return;
   const ledgerPath = path.join(wolfDir, "token-ledger.json");
   try {
-    withLock(ledgerPath, () => {
+    tryWithLock(ledgerPath, () => {
       // [2026-08-20, review] The first cut used readJSON with a two-field fallback and then wrote
       // it back. On an UNPARSEABLE ledger that produced a valid-looking file with no `sessions[]`,
       // and the stop hook died on `ledger.sessions.findIndex(...)` from then on — silently, because
@@ -1081,6 +1169,33 @@ export function readStdin(): Promise<string> {
 
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
+}
+
+/**
+ * The file's path relative to the project root, or "" when it is outside.
+ *
+ * Lexical first — cheap, and correct for the overwhelming majority. But a lexical comparison alone
+ * silently drops a whole project whenever the root is reached through a symlink: /home/me/work is
+ * a link to /mnt/data/work, the agent opens /mnt/data/work/src/a.ts, the prefix does not match, and
+ * every read in that project goes untracked with no error anywhere. macOS makes this the default
+ * case for anything under /tmp (-> /private/tmp).
+ *
+ * So a lexical miss gets a second opinion from realpath, on both sides. Resolution only runs when
+ * the cheap answer already said no, so the common path costs nothing.
+ */
+export function relativeToProject(absFile: string, projectDir: string): string {
+  const file = normalizePath(absFile);
+  const root = normalizePath(projectDir);
+  // Require the SEPARATOR after the root — a bare startsWith also matched a sibling directory
+  // sharing the prefix (/root/orderflow2 counted as inside /root/orderflow).
+  if (file.startsWith(root + "/")) return file.slice(root.length + 1);
+  if (file === root) return "";
+  try {
+    const realFile = normalizePath(fs.realpathSync(absFile));
+    const realRoot = normalizePath(fs.realpathSync(projectDir));
+    if (realFile.startsWith(realRoot + "/")) return realFile.slice(realRoot.length + 1);
+  } catch { /* the file may not exist yet, or the root is gone — outside, then */ }
+  return "";
 }
 
 /**

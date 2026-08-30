@@ -22,7 +22,10 @@ export function startFileWatcher(
         base.endsWith(".tmp") ||
         base.endsWith(".lock") ||
         base === "daemon.log" ||
-        base === "_session.json" ||
+        // Per-session hook state: `_session.json` (legacy shared) plus `_session-<id>.json`, one
+        // per live session. Read and broadcast to every websocket client on every tool call, and
+        // consumed by nothing on the dashboard side — pure waste that grows with concurrency.
+        base.startsWith("_session") ||
         base === "token-ledger.json" ||
         base === "buglog.json" ||
         // Semantic recall index: tens of MB, checkpointed repeatedly during a build — reading it

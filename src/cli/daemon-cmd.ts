@@ -4,10 +4,11 @@ import * as net from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, withLock, tryWithLock } from "../utils/fs-safe.js";
 import { readDashboardToken } from "../utils/dashboard-auth.js";
 import { isPortFree } from "../utils/ports.js";
 import { isWindows, execShim } from "../utils/platform.js";
+import { readOwnDaemonPid, clearDaemonRecord } from "../utils/daemon-pid.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -107,7 +108,7 @@ function killPid(pid: number): boolean {
 function markDaemonStopped(wolfDir: string): void {
   const statePath = path.join(wolfDir, "cron-state.json");
   try {
-    withLock(statePath, () => {
+    tryWithLock(statePath, () => {
       const state = readJSON<Record<string, unknown>>(statePath, {});
       // No cron state at all means the daemon never wrote one — nothing to correct, and inventing
       // a file here would only confuse the next start.
@@ -209,17 +210,35 @@ export async function daemonStop(): Promise<void> {
     return;
   }
 
-  // Last resort: kill whatever is listening, then write the state the handler never got to write.
-  const pid = findPidOnPort(port);
-  if (pid) {
-    if (killPid(pid)) {
-      markDaemonStopped(wolfDir);
-      console.log(`  ✓ Daemon stopped (PID ${pid} on port ${port})`);
+  // Last resort: kill the daemon — and ONLY the daemon.
+  //
+  // This used to kill whatever was listening on the configured port. That port is a number in a
+  // committed config file, the daemon may have been moved off it by `openwolf dashboard`, and on a
+  // developer machine it is just as likely to be a dev server or another project's daemon. Killing
+  // that and printing "✓ Daemon stopped" is the worst possible combination.
+  //
+  // The daemon now records its own pid, project root and host after a successful bind. A process is
+  // killed only when that record vouches for it. Anything else on the port is reported, not touched.
+  const ownPid = readOwnDaemonPid(wolfDir, projectRoot);
+  const listening = findPidOnPort(port);
+
+  if (ownPid === null) {
+    if (listening) {
+      console.log(`  No daemon of this project is running. Port ${port} is held by PID ${listening}, which OpenWolf did not start — left alone.`);
     } else {
-      console.error(`  Failed to kill process ${pid} on port ${port}.`);
+      console.log(`  No daemon running on port ${port}.`);
     }
+    return;
+  }
+  if (listening !== null && listening !== ownPid) {
+    console.log(`  Stopping this project's daemon (PID ${ownPid}). Note: port ${port} is held by a different process (PID ${listening}), which is left alone.`);
+  }
+  if (killPid(ownPid)) {
+    markDaemonStopped(wolfDir);
+    clearDaemonRecord(wolfDir);
+    console.log(`  ✓ Daemon stopped (PID ${ownPid})`);
   } else {
-    console.log(`  No daemon running on port ${port}.`);
+    console.error(`  Failed to stop the daemon (PID ${ownPid}).`);
   }
 }
 
@@ -250,11 +269,17 @@ export async function daemonRestart(): Promise<void> {
   if (await requestGracefulStop(wolfDir, port)) {
     console.log("  Stopped old daemon cleanly.");
   } else {
-    const pid = findPidOnPort(port);
-    if (pid) {
-      killPid(pid);
+    // Same ownership rule as daemonStop: a restart that kills a stranger on the port is a restart
+    // that took down somebody else's server and then told you it restarted yours.
+    const ownPid = readOwnDaemonPid(wolfDir, projectRoot);
+    if (ownPid !== null) {
+      killPid(ownPid);
       markDaemonStopped(wolfDir);
-      console.log(`  Stopped old daemon (PID ${pid}).`);
+      clearDaemonRecord(wolfDir);
+      console.log(`  Stopped old daemon (PID ${ownPid}).`);
+    } else {
+      const listening = findPidOnPort(port);
+      if (listening) console.log(`  Port ${port} is held by PID ${listening}, which OpenWolf did not start — left alone.`);
     }
   }
   console.log("  Use 'openwolf dashboard' to start a new daemon.");

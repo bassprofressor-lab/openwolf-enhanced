@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, updateSession, readMarkdown, parseAnatomy,
-  estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry
+  estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry, relativeToProject, sessionFileFor
 } from "./shared.js";
 
 const SESSION_FALLBACK: SessionData = {
@@ -22,16 +22,16 @@ async function main(): Promise<void> {
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");
-  const sessionFile = path.join(hooksDir, "_session.json");
-
   const raw = await readStdin();
-  let input: { tool_input?: { file_path?: string; path?: string } };
+  let input: { session_id?: string; tool_input?: { file_path?: string; path?: string } };
   try {
     input = JSON.parse(raw);
   } catch {
     process.exit(0);
     return;
   }
+  // After the parse, not before: the payload is what says which session this is.
+  const sessionFile = sessionFileFor(hooksDir, input.session_id);
 
   const filePath = input.tool_input?.file_path ?? input.tool_input?.path ?? "";
   if (!filePath) { process.exit(0); return; }
@@ -45,11 +45,7 @@ async function main(): Promise<void> {
   // Skip tracking for .wolf/ internal files — they're infrastructure, not project files.
   // Counting them inflates anatomy miss rates since .wolf/ is excluded from anatomy scanning.
   const projectDir = normalizePath(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  // Require the path SEPARATOR after the root — a bare startsWith(projectDir) also matched
-  // sibling directories sharing the prefix (/root/orderflow2 counted as inside /root/orderflow).
-  const relToProject = normalizedFile.startsWith(projectDir + "/")
-    ? normalizedFile.slice(projectDir.length + 1)
-    : "";
+  const relToProject = relativeToProject(filePath, projectDir);
   // Don't track files outside the project root (upstream #56).
   if (!relToProject) { process.exit(0); return; }
   if (relToProject.startsWith(".wolf/") || relToProject.startsWith(".wolf\\")) {

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { getRegisteredProjects, registerProject, type RegisteredProject } from "./registry.js";
 import { readJSON, writeJSON, readText, writeText, safeCopyFile } from "../utils/fs-safe.js";
 import { ensureDir } from "../utils/paths.js";
-import { getRetention, pruneBackups } from "../utils/maintenance.js";
+import { getRetention, pruneBackups, DEFAULT_ANATOMY_EXCLUDES } from "../utils/maintenance.js";
 import { copyHookScripts } from "../utils/hooks-deploy.js";
 import { deployAgentHooks } from "../utils/agent-hooks.js";
 import { reconcileProjectPorts } from "../utils/ports.js";
@@ -56,6 +56,28 @@ export function deepMergeDefaults(
     }
   }
   return out;
+}
+
+/**
+ * Union the anatomy exclusions instead of letting either side win.
+ *
+ * deepMergeDefaults replaces an array wholesale with the user's version, which is right for
+ * something like viewports and wrong here: a project initialised before a new exclusion existed
+ * would never receive it, and its index would keep filling with virtualenv or agent-config noise
+ * that every other project excludes. Union means new defaults arrive and a customised entry is
+ * never removed.
+ */
+export function unionAnatomyExcludes(
+  cfg: Record<string, unknown>,
+  defaults: string[],
+): Record<string, unknown> {
+  const ow = cfg.openwolf as { anatomy?: { exclude_patterns?: unknown } } | undefined;
+  if (!ow?.anatomy) return cfg;
+  const current = Array.isArray(ow.anatomy.exclude_patterns)
+    ? (ow.anatomy.exclude_patterns as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  ow.anatomy.exclude_patterns = [...new Set([...current, ...defaults])];
+  return cfg;
 }
 
 // Files that contain user data — NEVER overwrite, only create if missing
@@ -222,8 +244,9 @@ async function updateProject(
       const defaults = readJSON<Record<string, unknown>>(cfgTemplate, {});
       if (fs.existsSync(cfgDest)) {
         const userCfg = readJSON<Record<string, unknown>>(cfgDest, {});
-        writeJSON(cfgDest, deepMergeDefaults(defaults, userCfg));
-        console.log(`    ✓ config.json merged (user values preserved)`);
+        const mergedCfg = unionAnatomyExcludes(deepMergeDefaults(defaults, userCfg), DEFAULT_ANATOMY_EXCLUDES);
+        writeJSON(cfgDest, mergedCfg);
+        console.log(`    ✓ config.json merged (user values preserved, anatomy exclusions extended)`);
       } else {
         safeCopyFile(cfgTemplate, cfgDest);
         console.log(`    ✓ config.json created`);
@@ -245,7 +268,10 @@ async function updateProject(
     // 4. Register hooks with Claude (always) + any detected agent (Codex/Gemini/OpenCode).
     const claudeDir = path.join(root, ".claude");
     for (const r of deployAgentHooks(root)) {
-      if (r.agent === "claude") console.log(`    ✓ Claude settings updated`);
+      // Claude used to be reported as updated unconditionally — it cannot fail, was the assumption.
+      // It can: a malformed .claude/settings.json is now preserved instead of overwritten, and
+      // claiming success there would hide the one thing the user has to act on.
+      if (r.agent === "claude" && r.deployed) console.log(`    ✓ Claude settings updated`);
       else if (r.deployed) console.log(`    ✓ ${r.agent}: hooks registered (${r.detail})`);
       else console.log(`    ⚠ ${r.agent}: ${r.detail}`);
     }

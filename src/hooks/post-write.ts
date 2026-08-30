@@ -3,7 +3,7 @@ import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, writeAtomic, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateFileTokens, getTokenRatios, appendMarkdown, timeShort, readStdin, normalizePath,
-  getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject
+  getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject, tryWithLock, sessionFileFor
 } from "./shared.js";
 
 interface SessionData {
@@ -36,17 +36,17 @@ async function main(): Promise<void> {
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");
-  const sessionFile = path.join(hooksDir, "_session.json");
   const projectRoot = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   const raw = await readStdin();
-  let input: { tool_name?: string; tool_input?: { file_path?: string; path?: string; content?: string; old_string?: string; new_string?: string; edits?: Array<{ new_string?: string }> } };
+  let input: { session_id?: string; tool_name?: string; tool_input?: { file_path?: string; path?: string; content?: string; old_string?: string; new_string?: string; edits?: Array<{ new_string?: string }> } };
   try {
     input = JSON.parse(raw);
   } catch {
     process.exit(0);
     return;
   }
+  const sessionFile = sessionFileFor(hooksDir, input.session_id);
 
   const toolName = input.tool_name ?? "Write";
   const filePath = input.tool_input?.file_path ?? input.tool_input?.path ?? "";
@@ -93,6 +93,13 @@ async function main(): Promise<void> {
     : newStr;
 
   // 1. Update anatomy.md
+  //
+  // Under the lock for its whole read-modify-write cycle. writeAtomic() prevents a TORN file, not a
+  // LOST update: two post-write hooks that each parse the index, add their own entry and serialise
+  // it both produce valid markdown, and the second one silently drops the first one's file. On a
+  // multi-edit turn that is the normal case, and the missing entry only shows up much later as an
+  // anatomy miss for a file that was indexed.
+  tryWithLock(path.join(wolfDir, "anatomy.md"), () => {
   try {
     const anatomyPath = path.join(wolfDir, "anatomy.md");
     let anatomyContent: string;
@@ -146,6 +153,7 @@ async function main(): Promise<void> {
       writeAtomic(anatomyPath, () => serialized);
     }
   } catch {}
+  });
 
   // 2. Append richer entry to memory.md
   try {
@@ -309,6 +317,10 @@ function extractCalls(code: string): string[] {
 
 function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: string, oldStr: string, newStr: string): void {
   const bugLogPath = path.join(wolfDir, "buglog.json");
+  // The read has to happen INSIDE the lock together with the write. Reading first and writing later
+  // is the lost-update shape: two edits in the same turn both computed `bug-041` from the same
+  // snapshot, and the second write erased the first entry while reusing its id.
+  tryWithLock(bugLogPath, () => {
   const bugLog = readBugLog(wolfDir) as unknown as BugLog; // tolerates legacy array format
   const relFile = normalizePath(path.relative(projectRoot, absolutePath));
   const basename = path.basename(absolutePath);
@@ -316,7 +328,7 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
 
   // Detect what kind of fix this is
   const detection = detectFixPattern(oldStr, newStr, ext, path.basename(relFile));
-  if (!detection) return;
+  if (!detection) return;   // returns from the locked callback, not from autoDetectBugFix
 
   // Check for recent duplicate (same file + same category within 30 min).
   // Widened from 5 min to cut down on repeated auto-detected entries for the same file.
@@ -367,6 +379,7 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
   }
 
   writeJSON(bugLogPath, bugLog);
+  });
 }
 
 interface FixDetection {

@@ -4,7 +4,7 @@ import { extractDescription, capDescription } from "./description-extractor.js";
 import { readJSON } from "../utils/fs-safe.js";
 import { writeText } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
-import { loadIgnore } from "../utils/maintenance.js";
+import { loadIgnore, DEFAULT_ANATOMY_EXCLUDES, isPythonVenv } from "../utils/maintenance.js";
 import { extractSymbols, symbolsSupported, SYMBOL_MIN_TOKENS, type SymbolEntry } from "./symbol-extractor.js";
 import { extractImports, importsSupported, buildGraph, pageRank, toPercentile } from "./import-graph.js";
 import { estimateFileTokens, getTokenRatios, type TokenRatios } from "../tracker/token-estimator.js";
@@ -116,6 +116,9 @@ function walkDir(
     if (ignore(relPath)) continue; // .wolfignore
 
     if (item.isDirectory()) {
+      // A virtualenv under a name nobody thought to exclude ("env", ".env310", the project's own
+      // name) is still thousands of files of somebody else's source. pyvenv.cfg is what defines one.
+      if (isPythonVenv(fullPath)) continue;
       walkDir(fullPath, rootDir, excludePatterns, maxFiles, entries, ignore, symbols, ratios, rawImports);
     } else if (item.isFile()) {
       const ext = path.extname(item.name).toLowerCase();
@@ -245,7 +248,7 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
       anatomy: {
         max_description_length: 100,
         max_files: 500,
-        exclude_patterns: ["node_modules", ".git", "dist", "build", ".wolf"],
+        exclude_patterns: DEFAULT_ANATOMY_EXCLUDES,
       },
       token_audit: { chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
     },
@@ -258,7 +261,7 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
   const anatomyCfg = {
     max_description_length: 100,
     max_files: 500,
-    exclude_patterns: ["node_modules", ".git", "dist", "build", ".wolf"],
+    exclude_patterns: DEFAULT_ANATOMY_EXCLUDES,
     // Treat as Partial: the type says "complete", the file on disk need not be.
     ...((config.openwolf?.anatomy ?? {}) as Partial<WolfConfig["openwolf"]["anatomy"]>),
   };

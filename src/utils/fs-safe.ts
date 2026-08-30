@@ -93,18 +93,28 @@ export function writeText(filePath: string, content: string): boolean {
   return writeAtomic(filePath, () => content);
 }
 
-// Best-effort advisory lock around a read-modify-write cycle (M1). Duplicated from
-// hooks/shared.ts (separate build roots). Never blocks for long — waits up to ~1s, steals a
-// stale lock (>5s), and runs unlocked if it can't acquire, so it can't wedge a process.
+// Advisory lock around a read-modify-write cycle (M1). Duplicated from hooks/shared.ts (separate
+// build roots) — keep the two in step. Waits with a fast backoff, steals a lock left behind by a
+// dead process (>5s), and FAILS rather than proceeding unlocked; see the long note in
+// hooks/shared.ts for why running the callback anyway made the lock meaningless for everyone.
+export class LockTimeoutError extends Error {
+  constructor(public readonly targetPath: string, public readonly waitedMs: number) {
+    super(`could not acquire the lock on ${path.basename(targetPath)} within ${waitedMs}ms — update skipped`);
+    this.name = "LockTimeoutError";
+  }
+}
+
 function sleepSync(ms: number): void {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no-op */ }
 }
+
 export function withLock<T>(targetPath: string, fn: () => T): T {
   const lockPath = targetPath + ".lock";
-  const MAX_WAIT_MS = 1000;
+  const MAX_WAIT_MS = 1500;
   const STALE_MS = 5000;
   const start = Date.now();
   let held = false;
+  let backoff = 2;
   while (Date.now() - start < MAX_WAIT_MS) {
     try {
       const fd = fs.openSync(lockPath, "wx");
@@ -116,13 +126,46 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
       try {
         if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_MS) { fs.unlinkSync(lockPath); continue; }
       } catch { continue; }
-      sleepSync(25);
+      sleepSync(backoff);
+      backoff = Math.min(backoff * 2, 50);
     }
   }
+  if (!held) throw new LockTimeoutError(targetPath, Date.now() - start);
   try {
     return fn();
   } finally {
-    if (held) { try { fs.unlinkSync(lockPath); } catch { /* ignore */ } }
+    try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * withLock for a caller that returns a value and has a sensible "did not run" answer.
+ * The skip is reported, never silent — a maintenance pass that quietly did nothing reads exactly
+ * like a maintenance pass that found nothing to do.
+ */
+export function withLockOr<T>(targetPath: string, onSkip: () => T, fn: () => T): T {
+  try {
+    return withLock(targetPath, fn);
+  } catch (e) {
+    if (e instanceof LockTimeoutError) {
+      process.stderr.write(`[openwolf] ${e.message}\n`);
+      return onSkip();
+    }
+    throw e;
+  }
+}
+
+/** withLock for callers that must not throw. Reports a lost update instead of hiding it. */
+export function tryWithLock(targetPath: string, fn: () => void): boolean {
+  try {
+    withLock(targetPath, fn);
+    return true;
+  } catch (e) {
+    if (e instanceof LockTimeoutError) {
+      process.stderr.write(`[openwolf] ${e.message}\n`);
+      return false;
+    }
+    throw e;
   }
 }
 

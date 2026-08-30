@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
-import { readJSON, writeJSON, withLock } from "../utils/fs-safe.js";
+import { readJSON, writeJSON, withLock, withLockOr } from "../utils/fs-safe.js";
 import { readDashboardToken } from "../utils/dashboard-auth.js";
 import { Logger } from "../utils/logger.js";
 import { CronEngine } from "../daemon/cron-engine.js";
@@ -127,7 +127,7 @@ export function cronRetry(id: string): void {
   // This CLI runs in its own process while the daemon's cron engine may be appending to the same
   // file — read-modify-write under the shared lock so neither side clobbers the other.
   const statePath = path.join(wolfDir, "cron-state.json");
-  const removed = withLock(statePath, () => {
+  const removed = withLockOr(statePath, () => false, () => {
     const state = readJSON<CronState>(statePath, {
       engine_status: "unknown",
       execution_log: [],

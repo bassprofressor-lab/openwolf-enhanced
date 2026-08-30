@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, SESSION_SUMMARY_SCAFFOLD, bookInjection } from "./shared.js";
+import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, tryWithLock, sessionFileFor, pruneOldSessionFiles, SESSION_SUMMARY_SCAFFOLD, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 async function main(): Promise<void> {
@@ -17,7 +17,6 @@ async function main(): Promise<void> {
     }
   } catch {}
   const hooksDir = path.join(wolfDir, "hooks");
-  const sessionFile = path.join(hooksDir, "_session.json");
   const now = new Date();
   const sessionId = `session-${now.toISOString().slice(0, 10)}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
 
@@ -26,17 +25,24 @@ async function main(): Promise<void> {
   // would wipe this session's read/write tracking mid-flight and append a spurious memory header
   // on every compaction (compaction survival).
   let source = "startup";
+  let harnessSessionId: string | undefined;
   try {
-    const hookInput = JSON.parse(await readStdin()) as { source?: unknown };
+    const hookInput = JSON.parse(await readStdin()) as { source?: unknown; session_id?: unknown };
     if (typeof hookInput.source === "string") source = hookInput.source;
+    if (typeof hookInput.session_id === "string") harnessSessionId = hookInput.session_id;
   } catch {}
+  // One state file per session (see sessionFileFor). Two agents in the same project used to share
+  // one, so the second one's startup wiped the first one's in-flight tracking.
+  const sessionFile = sessionFileFor(hooksDir, harnessSessionId);
+  // One file per session accumulates; a finished session is already folded into the ledger.
+  pruneOldSessionFiles(hooksDir);
   const continuing = (source === "compact" || source === "resume") && fs.existsSync(sessionFile);
 
   if (!continuing) {
     // Create fresh session state. Under the lock like every other writer of this file: the reset is
     // a whole-file replacement, so an unlocked write here could land in the middle of another
     // hook's read-modify-write and hand it a half-written file to parse.
-    withLock(sessionFile, () => writeJSON(sessionFile, {
+    tryWithLock(sessionFile, () => writeJSON(sessionFile, {
       session_id: sessionId,
       started: timestamp(),
       files_read: {},
@@ -96,7 +102,7 @@ async function main(): Promise<void> {
     // Same lock as the stop hook's ledger write — a session ending in one process while another
     // starts must not clobber the read-modify-write.
     const ledgerPath = path.join(wolfDir, "token-ledger.json");
-    withLock(ledgerPath, () => {
+    tryWithLock(ledgerPath, () => {
       const ledger = readJSON(ledgerPath, { version: 1, lifetime: { total_sessions: 0 } }) as {
         version: number;
         lifetime: { total_sessions: number };
