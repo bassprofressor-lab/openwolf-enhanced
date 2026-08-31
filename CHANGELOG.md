@@ -6,6 +6,31 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.28.1] — 2026-08-31
+
+Patch: the `windows` CI job was permanently red on two test bugs in
+`test/upstream-parity.test.js` — no product code changed. A job that is always red stops catching
+the regressions it was added for, so this fixes the harness, not the code it guards. Both were
+reported against 1.28.0 (#1, #2).
+
+### Fixed — the Windows CI job is green again (tests only)
+
+- 🪟 **A concurrency test imported a bare Windows path and read its own startup failure as a lost
+  update.** `path.resolve()` yields `C:\…` on win32, and ESM rejects `c:` as an unknown protocol,
+  so all 30 child processes died before `registerProject()` ran. Because the test discarded their
+  exit codes, the missing registry file looked like the 1.28.0 lock had failed — it had not,
+  nothing ever wrote the file. The import now goes through `pathToFileURL()`, and the test asserts
+  every child exited 0, so the next real regression cannot masquerade as a phantom lost update. (#1)
+- 🪟 **A path-traversal test compared a normalised path against a raw POSIX string.**
+  `sessionFileFor()` builds its result with `path.join()`, which rewrites separators to `\` on
+  win32, while the hard-coded `"/p/.wolf/hooks"` never went through `path` — so the assertion could
+  only pass on POSIX, even though the traversal guard works correctly on Windows (the basename
+  stays `_session-etc-passwd.json`, contained). Both sides are normalised now. (#2)
+
+Neither was a product defect: `registerProject()` and `sessionFileFor()` behave correctly on
+Windows. `test/upstream-parity.test.js` arrived with 1.26–1.28 and had never run on Windows before
+it landed.
+
 ## [1.28.0] — 2026-08-31
 
 Upstream OpenWolf published 2.5.1 on 2026-08-30, the same day as our 1.27.0, and independently

@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import { withLock, tryWithLock, withLockOr, LockTimeoutError } from "../dist/src/utils/fs-safe.js";
 import {
@@ -95,7 +96,10 @@ test("sessionFileFor keys state by session id, and stays legacy when there is no
   // The id becomes a FILE NAME and comes from outside, so it can only ever name a file here.
   for (const evil of ["../../etc/passwd", "a/b", "..", "./."]) {
     const f = sessionFileFor(hooks, evil);
-    assert.equal(path.dirname(f), hooks, `"${evil}" escaped the hooks directory: ${f}`);
+    // Normalise the expected side too: sessionFileFor() builds `f` with path.join(), which
+    // rewrites separators on win32 (\p\.wolf\hooks). The raw POSIX `hooks` string never goes
+    // through path, so a bare comparison only matches on POSIX and keeps the windows job red.
+    assert.equal(path.dirname(f), path.join(hooks), `"${evil}" escaped the hooks directory: ${f}`);
     assert.ok(!path.basename(f).includes(".."), `"${evil}" kept a traversal segment`);
   }
 });
@@ -164,8 +168,11 @@ test("concurrent registrations do not lose each other", () => {
   const env = { ...process.env, OPENWOLF_HOME: home, HOME: home, USERPROFILE: home };
   // Separate PROCESSES, not promises: the lost update happens between OS processes, and a
   // single-threaded in-process loop cannot reproduce it.
+  // ESM needs a file:// URL for an absolute specifier — on win32 path.resolve() yields
+  // `C:\…` and the loader rejects `c:` as an unknown protocol, killing every child before
+  // it reaches registerProject(). pathToFileURL() makes it valid on both platforms.
   const script = `
-    import { registerProject } from ${JSON.stringify(path.resolve("dist/src/cli/registry.js"))};
+    import { registerProject } from ${JSON.stringify(pathToFileURL(path.resolve("dist/src/cli/registry.js")).href)};
     registerProject(process.argv[2], "p" + process.argv[3], "1.28.0");
   `;
   const scriptPath = path.join(home, "reg.mjs");
@@ -176,10 +183,15 @@ test("concurrent registrations do not lose each other", () => {
   for (let i = 0; i < N; i++) {
     kids.push(new Promise((resolve) => {
       const c = spawn(process.execPath, [scriptPath, `/tmp/proj-${i}`, String(i)], { env, stdio: "ignore" });
-      c.on("exit", resolve);
+      c.on("exit", (code) => resolve(code));
     }));
   }
-  return Promise.all(kids).then(() => {
+  return Promise.all(kids).then((codes) => {
+    // A child that never started (loader error) is otherwise indistinguishable from one that
+    // ran — that is what once turned a startup failure into a phantom lost-update. Assert the
+    // children actually succeeded, so the next real regression cannot masquerade the same way.
+    const failed = codes.filter((c) => c !== 0).length;
+    assert.equal(failed, 0, `${failed}/${N} registration children exited non-zero`);
     const reg = JSON.parse(fs.readFileSync(path.join(home, ".openwolf", "registry.json"), "utf8"));
     assert.equal(reg.projects.length, N, `all ${N} registrations must survive, kept ${reg.projects.length}`);
   });
