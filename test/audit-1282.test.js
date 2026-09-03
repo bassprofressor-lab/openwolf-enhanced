@@ -261,3 +261,33 @@ test("two sessions started in the same minute keep separate ledger entries", () 
   assert.equal(ledger.sessions.length, 2, "the second stop must not replace the first entry");
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("three stops in one session leave ONE session-end row, not three", () => {
+  // The helper is tested above in isolation, but the value that makes it work — session.memory_line
+  // — is persisted by the stop hook itself. That link is the part that can silently break, so this
+  // drives the real compiled hook. Before the fix each turn appended its own near-identical row;
+  // one real project had 232 of them for 173 sessions.
+  const dir = tmp("sessionend");
+  const hooks = path.join(dir, ".wolf", "hooks");
+  fs.mkdirSync(hooks, { recursive: true });
+  const file = path.join(hooks, "_session-e2e.json");
+  fs.writeFileSync(file, JSON.stringify({
+    session_id: "session-2026-09-03-2200", started: new Date().toISOString(), files_read: {},
+    files_written: [{ file: "a.ts", action: "Edit", tokens: 10, at: "t" }], edit_counts: {},
+    anatomy_hits: 0, anatomy_misses: 0, repeated_reads_warned: 0, cerebrum_warnings: 0, stop_count: 0,
+  }));
+  for (const turn of [1, 2, 3]) {
+    const s = JSON.parse(fs.readFileSync(file, "utf8"));
+    s.files_written.push({ file: `b${turn}.ts`, action: "Edit", tokens: 10, at: "t" });
+    fs.writeFileSync(file, JSON.stringify(s));
+    execFileSync("node", [path.join(repoRoot, "dist", "hooks", "stop.js")], {
+      cwd: repoRoot, input: JSON.stringify({ session_id: "e2e" }), encoding: "utf8",
+      env: { ...process.env, OPENWOLF_PROJECT_DIR: dir },
+    });
+  }
+  const memory = fs.readFileSync(path.join(dir, ".wolf", "memory.md"), "utf8");
+  assert.equal((memory.match(/Session end:/g) || []).length, 1, "one row for the session");
+  assert.match(memory, /4 writes across 4 files/, "and it carries the latest numbers");
+  assert.ok(JSON.parse(fs.readFileSync(file, "utf8")).memory_line, "the row is remembered for the next turn");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
