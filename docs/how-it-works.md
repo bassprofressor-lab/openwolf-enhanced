@@ -143,9 +143,9 @@ The daemon is optional. OpenWolf works without it -- hooks are the primary layer
 
 ### AI tasks and credentials
 
-The daemon's AI tasks (`cerebrum-reflection` and `project-suggestions`) use `claude -p` to invoke the Claude CLI. These use your **Claude subscription credentials** from `~/.claude/.credentials.json` -- not API credits.
+The daemon's AI tasks (`cerebrum-reflection` and `project-suggestions`) call the provider's HTTP API directly, using the key from `api_key_env`. A background daemon cannot use the interactive `claude` CLI: it delegates auth to the desktop app and fails headless.
 
-If `ANTHROPIC_API_KEY` is set in your environment, OpenWolf automatically strips it when spawning `claude -p` to ensure the subscription OAuth token is used instead.
+There is no subscription path for these tasks. If you do not want to spend API credits, point `openwolf.cron.llm_base_url` at a local model server — that needs no key.
 
 ## Token Tracking
 

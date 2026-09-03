@@ -70,7 +70,9 @@ export async function linkCommand(opts: LinkOpts): Promise<void> {
   }
 
   setRemoteConfig(wolfDir, { enabled: true, base_url: opts.url, project });
-  writeRemoteToken(wolfDir, opts.token);
+  // Bind the token to the URL it was just verified against, so a later edit to the committed
+  // config.json cannot redirect it somewhere else.
+  writeRemoteToken(wolfDir, opts.token, opts.url);
   // The token exists as of this line — so the thing that keeps it out of git has to exist too, here,
   // not at the next `openwolf update`. 0600 is no defence against `git add .wolf`.
   ensureWolfGitignore(wolfDir);

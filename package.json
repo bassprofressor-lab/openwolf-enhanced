@@ -1,6 +1,6 @@
 {
   "name": "openwolf-enhanced",
-  "version": "1.28.1",
+  "version": "1.29.0",
   "description": "A second brain for Claude Code, Codex & Gemini — persistent git-native project memory with searchable citations, an MCP server for Claude Desktop, and invisible hook-based context. No database.",
   "type": "module",
   "bin": {
@@ -96,5 +96,10 @@
     "NOTICE",
     "CHANGELOG.md",
     "README.md"
-  ]
+  ],
+  "pnpm": {
+    "overrides": {
+      "qs": ">=6.16.0"
+    }
+  }
 }

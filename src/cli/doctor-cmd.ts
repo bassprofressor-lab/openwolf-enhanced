@@ -152,8 +152,10 @@ export async function doctorCommand(opts: DoctorOpts): Promise<void> {
     if (nd) {
       const h = nativeMemoryHealth(nd);
       console.log("\nClaude native memory (~/.claude/…/memory):");
-      console.log(`  ${h.topicFiles} topic files, ${humanBytes(h.footprintBytes)}; MEMORY.md index ${h.indexLines} lines (${h.indexedCount} referenced)`);
-      if (h.indexCutoffExceeded)
+      console.log(`  ${h.topicFiles} topic files, ${humanBytes(h.footprintBytes)}; MEMORY.md index ${h.indexLines} lines / ${humanBytes(h.indexBytes)} (${h.indexedCount} referenced)`);
+      if (h.indexBytesExceeded)
+        console.log(`  ⚠ MEMORY.md is ${humanBytes(h.indexBytes)} — Claude Code stops loading it at ~24 KB, so the tail never reaches a session. Shorten the entries (one line, well under 200 chars each).`);
+      else if (h.indexCutoffExceeded)
         console.log(`  ⚠ MEMORY.md > 200 lines — only the first 200 load at session start; the rest is invisible until you trim it.`);
       if (h.orphanCount)
         console.log(`  ⚠ ${h.orphanCount} topic files not in the index → never surface on resume. Search them: \`openwolf recall <query>\``);

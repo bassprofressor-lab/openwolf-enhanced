@@ -27,17 +27,74 @@ export function remoteTokenPath(wolfDir: string): string {
   return path.join(wolfDir, "remote-token");
 }
 
-export function readRemoteToken(wolfDir: string): string {
-  try {
-    return fs.readFileSync(remoteTokenPath(wolfDir), "utf-8").trim();
-  } catch {
-    return "";
+/**
+ * The token file binds the token to the URL it was issued for.
+ *
+ * Keeping the token out of config.json was only half the protection: the ENDPOINT still came from
+ * that committed file, so a collaborator could change one line, and the next `openwolf push` sent
+ * the workspace token — a write credential for the team's memory — to their host instead.
+ * Reproduced. The token now travels with the base_url it was linked against, and a mismatch stops
+ * the request rather than redirecting the credential.
+ *
+ * Legacy files hold the bare token and no URL; those keep working and are simply unbound.
+ */
+interface StoredToken { token: string; base_url?: string }
+
+function readStoredToken(wolfDir: string): StoredToken {
+  let raw: string;
+  try { raw = fs.readFileSync(remoteTokenPath(wolfDir), "utf-8").trim(); } catch { return { token: "" }; }
+  if (raw.startsWith("{")) {
+    try {
+      const o = JSON.parse(raw) as StoredToken;
+      return { token: String(o.token ?? "").trim(), base_url: o.base_url ? String(o.base_url) : undefined };
+    } catch { /* corrupt — treat as bare */ }
   }
+  return { token: raw };
 }
 
-export function writeRemoteToken(wolfDir: string, token: string): void {
+const sameHost = (a: string, b: string): boolean => {
+  try { return new URL(a).host.toLowerCase() === new URL(b).host.toLowerCase(); } catch { return false; }
+};
+
+/**
+ * The token, but only if config.json still points at the workspace it was linked to.
+ *
+ * Fail closed and loud: on a mismatch this returns "" (every caller then behaves as "not linked")
+ * and says why on stderr. Returning the token would mean handing a write credential to whatever
+ * host the committed file currently names.
+ */
+export function readRemoteToken(wolfDir: string): string {
+  const stored = readStoredToken(wolfDir);
+  if (!stored.token || !stored.base_url) return stored.token;
+  const cfg = getRemoteConfig(wolfDir);
+  if (!cfg || sameHost(stored.base_url, cfg.baseUrl)) return stored.token;
+  process.stderr.write(
+    `[openwolf] remote.base_url in .wolf/config.json is ${cfg.baseUrl}, but this token was linked ` +
+    `to ${stored.base_url}. config.json is committed, so this can change without you noticing — ` +
+    `not sending the token. Run \`openwolf link\` again if the move is intentional.\n`
+  );
+  return "";
+}
+
+/**
+ * Throws when config.json now points somewhere else than the URL the token was linked against.
+ * Callers that send the token must run this first.
+ */
+export function assertTokenMatchesBaseUrl(wolfDir: string, baseUrl: string): void {
+  const stored = readStoredToken(wolfDir);
+  if (!stored.token || !stored.base_url) return;   // unbound legacy token
+  if (sameHost(stored.base_url, baseUrl)) return;
+  throw new Error(
+    `remote.base_url in .wolf/config.json (${baseUrl}) is not the workspace this token was linked ` +
+    `to (${stored.base_url}). config.json is committed, so this can change without you noticing — ` +
+    `refusing to send the token. Run \`openwolf link\` again if the move is intentional.`
+  );
+}
+
+export function writeRemoteToken(wolfDir: string, token: string, baseUrl?: string): void {
   const p = remoteTokenPath(wolfDir);
-  fs.writeFileSync(p, token, { mode: 0o600 });
+  const body = baseUrl ? JSON.stringify({ token, base_url: baseUrl }) : token;
+  fs.writeFileSync(p, body, { mode: 0o600 });
   try { fs.chmodSync(p, 0o600); } catch { /* best effort on platforms without chmod */ }
 }
 

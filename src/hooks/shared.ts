@@ -96,17 +96,49 @@ export class LockTimeoutError extends Error {
   }
 }
 
+/**
+ * The lock could not be taken for a reason that waiting will not fix — a missing directory we
+ * could not create, a read-only filesystem, no permission. Extends LockTimeoutError on purpose:
+ * every caller already treats that as "skip the update and say so", which is exactly right here
+ * too, and a hook must never die on it (see tryWithLock).
+ */
+export class LockUnavailableError extends LockTimeoutError {
+  constructor(targetPath: string, public readonly code: string) {
+    super(targetPath, 0);
+    this.message = `could not acquire the lock on ${path.basename(targetPath)} (${code}) — update skipped`;
+    this.name = "LockUnavailableError";
+  }
+}
+
 function sleepSync(ms: number): void {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no-op */ }
+}
+
+/**
+ * Is the lock file old enough to be considered abandoned?
+ *
+ * Age only. A pid liveness check was tried here and REMOVED on purpose: pids are recycled, so a
+ * lock left behind by a dead process whose number now belongs to an unrelated one would never be
+ * reclaimable again — a permanent lockout in exchange for a clock-skew problem nobody measured.
+ * Losing a lock occasionally beats never getting it back. The real defect was that reclaiming was
+ * not atomic; that is fixed at the call site.
+ */
+function isStaleLock(lockPath: string, staleMs: number): boolean {
+  return Date.now() - fs.statSync(lockPath).mtimeMs > staleMs;
 }
 
 export function withLock<T>(targetPath: string, fn: () => T): T {
   const lockPath = targetPath + ".lock";
   const MAX_WAIT_MS = 1500;   // well inside the tightest hook budget (5s)
   const STALE_MS = 5000;
+  // A lock that vanishes between our open and our stat is worth retrying at once — but only a few
+  // times. Without a bound, any error we did not anticipate turns the retry into a busy-loop that
+  // saturates a core for the whole budget and then fails anyway (bug-352).
+  const MAX_IMMEDIATE_RETRIES = 8;
   const start = Date.now();
   let held = false;
   let backoff = 2;
+  let immediateRetries = 0;
   while (Date.now() - start < MAX_WAIT_MS) {
     try {
       const fd = fs.openSync(lockPath, "wx");
@@ -114,10 +146,41 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
       fs.closeSync(fd);
       held = true;
       break;
-    } catch {
+    } catch (openErr) {
+      const code = (openErr as NodeJS.ErrnoException)?.code;
+
+      // EEXIST is the only failure that means "somebody else holds it" — the one case where
+      // waiting can help. Everything else is a property of the filesystem, not of a competitor,
+      // and will still be true in 1500ms, so spinning on it burns CPU to reach a certain failure.
+      if (code !== "EEXIST") {
+        // The one recoverable non-EEXIST case: the directory does not exist yet. The caller is
+        // about to write into it anyway, so create it and try once more.
+        if (code === "ENOENT" && immediateRetries < MAX_IMMEDIATE_RETRIES) {
+          immediateRetries++;
+          try { fs.mkdirSync(path.dirname(lockPath), { recursive: true }); continue; } catch { /* fall through */ }
+        }
+        throw new LockUnavailableError(targetPath, code ?? "UNKNOWN");
+      }
+
       try {
-        if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_MS) { fs.unlinkSync(lockPath); continue; }
-      } catch { continue; } // lock vanished — retry immediately
+        if (isStaleLock(lockPath, STALE_MS)) {
+          // Claim the stale lock ATOMICALLY. `unlink` + create is not: B stats the old lock, A
+          // removes it and creates a fresh one, B then removes A's FRESH lock and creates its own
+          // — and both run the critical section. Measured with 20 processes and one stale lock
+          // left behind: 12 lost updates in 8 rounds, and 0 without it. Only the process whose
+          // rename succeeds may remove the file; everyone else falls through and waits.
+          const claim = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+          try { fs.renameSync(lockPath, claim); fs.unlinkSync(claim); }
+          catch { /* somebody claimed it first */ }
+          continue;
+        }
+      } catch {
+        // Lock vanished between open and stat — retry immediately, but never unboundedly.
+        if (immediateRetries < MAX_IMMEDIATE_RETRIES) { immediateRetries++; continue; }
+        sleepSync(backoff);
+        backoff = Math.min(backoff * 2, 50);
+        continue;
+      }
       sleepSync(backoff);
       backoff = Math.min(backoff * 2, 50);
     }
@@ -531,7 +594,10 @@ export function compactMemoryIfLarge(wolfDir: string, maxBytes: number): void {
   flush();
   if (!changed) return;
 
-  writeAtomic(p, () => out.join("\n"));
+  // Same lock as appendMarkdown: without it an append landing between the read above and this
+  // rename is written to the old inode and vanishes.
+  try { withLock(p, () => writeAtomic(p, () => out.join("\n"))); }
+  catch { writeAtomic(p, () => out.join("\n")); }
 }
 
 // Read buglog.json tolerating the legacy bare-array format ([...]) as well as the
@@ -553,6 +619,50 @@ export function readBugLog(wolfDir: string): { version: number; bugs: BugLogEntr
   return { version: o.version ?? 1, bugs: Array.isArray(o.bugs) ? (o.bugs as BugLogEntry[]) : [] };
 }
 
+/**
+ * Cap buglog.json WITHOUT losing anything.
+ *
+ * The old `bugs.slice(-max)` cut from the front, so it deleted the OLDEST hand-written entries —
+ * exactly the ones other knowledge files cite by id ("see bug-084"). On a real project that had
+ * grown to 295 curated entries against a cap of 200, a single auto-detected fix would have thrown
+ * away 95 of them with no message. A cross-referenced logbook must never lose an entry; it may
+ * only move it somewhere the citation can still be resolved.
+ *
+ * Overflow now goes to `.wolf/buglog-archive.json`. Auto-detected noise is spent first (it is
+ * regenerable), curated entries only once that is exhausted — and even those are archived, not
+ * dropped. The archive is append-only and deduplicated by id; it is meant to grow.
+ */
+export function capBuglogWithArchive<T extends { id?: string; tags?: string[] }>(
+  wolfDir: string,
+  bugs: T[],
+  max: number,
+): { kept: T[]; archived: T[] } {
+  if (!Array.isArray(bugs) || bugs.length <= max || max < 0) return { kept: bugs, archived: [] };
+  const isAuto = (b: T) => Array.isArray(b.tags) && b.tags.includes("auto-detected");
+  const overflow = bugs.length - max;
+  const drop = new Set<number>();
+  for (let i = 0; i < bugs.length && drop.size < overflow; i++) if (isAuto(bugs[i])) drop.add(i);
+  for (let i = 0; i < bugs.length && drop.size < overflow; i++) drop.add(i);
+  const kept = bugs.filter((_, i) => !drop.has(i));
+  const archived = bugs.filter((_, i) => drop.has(i));
+  appendBuglogArchive(wolfDir, archived);
+  return { kept, archived };
+}
+
+/** Append entries to `.wolf/buglog-archive.json`, skipping ids that are already in there. */
+export function appendBuglogArchive<T extends { id?: string }>(wolfDir: string, entries: T[]): number {
+  if (!entries.length) return 0;
+  const p = path.join(wolfDir, "buglog-archive.json");
+  const raw = readJSON<unknown>(p, { version: 1, bugs: [] });
+  const o = Array.isArray(raw) ? { version: 1, bugs: raw as BugLogEntry[] } : (raw ?? {}) as { version?: number; bugs?: unknown };
+  const existing: T[] = Array.isArray(o.bugs) ? (o.bugs as T[]) : [];
+  const seen = new Set(existing.map((b) => String(b.id)));
+  const added = entries.filter((b) => !seen.has(String(b.id)));
+  if (!added.length) return 0;
+  writeJSON(p, { version: o.version ?? 1, bugs: [...existing, ...added] });
+  return added.length;
+}
+
 export function readMarkdown(filePath: string): string {
   try {
     return fs.readFileSync(filePath, "utf-8");
@@ -561,10 +671,39 @@ export function readMarkdown(filePath: string): string {
   }
 }
 
+/**
+ * Append a line, under the same lock the compactors take.
+ *
+ * A bare `appendFileSync` races the tmp+rename of `compactMemoryIfLarge` and `consolidateMemory`:
+ * an append that lands between their read and their rename goes to the old inode and disappears
+ * with it. Both sides "work", the line is simply gone. If the lock cannot be had we still append —
+ * a rare race beats losing the line outright, which is what happens if we give up here.
+ */
 export function appendMarkdown(filePath: string, line: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(filePath, line, "utf-8");
+  const write = () => fs.appendFileSync(filePath, line, "utf-8");
+  try { withLock(filePath, write); } catch { write(); }
+}
+
+/**
+ * Replace `previousLine` with `line`, or append if it is not there.
+ *
+ * The stop hook runs on EVERY turn and its numbers are cumulative for the whole session, so
+ * appending produced one near-identical "Session end" row per turn — 232 rows for 173 sessions in
+ * one real project, six of them consecutive and differing only in the timestamp. The ledger has
+ * replaced-by-id since 1.28.0; memory.md now does the same thing with the line itself as the key.
+ */
+export function replaceOrAppendMarkdown(filePath: string, previousLine: string, line: string): void {
+  if (!previousLine) { appendMarkdown(filePath, line); return; }
+  const swap = () => {
+    let content: string;
+    try { content = fs.readFileSync(filePath, "utf-8"); } catch { fs.appendFileSync(filePath, line, "utf-8"); return; }
+    const at = content.lastIndexOf(previousLine);
+    if (at === -1) { fs.appendFileSync(filePath, line, "utf-8"); return; }
+    writeAtomic(filePath, () => content.slice(0, at) + line + content.slice(at + previousLine.length));
+  };
+  try { withLock(filePath, swap); } catch { try { swap(); } catch { /* memory.md is a nicety */ } }
 }
 
 export interface AnatomyEntry {
@@ -1156,14 +1295,39 @@ export function timeShort(): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/**
+ * Read the hook payload from stdin.
+ *
+ * Every hook starts here, so this function sets the floor for hook latency — and under Bun it was
+ * the whole story. Measured on this repo: Bun starts a trivial script in 9ms against Node's 23ms,
+ * but reading stdin through the Node stream shim costs Bun ~15ms and Node ~2ms, which cancelled
+ * the entire runtime advantage (Bun 23ms vs Node 24ms for start+stdin). Bun's own
+ * `Bun.stdin.text()` does the same job in ~1ms, taking the floor to 8ms.
+ *
+ * So: a Bun fast path, and the Node path left exactly as it was — switching Node to
+ * `readFileSync(0)` measured no better (26ms vs 25ms) and would risk the blocking-read edge cases
+ * for nothing.
+ *
+ * The 4s guard applies to both. It is not decoration: on Windows, stdin delivery from Claude Code
+ * hooks can lag, and a hook that never resolves takes the tool call with it.
+ */
+const STDIN_TIMEOUT_MS = 4000;
+
 export function readStdin(): Promise<string> {
+  const bunStdin = (globalThis as { Bun?: { stdin?: { text?: () => Promise<string> } } }).Bun?.stdin;
+  if (typeof bunStdin?.text === "function") {
+    return Promise.race([
+      bunStdin.text().then((t) => t || "{}").catch(() => "{}"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("{}"), STDIN_TIMEOUT_MS)),
+    ]);
+  }
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     process.stdin.on("data", (chunk) => chunks.push(chunk as Buffer));
     process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     // If no stdin data after 4s, resolve with whatever we have so far.
     // On Windows, stdin delivery from Claude Code hooks can be slow.
-    setTimeout(() => resolve(chunks.length ? Buffer.concat(chunks).toString("utf-8") : "{}"), 4000);
+    setTimeout(() => resolve(chunks.length ? Buffer.concat(chunks).toString("utf-8") : "{}"), STDIN_TIMEOUT_MS);
   });
 }
 
@@ -1327,6 +1491,17 @@ export function blankPrivate(text: string): string {
   return redact(text, (m) => m.replace(/[^\n]/g, ""));
 }
 
+/**
+ * Same redaction, but the block is replaced by a visible marker.
+ *
+ * For a reader — the dashboard, a file viewer — silently deleting the region is worse than saying
+ * that something is hidden: the reader cannot tell an empty section from a redacted one. Recall and
+ * every egress path keep using strip/blankPrivate; this one is for display.
+ */
+export function maskPrivate(text: string): string {
+  return redact(text, () => "[private — hidden by OpenWolf]");
+}
+
 // Structured session-summary scaffold written under each new session header in memory.md.
 // An HTML comment → invisible in rendered markdown (no clutter), but a clear prompt for the
 // agent to replace at session end with a consistent, greppable one-liner (see OPENWOLF.md).
@@ -1350,16 +1525,25 @@ function isStatusStub(s: string): boolean {
 }
 
 // Body of a markdown section identified by its heading, up to the next h1/h2 heading.
-function extractMarkdownSection(md: string, headingRe: RegExp): string {
+/**
+ * Body of the first section whose heading matches `headingRe`, up to the next heading of the same
+ * or a higher level. Exported because pre-write.ts needs the SAME anchored lookup: it used to find
+ * its section with `split("## Do-Not-Repeat")`, a plain substring, which on a large cerebrum.md
+ * matched a sentence that merely quoted the heading name — and then scanned 5 unrelated bullets
+ * instead of the 175 real entries, silently, for as long as the file had grown.
+ */
+export function extractMarkdownSection(md: string, headingRe: RegExp): string {
   const lines = md.split(/\r?\n/);
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     if (headingRe.test(lines[i])) { start = i; break; }
   }
   if (start === -1) return "";
+  const level = (lines[start].match(/^#+/)?.[0].length) ?? 2;
   const body: string[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^#{1,2}\s/.test(lines[i])) break;
+    const m = lines[i].match(/^(#{1,6})\s/);
+    if (m && m[1].length <= level) break;
     body.push(lines[i]);
   }
   return body.join("\n").trim();
@@ -1396,11 +1580,31 @@ const BULLET_RE = /^\s*[-*] /gm;
 
 // Index of knowledge files the model can pull on demand, with entry counts and token cost —
 // so it knows what's available without us pre-dumping it (progressive disclosure).
+/** `openwolf.cerebrum.max_tokens` from config.json, with the template's own default. */
+function cerebrumBudget(read: (f: string) => string): number {
+  try {
+    const cfg = JSON.parse(read("config.json")) as { openwolf?: { cerebrum?: { max_tokens?: number } } };
+    const v = cfg.openwolf?.cerebrum?.max_tokens;
+    if (typeof v === "number" && v > 0) return v;
+  } catch { /* no config, or not JSON */ }
+  return 2000;
+}
+
 function availabilityIndex(read: (f: string) => string, cerebrum: string, nativeDir: string | null): string {
   const items: string[] = [];
   if (cerebrum.trim()) {
     const entries = (cerebrum.match(BULLET_RE) || []).length;
-    items.push(`- cerebrum.md — ${entries} entries, ~${estimateTokens(cerebrum, "prose")} tok (preferences, learnings, decisions, do-not-repeat) → Read or \`openwolf recall\``);
+    const tok = estimateTokens(cerebrum, "prose");
+    // `cerebrum.max_tokens` existed in every generated config.json since forever and was read by
+    // nothing at all. Meanwhile OPENWOLF.md tells the model to read the whole file — which on a
+    // grown project is ~126k tokens, 63× the configured budget. Honour the budget here: past it,
+    // "Read" stops being offered and recall is the only route.
+    const budget = cerebrumBudget(read);
+    items.push(
+      tok > budget
+        ? `- cerebrum.md — ${entries} entries, ~${tok} tok — TOO LARGE TO READ (budget ${budget}); use \`openwolf recall <query>\`, not Read`
+        : `- cerebrum.md — ${entries} entries, ~${tok} tok (preferences, learnings, decisions, do-not-repeat) → Read or \`openwolf recall\``
+    );
   }
   const buglog = read("buglog.json");
   if (buglog.trim()) {

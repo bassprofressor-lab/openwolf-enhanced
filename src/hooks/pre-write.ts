@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock, tryWithLock, sessionFileFor } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock, tryWithLock, sessionFileFor, extractMarkdownSection} from "./shared.js";
 
 interface BugEntry {
   id: string;
@@ -63,12 +63,16 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
+// One write should never produce a wall of warnings; the first few are the useful ones.
+const MAX_CEREBRUM_WARNINGS = 3;
+
 function checkCerebrum(wolfDir: string, content: string): number {
   const cerebrumContent = readMarkdown(path.join(wolfDir, "cerebrum.md"));
-  const doNotRepeatSection = cerebrumContent.split("## Do-Not-Repeat")[1];
-  if (!doNotRepeatSection) return 0;
+  // Anchored heading lookup, not a substring: an entry that quotes "## Do-Not-Repeat" inside its
+  // own prose used to win the split and reduce this check to a handful of unrelated bullets.
+  const entries = extractMarkdownSection(cerebrumContent, /^#{2,3}\s*Do[-\s]?Not[-\s]?Repeat/i);
+  if (!entries) return 0;
 
-  const entries = doNotRepeatSection.split("## ")[0];
   const lines = entries.split("\n").filter((l) => l.trim().startsWith("[") || l.trim().startsWith("-"));
   let fired = 0;
 
@@ -76,6 +80,7 @@ function checkCerebrum(wolfDir: string, content: string): number {
     const trimmed = line.trim().replace(/^[-*]\s*/, "").replace(/^\[[\d-]+\]\s*/, "");
     if (!trimmed) continue;
 
+    if (fired >= MAX_CEREBRUM_WARNINGS) break;
     const patterns: string[] = [];
 
     const quotedMatches = trimmed.match(/"([^"]+)"/g) || trimmed.match(/'([^']+)'/g) || trimmed.match(/`([^`]+)`/g);
@@ -89,6 +94,9 @@ function checkCerebrum(wolfDir: string, content: string): number {
     if (neverMatch) patterns.push(neverMatch[1]);
 
     for (const pattern of patterns) {
+      // Anything shorter than four characters ("id", "os", "npm") matches almost any file and
+      // would turn a correctly-scoped section into a warning machine.
+      if (pattern.trim().length < 4) continue;
       try {
         const regex = new RegExp(`\\b${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
         if (regex.test(content)) {

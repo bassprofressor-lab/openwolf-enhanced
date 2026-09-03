@@ -309,10 +309,15 @@ export function aggregateProjects(projects: Array<{ root: string; name: string }
   return projects.map((p) => projectSummary(p.root, p.name));
 }
 
+/** Claude Code stops loading MEMORY.md at roughly this size; stay under it with a little room. */
+export const NATIVE_INDEX_MAX_BYTES = 24_000;
+
 export interface NativeMemoryHealth {
   topicFiles: number;
   indexLines: number;
-  indexCutoffExceeded: boolean; // MEMORY.md > 200 lines → only first 200 load at session start
+  indexCutoffExceeded: boolean; // MEMORY.md too large to load whole at session start (lines OR bytes)
+  indexBytes: number;           // size of MEMORY.md — the limit that actually bites first
+  indexBytesExceeded: boolean;  // over the byte budget, regardless of line count
   indexedCount: number;         // topic files referenced by MEMORY.md
   orphanCount: number;          // topic files NOT referenced (won't surface on resume)
   deadLinks: string[];          // MEMORY.md links to files that don't exist
@@ -328,6 +333,11 @@ export function nativeMemoryHealth(dir: string, opts: { staleDays?: number } = {
   let indexContent = "";
   try { indexContent = fs.readFileSync(path.join(dir, "MEMORY.md"), "utf-8"); } catch { /* no index */ }
   const indexLines = indexContent ? indexContent.split(/\r?\n/).length : 0;
+  // Lines were the wrong dimension. Claude Code truncates MEMORY.md by SIZE (~24.4 KB), so a
+  // 175-line index of long one-liners loads only partially while the line check reports "fine" —
+  // observed on a real project whose own index carried a hand-written note about it.
+  const indexBytes = Buffer.byteLength(indexContent, "utf-8");
+  const bytesExceeded = indexBytes > NATIVE_INDEX_MAX_BYTES;
 
   const referenced = new Set<string>();
   for (const m of indexContent.matchAll(/\]\(([^)]+\.md)\)/g)) referenced.add(path.basename(m[1]));
@@ -353,7 +363,9 @@ export function nativeMemoryHealth(dir: string, opts: { staleDays?: number } = {
   return {
     topicFiles: names.length,
     indexLines,
-    indexCutoffExceeded: indexLines > 200,
+    indexCutoffExceeded: indexLines > 200 || bytesExceeded,
+    indexBytes,
+    indexBytesExceeded: bytesExceeded,
     indexedCount: indexed,
     orphanCount: names.length - indexed,
     deadLinks: [...referenced].filter((r) => !existing.has(r)),
@@ -712,6 +724,25 @@ interface Bug {
 }
 
 // Merge auto-detected duplicates (same basename + same category) and cap the total.
+/**
+ * Append entries to `.wolf/buglog-archive.json`, skipping ids already there. Mirror of the hook
+ * copy in hooks/shared.ts — the two build roots do not share modules; keep them in step.
+ */
+export function appendBuglogArchive(wolfDir: string, entries: Bug[]): number {
+  if (!entries.length) return 0;
+  const p = path.join(wolfDir, "buglog-archive.json");
+  const raw = readJSON<unknown>(p, { version: 1, bugs: [] as Bug[] });
+  const o = Array.isArray(raw)
+    ? { version: 1, bugs: raw as Bug[] }
+    : ((raw ?? {}) as { version?: number; bugs?: unknown });
+  const existing: Bug[] = Array.isArray(o.bugs) ? (o.bugs as Bug[]) : [];
+  const seen = new Set(existing.map((b) => String(b.id)));
+  const added = entries.filter((b) => !seen.has(String(b.id)));
+  if (!added.length) return 0;
+  writeJSON(p, { version: o.version ?? 1, bugs: [...existing, ...added] });
+  return added.length;
+}
+
 export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult {
   const p = path.join(wolfDir, "buglog.json");
   if (!fs.existsSync(p)) return noop("buglog");
@@ -750,13 +781,20 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
     }
   }
   let result = ordered;
+  let archivedCount = 0;
   if (result.length > max) {
     // Over the cap: spend auto-detected noise first (oldest first), and only fall back to
     // curated entries once that is exhausted. Manual bugs carry the root_cause/fix knowledge.
+    //
+    // Falling back to curated entries USED TO DELETE them. On a project with 295 curated entries
+    // and one auto-detected one, a single `doctor` run would have removed 94 hand-written bugs
+    // that other files cite by id. Overflow is now MOVED to buglog-archive.json instead.
     const overflow = result.length - max;
     const drop = new Set<number>();
     for (let i = 0; i < result.length && drop.size < overflow; i++) if (isAuto(result[i])) drop.add(i);
     for (let i = 0; i < result.length && drop.size < overflow; i++) drop.add(i);
+    const moved = result.filter((_, i) => drop.has(i));
+    archivedCount = appendBuglogArchive(wolfDir, moved);
     result = result.filter((_, i) => !drop.has(i));
   }
 
@@ -767,7 +805,8 @@ export function dedupeAndCapBuglog(wolfDir: string, max: number): CompactResult 
   writeJSON(p, { version: log.version ?? 1, bugs: result });
   const after = fileSize(p);
   const note = wasArray ? " (migrated legacy array → {version,bugs})" : "";
-  return { changed: true, before, after, detail: `buglog: ${startCount} → ${result.length} entries${note}, ${humanBytes(before)} → ${humanBytes(after)}` };
+  const arch = archivedCount ? `, ${archivedCount} moved to buglog-archive.json` : "";
+  return { changed: true, before, after, detail: `buglog: ${startCount} → ${result.length} entries${note}${arch}, ${humanBytes(before)} → ${humanBytes(after)}` };
   });
 }
 

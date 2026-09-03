@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { readJSON } from "./fs-safe.js";
-import { isLocalEndpoint, assertSafeBaseUrl } from "../daemon/llm-provider.js";
+import { isLocalEndpoint, assertSafeBaseUrl, assertTrustedLlmHost, assertAllowedApiKeyEnv } from "../daemon/llm-provider.js";
 
 // Embeddings for semantic recall. Provider-agnostic: talks to any OpenAI-compatible /embeddings
 // endpoint. Defaults to a local LM Studio server (keyless), so semantic memory stays local — the
@@ -44,6 +44,10 @@ export async function embedTexts(cfg: EmbedConfig, texts: string[]): Promise<num
   // metadata-address check, and default redirect handling, so a 307 replayed the whole POST body
   // (and the Authorization header) at whatever host the first one named.
   assertSafeBaseUrl(cfg.baseUrl, "recall.embeddings.base_url");
+  // Same reasoning as the LLM path: the endpoint comes from the committed config.json, and what
+  // gets sent here is the project's own text.
+  assertTrustedLlmHost(cfg.baseUrl, "recall.embeddings.base_url");
+  if (cfg.apiKeyEnv && !isLocalEndpoint(cfg.baseUrl)) assertAllowedApiKeyEnv(cfg.apiKeyEnv);
   const key = process.env[cfg.apiKeyEnv] ?? "";
   if (!key && !isLocalEndpoint(cfg.baseUrl)) {
     throw new Error(`${cfg.apiKeyEnv} is not set — a remote embeddings endpoint needs a key. Point openwolf.recall.embeddings.base_url at a local server (LM Studio http://localhost:1234/v1) to run keyless.`);

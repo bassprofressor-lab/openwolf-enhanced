@@ -3,7 +3,8 @@ import * as path from "node:path";
 import {
   getWolfDir, ensureWolfDir, readJSON, writeJSON, writeAtomic, readMarkdown, parseAnatomy, serializeAnatomy,
   extractDescription, estimateFileTokens, getTokenRatios, appendMarkdown, timeShort, readStdin, normalizePath,
-  getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject, tryWithLock, sessionFileFor
+  getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject, tryWithLock, sessionFileFor,
+  capBuglogWithArchive
 } from "./shared.js";
 
 interface SessionData {
@@ -373,9 +374,15 @@ function autoDetectBugFix(wolfDir: string, absolutePath: string, projectRoot: st
   });
 
   // Keep buglog.json bounded — auto-detection can otherwise append on nearly every edit.
+  // Overflow is MOVED to buglog-archive.json, never dropped: the old slice(-max) deleted the
+  // oldest curated entries, which are the ones other files cite by id.
   const maxBugs = getRetention(wolfDir).buglog_max_entries;
-  if (bugLog.bugs.length > maxBugs) {
-    bugLog.bugs = bugLog.bugs.slice(-maxBugs);
+  const capped = capBuglogWithArchive(wolfDir, bugLog.bugs, maxBugs);
+  if (capped.archived.length) {
+    bugLog.bugs = capped.kept;
+    process.stderr.write(
+      `[openwolf] buglog over ${maxBugs} entries — moved ${capped.archived.length} to buglog-archive.json\n`
+    );
   }
 
   writeJSON(bugLogPath, bugLog);

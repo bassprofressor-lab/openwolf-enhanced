@@ -16,7 +16,7 @@ import { DEFAULT_VIEWPORTS } from "../designqc/designqc-types.js";
 import { getRegisteredProjects } from "../cli/registry.js";
 import { aggregateProjects, aggregateNativeMemory, nativeMemoryHealth, nativeMemoryFiles, getRetention, rotateDaemonLog, pruneProposals } from "../utils/maintenance.js";
 import { resolveLlmConfig, requiresApiKey } from "./llm-provider.js";
-import { nativeMemoryDir } from "../hooks/shared.js";
+import { nativeMemoryDir, maskPrivate} from "../hooks/shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,7 +75,10 @@ const WOLF_BROADCAST_FILES = [
 function readWolfFileForDashboard(file: string): string {
   let raw: string;
   try {
-    raw = fs.readFileSync(path.join(wolfDir, file), "utf-8");
+    // maskPrivate, not readFileSync: the README promises <private> blocks stay "out of anything
+    // sent elsewhere". Recall, MCP, the LLM cron, push and the embedding index all honoured that;
+    // this reader did not, so the one channel that shows whole files showed them in full.
+    raw = maskPrivate(fs.readFileSync(path.join(wolfDir, file), "utf-8"));
   } catch {
     return "";
   }
@@ -264,7 +267,7 @@ app.get("/api/native-memory/file", (req, res) => {
   try { listing = fs.readdirSync(nd); } catch { /* unreadable */ }
   if (!listing.includes(name)) { res.status(404).json({ error: "not found" }); return; }
   try {
-    let content = fs.readFileSync(path.join(nd, name), "utf-8");
+    let content = maskPrivate(fs.readFileSync(path.join(nd, name), "utf-8"));
     if (content.length > 200_000) content = content.slice(0, 200_000) + "\n… (truncated)";
     res.json({ name, content });
   } catch {
@@ -436,7 +439,26 @@ app.get("/{*path}", (_req, res) => {
 // configured one is taken by another project's daemon (multi-project port handling).
 const port = Number(process.env.OPENWOLF_DASHBOARD_PORT) || config.openwolf.dashboard.port;
 // Bind to loopback by default so the dashboard isn't exposed on the network (upstream #30).
-const host = config.openwolf.dashboard.host || "127.0.0.1";
+// Loopback unless THIS MACHINE says otherwise. The bind address used to come from
+// .wolf/config.json, which is committed — a cloned repo could set "0.0.0.0" and put the daemon on
+// the network without the user doing anything. An env var cannot travel in a git clone.
+const configuredHost = String(config.openwolf.dashboard.host || "").trim();
+const host = process.env.OPENWOLF_DASHBOARD_HOST || "127.0.0.1";
+if (configuredHost && configuredHost !== host) {
+  logger.warn(
+    `ignoring dashboard.host "${configuredHost}" from config.json — that file is committed, so it ` +
+    `must not decide the bind address. Set OPENWOLF_DASHBOARD_HOST=${configuredHost} to allow it.`
+  );
+}
+// Last line of defence. A daemon that dies takes the crons, the watcher and the dashboard with
+// it; a logged error that leaves it running is strictly better than a clean exit nobody sees.
+process.on("uncaughtException", (err) => {
+  try { logger.error(`uncaught exception (daemon kept running): ${err?.stack || err?.message || String(err)}`); } catch { /* ignore */ }
+});
+process.on("unhandledRejection", (reason) => {
+  try { logger.error(`unhandled rejection (daemon kept running): ${reason instanceof Error ? reason.stack : String(reason)}`); } catch { /* ignore */ }
+});
+
 const server = app.listen(port, host, () => {
   logger.info(`Dashboard server listening on ${host}:${port}`);
   // Written only after the bind SUCCEEDS: a record for a daemon that never came up would point
@@ -456,6 +478,12 @@ const wss = new WebSocketServer({
   },
 });
 
+// Server-level errors (a failed upgrade, a socket that dies mid-handshake) reach the server
+// object, not any client — same uncaught-exception risk.
+wss.on("error", (err) => {
+  logger.warn(`WebSocket server error: ${err instanceof Error ? err.message : String(err)}`);
+});
+
 wss.on("connection", (ws) => {
   wsClients.add(ws);
   logger.info("WebSocket client connected");
@@ -471,6 +499,17 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     wsClients.delete(ws);
+  });
+
+  // Without this listener a protocol-level error — a frame with an RSV bit set, invalid UTF-8, an
+  // oversized control frame — is emitted as `error` on the socket, and Node turns an unhandled
+  // 'error' event into an uncaught exception that KILLS THE DAEMON. Verified: one seven-byte frame
+  // ended the process with exit 1, leaving cron-state on "running" because shutdown() never ran.
+  // A malformed frame is a client problem; it must cost that client its connection, nothing more.
+  ws.on("error", (err) => {
+    logger.warn(`WebSocket client error: ${err instanceof Error ? err.message : String(err)}`);
+    wsClients.delete(ws);
+    try { ws.terminate(); } catch { /* already gone */ }
   });
 
   // Send the current full state to THIS newly-connected client. Without this, a fresh page load or

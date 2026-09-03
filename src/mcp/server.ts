@@ -110,7 +110,8 @@ function callTool(name: string, args: Record<string, unknown>, projectDir: strin
     const h = nativeMemoryHealth(nd);
     return [
       `${h.topicFiles} topic files; MEMORY.md ${h.indexLines} lines, ${h.indexedCount} referenced, ${h.orphanCount} not indexed (never auto-load at session start).`,
-      h.indexCutoffExceeded ? "WARNING: MEMORY.md exceeds 200 lines — only the first 200 load at session start." : "",
+      h.indexBytesExceeded ? `WARNING: MEMORY.md is ${h.indexBytes} bytes — Claude Code stops loading it at ~24 KB, so the tail never reaches a session.`
+        : h.indexCutoffExceeded ? "WARNING: MEMORY.md exceeds 200 lines — only the first 200 load at session start." : "",
       h.deadLinks.length ? `${h.deadLinks.length} dead index link(s): ${h.deadLinks.slice(0, 5).join(", ")}` : "",
       h.staleCount ? `${h.staleCount} files untouched in 90+ days.` : "",
     ].filter(Boolean).join("\n");

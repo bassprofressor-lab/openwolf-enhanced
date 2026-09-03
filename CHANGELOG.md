@@ -6,6 +6,143 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.29.0] — 2026-09-03
+
+A four-model audit (bugs, security, token cost, product) run against this repo AND against a real
+project that has used it for months. 17 findings survived being checked against the code; the ones
+that did not are listed at the end so the next session does not chase them again. Two of them were
+losing data or bookkeeping in production right now.
+
+Minor, not patch: two defaults change. A non-standard `llm_base_url` and a custom `api_key_env` now
+need an opt-in from the machine, and `dashboard.host` from `config.json` is ignored.
+
+### Fixed — data loss
+
+- 🩸 **Capping `buglog.json` deleted the oldest hand-written entries.** Both the post-write hook
+  (`bugs.slice(-max)`) and `doctor`'s `dedupeAndCapBuglog` trimmed from the front once the
+  auto-detected entries ran out. Measured on a real project: 295 curated entries against the
+  default cap of 200 and exactly one auto-detected one, so a single `openwolf doctor` would have
+  removed 94 entries that 141 references elsewhere cite by id — and the hook would have done the
+  same on the next `?.` it saw. Overflow now MOVES to `.wolf/buglog-archive.json`: auto-detected
+  noise is still spent first, but nothing is dropped. Verified against the published 1.28.1 build:
+  295 in → 200 left, no archive, 95 gone.
+- 🔒 **`appendMarkdown` raced the memory.md compactors.** A hook appending between
+  `compactMemoryIfLarge`/`consolidateMemory`'s read and their rename wrote to the old inode and
+  vanished with it. Both writers now take the same lock.
+- 🔒 **The anatomy rescan wrote `anatomy.md` without the lock post-write has held since 1.28.0.**
+  The 6-hourly cron (and `openwolf scan`) could replace the file mid-hook, and the hook then put
+  its stale parse back over the whole scan result.
+- 🔒 **Reclaiming a stale lock was not atomic.** `stat → unlink → create` let two processes both
+  believe they held the lock: B sees the old file, A removes it and creates a fresh one, B removes
+  A's FRESH one. Measured with 20 processes and one stale lock: 12 lost updates in 8 rounds, 0
+  without it. The stale file is now claimed with a rename, so only one process may remove it.
+  A pid-liveness check was tried here and deliberately dropped — pids get recycled, and a
+  permanent lockout is worse than the clock-skew case it would have covered.
+- ⚙️ **`openwolf update` overwrote live hook files non-atomically.** `safeCopyFile` truncated the
+  destination; a hook starting inside that window imported half a `shared.js`. Now tmp + rename.
+
+### Fixed — silent failures
+
+- 🕳️ **The stop hook died on a session file it did not write itself.** post-bash, pre-write and
+  post-read each create `_session-<id>.json` with their own partial shape when they run first;
+  `stop.ts` assumed the full one, `Object.keys(session.files_read)` threw, and
+  `main().catch(() => exit(0))` swallowed it. The whole session then produced no ledger entry, no
+  memory.md line and no reminder, without a single line of output. Found as a real file in a live
+  project: 66 writes recorded, nothing booked. The session is now normalised against defaults, and
+  a hook crash prints to stderr instead of disappearing.
+- 🕳️ **A ledger stub written by session-start disabled every later stop hook.** When
+  `token-ledger.json` was missing, session-start wrote `{version, lifetime}` — without
+  `sessions: []`. From then on the stop hook died in `findIndex`, permanently, until someone
+  repaired the file by hand. It writes the full shape now, and the stop hook tolerates the old one.
+- 🕳️ **The Do-Not-Repeat check scanned the wrong section.** `pre-write.ts` found its section with
+  `split("## Do-Not-Repeat")` — a plain substring. On a grown cerebrum.md the first hit was inside
+  a *sentence* that quoted the heading, so the check ran over 5 unrelated bullets and none of the
+  155 real entries. That is why `cerebrum_warnings` was 0 in every session file ever recorded. It
+  now uses the same anchored, level-aware heading lookup as the resume digest, ignores patterns
+  under four characters, and stops after three warnings per write.
+- 🕳️ **A malformed WebSocket frame killed the daemon.** No `error` listener on the socket, so
+  Node turned it into an uncaught exception: one seven-byte frame with an RSV bit set ended the
+  process with exit 1, leaving cron-state on "running" because `shutdown()` never ran. Listeners
+  added for `ws`, `wss` and the chokidar watcher (inotify ENOSPC has the same shape), plus
+  `uncaughtException`/`unhandledRejection` handlers that log and keep the daemon up.
+- 🕳️ **Two sessions started in the same minute collapsed into one ledger entry.** The internal id
+  was minute-granular while the entry is replaced by id, so the second session's stop overwrote the
+  first — and `total_sessions` counted both. The harness session id is used now.
+
+### Fixed — security
+
+All four start from the same place: `.wolf/config.json` and `cron-manifest.json` are COMMITTED, so
+a cloned repository carries them. The rule now is that the untrusted file may choose among trusted
+options, never define them.
+
+- 🔑 **A repository could name the secret AND the endpoint.** `api_key_env` and `llm_base_url` came
+  straight from `config.json`, and `assertSafeBaseUrl` only blocked private addresses — any public
+  host was fine. `"api_key_env": "AWS_SECRET_ACCESS_KEY"` plus an attacker's host, with a minutely
+  `ai_task` in the committed manifest, sent that secret and every listed context file to them; and
+  `openwolf init` starts the daemon under pm2 with `pm2 save`, so it survived reboots.
+  Reproduced end to end before the fix. Both values are now allowlisted: `ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY` and the two official provider hosts, extended only by
+  `OPENWOLF_EXTRA_API_KEY_ENV`, `OPENWOLF_TRUSTED_LLM_HOSTS` or `~/.openwolf/trusted-llm-hosts`.
+  Loopback endpoints stay unrestricted — a local model server is the user's own machine. The
+  embeddings client gets the same treatment.
+- 🔑 **The workspace token was not bound to a URL.** Keeping it out of `config.json` was half the
+  protection: the endpoint still came from there, so one changed line redirected a write credential
+  for the team's memory to someone else's host on the next `openwolf push`. The token file now
+  stores `{token, base_url}` and `readRemoteToken` fails closed — and loudly — on a mismatch.
+  Bare legacy token files keep working, unbound.
+- 🌐 **`dashboard.host` from `config.json` could put the daemon on 0.0.0.0.** The bind address now
+  comes only from `OPENWOLF_DASHBOARD_HOST`; a value in the committed file is ignored with a
+  warning naming the env var.
+- 🙈 **`<private>` blocks reached the dashboard in full.** Recall, MCP, the LLM cron, push and the
+  embedding index all honoured the promise; `/api/files`, `/api/native-memory/file` and the
+  watcher broadcast read the files raw. They go through `maskPrivate` now, which replaces the block
+  with a visible marker rather than deleting it silently.
+- 📦 `pnpm.overrides` pins `qs >= 6.16.0` (two advisories, reachable before the token check because
+  the auth middleware reads `req.query.token`).
+
+### Fixed — the token bill
+
+- 📉 **The report credited savings that never happened.** ~200 tokens per anatomy hit and the full
+  file size for every repeated read were booked as "avoided" — but those hints go to stderr with
+  exit 0, which the model never sees, and no read is ever blocked. On the measured project the
+  tool already reported itself at −25,501 net; the honest number is worse. New savings are booked
+  as 0 until a hint actually reaches the model or a read is actually prevented. The counters stay.
+- 📉 **`cerebrum.max_tokens` was a dead config key** — written into every generated `config.json`
+  since forever, read by nothing, while `OPENWOLF.md` told the model to read the whole file. On a
+  grown project that is ~126k tokens against a configured budget of 2,000. The availability index
+  now honours it: past the budget it stops offering "Read" and points at `recall` instead, and the
+  template says the same.
+- 📉 **`.claude/rules/openwolf.md` duplicated `OPENWOLF.md` line for line** — 12 bullets, all with
+  a counterpart, ~359 tokens in every API call. It is a five-line pointer now.
+- 📉 **The stop hook appended a near-identical "Session end" row every turn.** Its numbers are
+  cumulative for the whole session, so a real memory.md carried 232 such rows for 173 sessions, six
+  of them consecutive and differing only in the timestamp. The row is replaced in place now.
+- 📉 **The native-memory index was checked in lines, not bytes.** Claude Code truncates MEMORY.md
+  at ~24 KB, so a 175-line index of long entries loaded only partially while `doctor` reported it
+  fine — observed on a project whose own index carried a hand-written note about exactly that.
+  `doctor`, the MCP health tool and the dashboard now report the byte budget.
+
+### Changed
+
+- `use_claude_p` is gone from the template and from `init` — nothing read it, and four doc pages
+  described a `claude -p` subscription path that does not exist in the code. Those pages now
+  describe what actually happens: a direct HTTP call with the key from `api_key_env`.
+
+### Checked and NOT changed
+
+- **Command injection**: every `child_process` call uses argument arrays; the only `shell: true`
+  builds its command from a lockfile-derived runner and a fixed script name.
+- **Path traversal**: the designqc, native-memory, switch, cron-slug and context-file paths all
+  validate, and `findProjectRoot` still refuses `$HOME`.
+- **MCP server**: stdio only, four read-only tools, no caller-supplied path.
+- **Transcript parsing** is not a latency problem: 26.8 MB of JSONL in 158 ms.
+- **`readStdin` does not keep hooks alive**; every hook ends with an explicit `process.exit(0)`.
+- **The 83 duplicate ledger ids** in the field date from before the replace-by-id logic; the
+  same-minute fix above stops new ones, the old rows are history.
+- **Prompt injection through knowledge files** is real but not privileged: a collaborator who can
+  write `cerebrum.md` can also write `CLAUDE.md`. Worth a data boundary in the digest later; it is
+  not a fix that belongs in a bugfix release.
+
 ## [1.28.1] — 2026-08-31
 
 Patch: the `windows` CI job was permanently red on two test bugs in

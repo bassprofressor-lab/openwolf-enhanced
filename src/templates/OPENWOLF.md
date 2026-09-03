@@ -22,9 +22,12 @@ architecture (📁), open pendencies (⚠️), and useful commands (🔧).
 
 ## Code Generation
 
-1. Before generating code, read `.wolf/cerebrum.md` and respect every entry.
-2. Check the `## Do-Not-Repeat` section — these are past mistakes that must not recur.
-3. Follow all conventions in `## Key Learnings` and `## User Preferences`.
+1. The `## Do-Not-Repeat` entries from `.wolf/cerebrum.md` are already in your session-start
+   context. Respect them; they are past mistakes that must not recur.
+2. Before generating code, pull what is relevant with `openwolf recall <topic>` — do NOT read
+   `cerebrum.md` whole. On a grown project that file is well over 100k tokens, and reading it to
+   find three applicable lines is the single most expensive thing you can do here.
+3. Follow the conventions in `## Key Learnings` and `## User Preferences` — same route: `recall`.
 
 ## After Actions
 

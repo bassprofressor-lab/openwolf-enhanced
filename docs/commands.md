@@ -191,13 +191,13 @@ Cron Tasks
     Schedule: Sundays at 3:00 AM
     Status: enabled
     Last run: 2 days ago
-    Uses: claude -p (subscription)
+    Uses: anthropic/claude-haiku-4-5 (ANTHROPIC_API_KEY)
 
   AI suggestions (project-suggestions)
     Schedule: Mondays at 4:00 AM
     Status: enabled
     Last run: 5 days ago
-    Uses: claude -p (subscription)
+    Uses: anthropic/claude-haiku-4-5 (ANTHROPIC_API_KEY)
 ```
 
 ### `openwolf cron run <id>`

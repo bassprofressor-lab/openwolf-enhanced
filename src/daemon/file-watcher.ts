@@ -1,3 +1,4 @@
+import { maskPrivate } from "../hooks/shared.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { watch, type FSWatcher } from "chokidar";
@@ -41,13 +42,20 @@ export function startFileWatcher(
     },
   });
 
+  // chokidar emits `error` for everything except ENOENT/ENOTDIR — inotify limits (ENOSPC) being
+  // the realistic one. Without a listener that is an uncaught exception and the daemon dies.
+  watcher.on("error", (err) => {
+    logger.warn(`file watcher error: ${err instanceof Error ? err.message : String(err)}`);
+  });
+
   watcher.on("change", (filePath) => {
     const relativePath = path.relative(wolfDir, filePath as string);
     const fileName = path.basename(filePath as string);
     logger.debug(`File changed: ${relativePath}`);
 
     try {
-      const content = fs.readFileSync(filePath as string, "utf-8");
+      // Same promise as the REST reader: a watcher broadcast is "sent elsewhere" too.
+      const content = maskPrivate(fs.readFileSync(filePath as string, "utf-8"));
       broadcast({
         type: "file_changed",
         file: relativePath,

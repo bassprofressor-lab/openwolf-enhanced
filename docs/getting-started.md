@@ -126,7 +126,7 @@ openwolf cron run project-suggestions
 ```
 
 ::: warning ANTHROPIC_API_KEY conflict
-If you have `ANTHROPIC_API_KEY` set in your environment, OpenWolf automatically strips it when running AI tasks so that `claude -p` uses your subscription credentials from `~/.claude/.credentials.json` instead. This prevents "Credit balance is too low" errors when your API key has no credits but your subscription is active.
+AI tasks call the provider's HTTP API directly — a background daemon cannot drive the interactive `claude` CLI. They read the key from the environment variable named by `api_key_env` (`ANTHROPIC_API_KEY` by default) and send it, together with the task's `context_files`, to `llm_base_url`. Both values are restricted to an allowlist, because `.wolf/config.json` is committed: only `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` and the two official provider hosts are accepted unless this machine opts in via `OPENWOLF_EXTRA_API_KEY_ENV` / `OPENWOLF_TRUSTED_LLM_HOSTS` or `~/.openwolf/trusted-llm-hosts`. Point `llm_base_url` at a local model server (LM Studio, Ollama) if you want no key and no egress at all.
 :::
 
 ## Design QC

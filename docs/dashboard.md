@@ -117,7 +117,7 @@ AI-generated suggestions displayed in four cards:
 
 Includes a **Regenerate** button that triggers the `project-suggestions` cron task.
 
-Generated weekly using `claude -p` via your Claude subscription. You can trigger manually from the dashboard or via:
+Generated weekly by the daemon's AI task, using the provider configured under `openwolf.cron`. You can trigger it manually from the dashboard or via:
 
 ```bash
 openwolf cron run project-suggestions

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, tryWithLock, updateSession, sessionFileFor, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
+import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, replaceOrAppendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, tryWithLock, updateSession, sessionFileFor, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
 
 interface FileRead {
@@ -35,6 +35,10 @@ interface SessionData {
   /** Writes made through the shell (heredoc, `>`, sed -i, cp) — counted, never named. post-write
    *  never sees these: it only matches Write|Edit|MultiEdit. [bug-149] */
   bash_writes?: number;
+  /** The "Session end" row this session last wrote to memory.md. Kept so the next turn REPLACES
+   *  it instead of appending another one — the numbers are cumulative, so every turn produced a
+   *  near-identical row. */
+  memory_line?: string;
   /**
    * What this session has ALREADY contributed to ledger.lifetime.
    *
@@ -123,7 +127,14 @@ async function main(): Promise<void> {
   // session's whole turn to another.
   const sessionFile = sessionFileFor(hooksDir, hookInput.session_id);
 
-  const session = readJSON<SessionData>(sessionFile, {
+  // NORMALISE, do not assume. readJSON only applies these defaults when the file is MISSING —
+  // but post-bash, pre-write and post-read each create the file with their OWN partial shape when
+  // they run first (`{files_written:[], edit_counts:{}}`, `{}`), which happens whenever the
+  // session predates an `openwolf update` or session-start skipped its write under contention.
+  // `Object.keys(session.files_read)` then threw, main().catch() swallowed it, and the whole
+  // session produced no ledger entry, no memory.md line and no reminder — without one line of
+  // output. A real project carried such a file for days.
+  const SESSION_DEFAULTS: SessionData = {
     session_id: "",
     started: "",
     files_read: {},
@@ -134,7 +145,12 @@ async function main(): Promise<void> {
     repeated_reads_warned: 0,
     cerebrum_warnings: 0,
     stop_count: 0,
-  });
+  };
+  const stored = readJSON<Partial<SessionData>>(sessionFile, {});
+  const session: SessionData = { ...SESSION_DEFAULTS, ...stored };
+  if (!session.files_read || typeof session.files_read !== "object") session.files_read = {};
+  if (!Array.isArray(session.files_written)) session.files_written = [];
+  if (!session.edit_counts || typeof session.edit_counts !== "object") session.edit_counts = {};
 
   session.stop_count++;
 
@@ -199,7 +215,10 @@ async function main(): Promise<void> {
   const realUsage = hookInput.transcript_path ? readTranscriptUsage(hookInput.transcript_path) : null;
 
   const sessionEntry: SessionEntry = {
-    id: session.session_id,
+    // The harness session id, not the minute-granular one from session-start: two sessions started
+    // in the same minute shared an id, and this hook REPLACES by id — so the second one's stop
+    // overwrote the first one's entry while total_sessions still counted both.
+    id: hookInput.session_id || session.session_id,
     agent: detectAgent(),
     started: session.started,
     ended: new Date().toISOString(),
@@ -261,6 +280,9 @@ async function main(): Promise<void> {
   }
   // One entry per session, not per turn: the entry carries the session's cumulative state, so a
   // later stop REPLACES the earlier one instead of appending a near-duplicate under the same id.
+  // session-start writes a `{version, lifetime}` stub when the ledger is missing; without this
+  // guard every stop hook from then on died in findIndex — silently, for good.
+  if (!Array.isArray(ledger.sessions)) ledger.sessions = [];
   const existing = ledger.sessions.findIndex((s) => s.id === sessionEntry.id);
   if (existing === -1) ledger.sessions.push(sessionEntry);
   else ledger.sessions[existing] = sessionEntry;
@@ -274,12 +296,17 @@ async function main(): Promise<void> {
   const totalWritesNow = writeCount + unnamedWrites;
   const tokensNow = inputTokens + outputTokens;
 
-  // Estimate savings: anatomy hits save ~200 tokens each, repeated reads blocked save their token count
-  const savedFromAnatomy = session.anatomy_hits * 200;
-  const savedFromRepeats = Object.values(session.files_read)
-    .filter((r) => r.count > 1)
-    .reduce((sum, r) => sum + r.tokens * (r.count - 1), 0);
-  const savingsNow = savedFromAnatomy + savedFromRepeats;
+  // Savings, counted honestly.
+  //
+  // This used to credit ~200 tokens per anatomy hit and the FULL file size for every repeated read
+  // — as if both had been prevented. Neither is true: those hints go to stderr with exit 0, which
+  // the model never sees, and no read is ever blocked. A report that invents its own credit is
+  // worse than no report, so only genuinely avoided tokens are booked. `repeated_reads_warned`
+  // and `anatomy_hits` are still recorded; they are counters, not savings.
+  //
+  // What IS avoided: nothing measurable from the hooks today. The honest number is zero until a
+  // hint actually reaches the model (via additionalContext) or a read is actually prevented.
+  const savingsNow = 0;
 
   ledger.lifetime.total_reads += delta(readCount, booked.reads);
   // Unnamed writes (shell / other working dirs) count toward the lifetime total — they were real
@@ -343,6 +370,7 @@ async function main(): Promise<void> {
 
   // Write a session summary line to memory.md if there was meaningful activity
   const memoryPath = path.join(wolfDir, "memory.md");
+  let memoryLineNow = session.memory_line ?? "";
 
   // A session that wrote only through the shell, or only in another directory, still happened.
   // Without this, memory.md shows a gap exactly where the work was — which is how someone later
@@ -353,7 +381,9 @@ async function main(): Promise<void> {
         externalWrites > 0 ? `${externalWrites} outside this project root` : "",
         bashWrites > 0 ? `${bashWrites} through the shell` : "",
       ].filter(Boolean).join(", ");
-      appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${unnamedWrites} untracked writes (${via}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
+      const line = `| ${timeShort()} | Session end: ${unnamedWrites} untracked writes (${via}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`;
+      replaceOrAppendMarkdown(memoryPath, session.memory_line ?? "", line);
+      memoryLineNow = line;
     } catch { /* memory.md is a nicety, not a dependency */ }
   }
 
@@ -361,8 +391,15 @@ async function main(): Promise<void> {
     try {
       const uniqueFiles = new Set(session.files_written.map(w => path.basename(w.file)));
       const fileList = [...uniqueFiles].slice(0, 5).join(", ");
-      appendMarkdown(memoryPath, `| ${timeShort()} | Session end: ${writeCount} writes across ${uniqueFiles.size} files (${fileList}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`);
+      const line = `| ${timeShort()} | Session end: ${writeCount} writes across ${uniqueFiles.size} files (${fileList}) | ${readCount} reads | ~${inputTokens + outputTokens} tok |\n`;
+      replaceOrAppendMarkdown(memoryPath, session.memory_line ?? "", line);
+      memoryLineNow = line;
     } catch {}
+  }
+
+  // Remember the row we just wrote so the next turn replaces it instead of adding another.
+  if (memoryLineNow !== (session.memory_line ?? "")) {
+    try { updateSession<SessionData>(sessionFile, session, (t) => { t.memory_line = memoryLineNow; }); } catch {}
   }
 
   // Opportunistic self-maintenance: keep memory.md bounded even when the daemon
@@ -468,4 +505,11 @@ function checkSemanticSummaries(wolfDir: string, writeCount: number): string | n
   return `${writeCount} files were changed this session but no meaningful summary was written to memory.md. Consider recording what you did and why.`;
 }
 
-main().catch(() => process.exit(0));
+// A hook must never fail the turn — but it must not disappear either. Swallowing the error is how
+// a broken session file cost a whole session's bookkeeping without a trace.
+main().catch((err) => {
+  try {
+    process.stderr.write(`[openwolf] stop hook failed: ${err?.stack || err?.message || String(err)}\n`);
+  } catch { /* stderr gone too — nothing left to do */ }
+  process.exit(0);
+});

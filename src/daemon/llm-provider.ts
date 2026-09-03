@@ -1,4 +1,6 @@
 import * as net from "node:net";
+import * as os from "node:os";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJSON } from "../utils/fs-safe.js";
 
@@ -50,7 +52,16 @@ export function llmConfigFrom(cron: CronCfg | undefined): LlmConfig {
 
 export function resolveLlmConfig(wolfDir: string): LlmConfig {
   const cfg = readJSON<{ openwolf?: { cron?: CronCfg } }>(path.join(wolfDir, "config.json"), {});
-  return llmConfigFrom(cfg.openwolf?.cron);
+  const resolved = llmConfigFrom(cfg.openwolf?.cron);
+  // This is the one place where the COMMITTED config.json becomes a live endpoint and a live
+  // secret name. Everything downstream (cron ai_tasks, `openwolf llm`, `openwolf consolidate`)
+  // goes through here, so the two allowlists belong here and nowhere else.
+  assertTrustedLlmHost(resolved.baseUrl);
+  // The key name only matters when the key leaves this machine. A loopback endpoint is the user's
+  // own model server, so no allowlist there — otherwise LM Studio and Ollama users would need an
+  // opt-in for a secret that never goes anywhere.
+  if (!isLocalEndpoint(resolved.baseUrl)) assertAllowedApiKeyEnv(resolved.apiKeyEnv);
+  return resolved;
 }
 
 function isPrivateIpv4(host: string): boolean {
@@ -124,6 +135,58 @@ export function requiresApiKey(cfg: LlmConfig): boolean {
 // `label` names the config key in the error text. The embeddings client reuses this function, and
 // telling someone to fix "llm_base_url" when the offending value sits under
 // recall.embeddings.base_url sends them to the wrong line of config.json.
+/**
+ * Which environment variable may be read for the API key, and which host may receive it.
+ *
+ * Both values come from `.wolf/config.json`, which is COMMITTED — a cloned repo carries them. So a
+ * repo could name `AWS_SECRET_ACCESS_KEY` as its "api key" and its own server as the endpoint, and
+ * the first `openwolf init` (which starts the daemon under pm2) would ship that secret plus every
+ * context file listed in the cron manifest, once a minute, silently. Reproduced end to end.
+ *
+ * The rule is therefore: the untrusted file may CHOOSE among trusted options, never define them.
+ * Anything beyond the built-ins has to be stated outside the repository — an environment variable
+ * or a file in the user's home — which a `git clone` cannot do for you.
+ */
+const BUILTIN_KEY_ENVS = new Set(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+const BUILTIN_LLM_HOSTS = new Set(["api.anthropic.com", "api.openai.com"]);
+
+function extraFromEnv(name: string): string[] {
+  return (process.env[name] || "").split(/[,\s]+/).map((v) => v.trim()).filter(Boolean);
+}
+
+function trustedHostsFile(): string[] {
+  try {
+    const p = path.join(os.homedir(), ".openwolf", "trusted-llm-hosts");
+    return fs.readFileSync(p, "utf-8").split(/\r?\n/).map((l) => l.replace(/#.*$/, "").trim()).filter(Boolean);
+  } catch { return []; }
+}
+
+/** Throws unless `envName` is a key variable this machine has agreed to expose. */
+export function assertAllowedApiKeyEnv(envName: string): void {
+  if (BUILTIN_KEY_ENVS.has(envName)) return;
+  if (extraFromEnv("OPENWOLF_EXTRA_API_KEY_ENV").includes(envName)) return;
+  throw new Error(
+    `api_key_env "${envName}" is not allowed. .wolf/config.json is committed, so a repository must ` +
+    `not be able to pick which secret is sent. Allowed by default: ${[...BUILTIN_KEY_ENVS].join(", ")}. ` +
+    `To permit another one on this machine: OPENWOLF_EXTRA_API_KEY_ENV=${envName}`
+  );
+}
+
+/** Throws unless `baseUrl`'s host is a built-in provider, loopback, or trusted on this machine. */
+export function assertTrustedLlmHost(baseUrl: string, label = "llm_base_url"): void {
+  if (isLocalEndpoint(baseUrl)) return;   // local models are the user's own machine
+  let host: string;
+  try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { throw new Error(`invalid ${label}: ${baseUrl}`); }
+  if (BUILTIN_LLM_HOSTS.has(host)) return;
+  if (extraFromEnv("OPENWOLF_TRUSTED_LLM_HOSTS").includes(host)) return;
+  if (trustedHostsFile().includes(host)) return;
+  throw new Error(
+    `${label} points at "${host}", which this machine has not agreed to. .wolf/config.json is ` +
+    `committed, so a cloned repository must not be able to redirect your API key. To trust it: ` +
+    `add "${host}" to ~/.openwolf/trusted-llm-hosts, or set OPENWOLF_TRUSTED_LLM_HOSTS=${host}`
+  );
+}
+
 export function assertSafeBaseUrl(baseUrl: string, label = "llm_base_url"): void {
   let u: URL;
   try { u = new URL(baseUrl); } catch { throw new Error(`invalid ${label}: ${baseUrl}`); }

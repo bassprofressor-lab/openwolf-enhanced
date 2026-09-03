@@ -103,11 +103,17 @@ async function main(): Promise<void> {
     // starts must not clobber the read-modify-write.
     const ledgerPath = path.join(wolfDir, "token-ledger.json");
     tryWithLock(ledgerPath, () => {
-      const ledger = readJSON(ledgerPath, { version: 1, lifetime: { total_sessions: 0 } }) as {
+      // The full shape, including `sessions: []`. Writing the stub without it used to poison the
+      // file: the stop hook reads it (it exists now, so no default applies) and died in
+      // `ledger.sessions.findIndex` on every turn of every session until someone fixed it by hand.
+      const ledger = readJSON(ledgerPath, { version: 1, sessions: [], lifetime: { total_sessions: 0 } }) as {
         version: number;
+        sessions: unknown[];
         lifetime: { total_sessions: number };
         [key: string]: unknown;
       };
+      if (!Array.isArray(ledger.sessions)) ledger.sessions = [];
+      if (!ledger.lifetime || typeof ledger.lifetime !== "object") ledger.lifetime = { total_sessions: 0 };
       ledger.lifetime.total_sessions++;
       writeJSON(ledgerPath, ledger);
     });

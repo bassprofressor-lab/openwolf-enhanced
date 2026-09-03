@@ -346,7 +346,7 @@ function generateTemplate(destPath: string, file: string): void {
         lang: "en",
         anatomy: { auto_scan_on_init: true, rescan_interval_hours: 6, max_description_length: 100, max_files: 500, exclude_patterns: DEFAULT_ANATOMY_EXCLUDES },
         token_audit: { enabled: true, report_frequency: "weekly", waste_threshold_percent: 15, chars_per_token_code: 3.5, chars_per_token_prose: 4.0 },
-        cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, use_claude_p: true, api_key_env: null, llm_provider: "anthropic", llm_base_url: null, llm_model: null },
+        cron: { enabled: true, max_retry_attempts: 3, dead_letter_enabled: true, heartbeat_interval_minutes: 30, api_key_env: null, llm_provider: "anthropic", llm_base_url: null, llm_model: null },
         memory: { consolidation_after_days: 7, max_entries_before_consolidation: 200 },
         retention: { token_ledger_max_sessions: 200, session_io_max: 100, buglog_max_entries: 200, backups_keep: 10, memory_consolidate_after_days: 7, memory_max_bytes: 262144, daemon_log_max_bytes: 524288, proposals_keep: 20 },
         cerebrum: { max_tokens: 2000, reflection_frequency: "weekly" },

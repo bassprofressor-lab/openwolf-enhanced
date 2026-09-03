@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractDescription, capDescription } from "./description-extractor.js";
 import { readJSON } from "../utils/fs-safe.js";
-import { writeText } from "../utils/fs-safe.js";
+import { writeText, withLockOr } from "../utils/fs-safe.js";
 import { normalizePath } from "../utils/paths.js";
 import { loadIgnore, DEFAULT_ANATOMY_EXCLUDES, isPythonVenv } from "../utils/maintenance.js";
 import { extractSymbols, symbolsSupported, SYMBOL_MIN_TOKENS, type SymbolEntry } from "./symbol-extractor.js";
@@ -302,7 +302,11 @@ export function buildAnatomy(wolfDir: string, projectRoot: string): { content: s
 export function scanProject(wolfDir: string, projectRoot: string): number {
   const { content, fileCount, symbols, importance, pagerank } = buildAnatomy(wolfDir, projectRoot);
   const anatomyPath = path.join(wolfDir, "anatomy.md");
-  writeText(anatomyPath, content);
+  // Same lock the post-write hook takes. Without it the 6-hourly rescan (and `openwolf scan`)
+  // replaces the whole file while a hook is between its read and its write — the hook then puts
+  // its stale parse back and the entire scan result is gone. Exactly the lost update 1.28.0 fixed
+  // for hook-against-hook, only cron-against-hook.
+  withLockOr(anatomyPath, () => undefined, () => writeText(anatomyPath, content));
   // Sidecar: symbol-level line ranges for big files (see symbol-extractor). Written next to
   // anatomy.md; pre-read reads it to point the agent at a slice instead of the whole file.
   writeText(path.join(wolfDir, "anatomy-symbols.json"), JSON.stringify({ version: 1, files: symbols }, null, 2));
@@ -373,5 +377,5 @@ export function updateAnatomyEntry(
     misses: 0,
   });
 
-  writeText(anatomyPath, serialized);
+  withLockOr(anatomyPath, () => undefined, () => writeText(anatomyPath, serialized));
 }
