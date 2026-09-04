@@ -99,6 +99,10 @@ options, never define them.
   with a visible marker rather than deleting it silently.
 - 📦 `pnpm.overrides` pins `qs >= 6.16.0` (two advisories, reachable before the token check because
   the auth middleware reads `req.query.token`).
+  **✏️ Correction: this line was not true of the shipped tree.** The pin went into the `pnpm` field
+  of `package.json`, which pnpm 10+ no longer reads — it warns and moves on, so `qs` stayed at
+  6.15.3 and the lockfile was never touched. Reported as #3, fixed by moving the constraint into
+  the `overrides:` block of `pnpm-workspace.yaml`, which does reach the lockfile.
 
 ### Fixed — the token bill
 

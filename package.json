@@ -96,10 +96,5 @@
     "NOTICE",
     "CHANGELOG.md",
     "README.md"
-  ],
-  "pnpm": {
-    "overrides": {
-      "qs": ">=6.16.0"
-    }
-  }
+  ]
 }
