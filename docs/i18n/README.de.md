@@ -26,6 +26,26 @@
 
 ---
 
+> ## Wird nicht mehr weiterentwickelt
+>
+> Die Entwicklung an diesem Fork ist eingestellt, weitere Veröffentlichungen wird es nicht
+> geben. `1.29.0` ist die letzte Fassung, sie funktioniert weiter, es wird nichts
+> weggenommen.
+>
+> **Das Repository bleibt öffentlich und wird archiviert, nicht gelöscht.** Das Projekt
+> steht unter AGPL-3.0, der Quelltext muss also allen verfügbar bleiben, die die Software
+> erhalten haben. Archivieren hält ihn lesbar, Löschen nicht.
+>
+> Der Autor arbeitet inzwischen an einem anderen Werkzeug, von Grund auf neu geschrieben
+> und noch nicht veröffentlicht. Es ist ein eigenständiges Werk: es teilt keinen Quelltext
+> mit diesem Projekt oder dessen Ursprung und trägt eine eigene Lizenz. Es ist keine
+> Fortsetzung dieses Projekts, und nichts von hier geht darin auf.
+>
+> Wer es weiterführen möchte, forkt es. Die AGPL gibt dieses Recht, und der Fix aus `#3`
+> lohnt den Weg stromaufwärts.
+
+---
+
 > **Dies ist ein erweiterter Fork von [OpenWolf](https://github.com/cytostack/openwolf)** von Cytostack Pvt Ltd.
 > Das Original ist eine großartige Idee; in langlebigen Projekten konnte sein `.wolf/`-Verzeichnis jedoch
 > unbegrenzt wachsen (mehrere Megabyte große Token-Ledger, ein ständig wachsendes Bug-Log, vollständige
