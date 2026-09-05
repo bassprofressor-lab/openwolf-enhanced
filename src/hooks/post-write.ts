@@ -6,6 +6,7 @@ import {
   getRetention, loadIgnore, readBugLog, isSecretFile, updateSession, isOutsideProject, tryWithLock, sessionFileFor,
   capBuglogWithArchive
 } from "./shared.js";
+import { standDown } from "./engine.js";
 
 interface SessionData {
   files_written: Array<{ file: string; action: string; tokens: number; at: string }>;
@@ -34,6 +35,9 @@ interface BugLog {
 }
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");

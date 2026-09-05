@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readStdin, timestamp, sessionFileFor } from "./shared.js";
+import { standDown } from "./engine.js";
 
 // PreCompact hook — compaction survival.
 //
@@ -10,6 +11,9 @@ import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readStdin, timestamp, s
 // modified) via additionalContext. That pair is the survival mechanism.
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");

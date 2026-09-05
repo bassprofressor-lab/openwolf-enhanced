@@ -38,6 +38,46 @@ All hooks are **pure Node.js file I/O**. No network calls, no AI, no external de
 └──────────────┘      └──────────┘
 ```
 
+## Engine switch — which system owns a session
+
+OpenWolf and cfetch both register hooks in the same `.claude/settings.json`, and both inject a
+resume block at SessionStart. Left alone they both run: two protocols in context every session,
+and two memories that drift apart from the moment they diverge.
+
+`OPENWOLF_ENGINE` decides who owns a session:
+
+```
+claude                          # OpenWolf (the default)
+OPENWOLF_ENGINE=cfetch claude   # cfetch owns it; OpenWolf's hooks stand down
+```
+
+Accepted values are `wolf` (also `openwolf`, `openwolf-enhanced`) and `cfetch`, case and
+whitespace insensitive. Anything else falls back to OpenWolf **and says so** in the session —
+failing towards the system that is definitely installed keeps a typo from silently disabling the
+memory.
+
+What "stand down" means concretely:
+
+- Every hook checks the switch **before it touches the disk**, so a handed-over session does not
+  get a `.wolf/` created behind the other system's back.
+- The hooks produce no output and write nothing. `.wolf/` is untouched for the whole session.
+- `session-start.js` is the one exception: it injects a short notice naming the active engine.
+  A silent stand-down looks exactly like a broken hook, and the model would otherwise have no way
+  to tell which protocol applies.
+- If `cfetch` is selected but no `cfetch` binary is on PATH, the notice says so loudly: nothing
+  took over, so the session has no knowledge system at all.
+
+The choice lives **only** in the environment, never in the project. A stored setting drifts out of
+sync with what is actually installed, and two sessions running side by side in one project would
+fight over it. `.wolf/ENGINE.md` — imported by `CLAUDE.md` ahead of `OPENWOLF.md` — states the
+rule for the model, not the current state, for the same reason.
+
+`openwolf status` prints the engine a session started right now would use.
+
+**Known limit:** `CLAUDE.md` imports `.wolf/OPENWOLF.md` statically, so the OpenWolf protocol still
+occupies context during a cfetch session. `ENGINE.md` and the hook notice both say it does not
+apply. Making the import conditional would mean moving the protocol into the hook injection.
+
 ## `session-start.js`
 
 **Fires:** When a Claude Code session begins.

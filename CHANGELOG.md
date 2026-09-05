@@ -6,6 +6,94 @@ This is a fork of [OpenWolf](https://github.com/cytostack/openwolf) by Cytostack
 Pvt Ltd. Versions ≤ 1.0.4 refer to the upstream project; `1.1.0` is the first
 release of this fork.
 
+## [1.30.0] — 2026-09-03
+
+**Engine switch: one knowledge system per session.** OpenWolf and cfetch both hook into the same
+`.claude/settings.json` and both inject a resume block at SessionStart. Running both means paying
+for two protocols in every session and writing two memories that drift apart from the moment they
+diverge — which is the worst possible state for tools whose whole job is remembering. A session
+now belongs to exactly one of them.
+
+### Added
+
+- 🎚️ **`OPENWOLF_ENGINE` decides who owns a session.** Unset or `wolf` (also `openwolf`,
+  `openwolf-enhanced`) keeps OpenWolf; `cfetch` hands the session over and every OpenWolf hook
+  stands down without writing anything. The choice is per session and lives only in the
+  environment:
+
+  ```
+  claude                          # OpenWolf (default)
+  OPENWOLF_ENGINE=cfetch claude   # cfetch owns the session
+  ```
+
+  Deliberately no stored project setting: a saved choice drifts out of sync with what is actually
+  installed, and two sessions running side by side in one project would fight over it. The
+  environment is read fresh on every hook invocation and cannot drift.
+
+- 🔀 **`.wolf/ENGINE.md`**, imported by `CLAUDE.md` ahead of `OPENWOLF.md`, states the rule —
+  never the current state. A switch file rewritten at every session start would be wrong for a
+  second session running beside it. `openwolf update` adds the import line to projects that
+  already had an OpenWolf block, in place and idempotently.
+
+- 📣 **Standing down is announced, not silent.** At SessionStart the hook injects which engine is
+  active and that `.wolf/` is not being updated. A silent stand-down is indistinguishable from a
+  broken hook, and the model would have no way to tell which protocol applies.
+
+- ⚠️ **A hand-off to nothing is reported.** If `OPENWOLF_ENGINE=cfetch` is set but no `cfetch`
+  binary is on PATH, the session has NO knowledge system at all — no resume context, nothing being
+  written. That case now says so loudly instead of looking like a quiet, working hand-off.
+
+- 🩹 **An unrecognised value falls back to OpenWolf and says so.** Failing towards the system that
+  is definitely installed keeps a typo (`OPENWOLF_ENGINE=cfech`) from silently disabling the
+  memory; the warning rides along with the resume digest.
+
+- `openwolf status` reports the engine a session started right now would use.
+
+### Fixed
+
+- 📦 **The 1.29.0 `qs` pin never applied (#3).** It was written to the `pnpm` field of
+  `package.json`; pnpm 10+ ignores that field and says so (`The "pnpm" field in package.json is no
+  longer read by pnpm … ignored: "pnpm.overrides"`). The pin therefore did nothing: a clean install
+  still resolved `qs@6.15.3` and the 1.29.0 commit left `pnpm-lock.yaml` untouched. The working
+  mechanism was sitting next to it — `pnpm-workspace.yaml` has carried an `overrides:` block since
+  1.6.1 and it does reach the lockfile — so the existing entry is tightened rather than a second
+  mechanism added:
+
+  ```yaml
+  'qs@<6.16.0': '>=6.16.0'     # was: 'qs@>=6.11.1 <=6.15.1': '>=6.15.2'
+  ```
+
+  `pnpm install` now records it (`pnpm why qs` → `6.16.0`), and the `pnpm` field is gone from
+  `package.json`. The two advisories are real and both fixed in 6.16.0: GHSA-4mjr-xmp4-gh2g (DoS
+  via attacker-controlled `isBuffer`) and GHSA-x5fp-wj9c-mxmx (array-limit bypass via bracket-key
+  comma parsing). OSV reports nothing against 6.16.0.
+
+  **Scope, stated plainly, because the 1.29.0 line read stronger than it was:** `overrides` are
+  applied by the root project only. This protects *this repository's* install and CI, not someone
+  who runs `npm i openwolf-enhanced`. Those users are fine regardless — `body-parser@2.3.0` asks
+  for `qs: ^6.15.2` and `express@5.2.1` for `^6.14.0`, and a fresh install of `express@^5.2.1` in
+  an empty directory resolves to `qs@6.16.0` (measured, not assumed). What was stale was this
+  repo's lockfile, written before 6.16.0 was published on 2026-08-29.
+
+### Notes
+
+- The guard runs before any disk access in every hook, so a handed-over session does not get a
+  `.wolf/` created behind the other system's back. There is a test asserting that order.
+- `.wolf/OPENWOLF.md` is still imported statically by `CLAUDE.md` and therefore still occupies
+  context in a cfetch session; `ENGINE.md` and the hook notice both say it does not apply. Making
+  that import conditional would mean moving the protocol into the hook injection — a bigger change
+  than this release wanted to make.
+- 12 new tests. The behavioural ones carry a control run proving the assertion can fail: an
+  earlier cut asserted "no `.wolf/` was created", which passes with or without the guard, because
+  `ensureWolfDir()` never creates anything — it exits when `.wolf/` is missing. `pre-write` and
+  `post-bash` showed no observable effect under any input tried, so they are covered by a static
+  guard test instead of a behavioural one that would only look like it measured something.
+  Calibrated by removing the guard from two hooks and confirming the suite goes red.
+- Verified end to end in a throwaway project with real `claude -p` sessions: the default run wrote
+  `memory.md`, the session state file and the token ledger; the `OPENWOLF_ENGINE=cfetch` run
+  touched nothing under `.wolf/` and the model correctly reported cfetch as the owner, including
+  the missing-binary warning.
+
 ## [1.29.0] — 2026-09-03
 
 A four-model audit (bugs, security, token cost, product) run against this repo AND against a real

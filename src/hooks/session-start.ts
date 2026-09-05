@@ -2,8 +2,23 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getWolfDir, ensureWolfDir, writeJSON, appendMarkdown, readJSON, timestamp, timeShort, buildResumeDigest, readStdin, withLock, tryWithLock, sessionFileFor, pruneOldSessionFiles, SESSION_SUMMARY_SCAFFOLD, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
+import { resolveEngine, cfetchOnPath, standDownNotice, unrecognizedWarning } from "./engine.js";
 
 async function main(): Promise<void> {
+  // Engine switch, before anything touches the disk. When another system owns this session we
+  // announce the hand-off and leave — silently standing down would look exactly like a broken
+  // hook, and the model would have no way to tell which protocol it is supposed to follow.
+  const choice = resolveEngine();
+  if (choice.engine !== "wolf") {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: standDownNotice(choice, cfetchOnPath()),
+      },
+    }));
+    process.exit(0);
+  }
+
   ensureWolfDir();
   const wolfDir = getWolfDir();
 
@@ -148,6 +163,13 @@ async function main(): Promise<void> {
           const note = `## Session in progress (context was ${how})\nFiles already modified this session: ${files.slice(-15).join(", ")}. Don't re-read them wholesale — check .wolf/memory.md for what was done.`;
           digest = digest ? `${note}\n\n${digest}` : note;
         }
+      }
+
+      // A value we could not map means the user aimed at something and missed. OpenWolf runs
+      // (the safe default), but saying so is the difference between a fallback and a surprise.
+      if (choice.unrecognized) {
+        const warning = unrecognizedWarning(choice);
+        digest = digest ? `${warning}\n\n${digest}` : warning;
       }
 
       if (digest) {

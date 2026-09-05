@@ -4,6 +4,7 @@ import {
   getWolfDir, ensureWolfDir, readJSON, updateSession, readMarkdown, parseAnatomy,
   estimateTokens, readStdin, normalizePath, loadIgnore, isSecretFile, matchesAnatomyEntry, relativeToProject, sessionFileFor
 } from "./shared.js";
+import { standDown } from "./engine.js";
 
 const SESSION_FALLBACK: SessionData = {
   session_id: "", files_read: {}, anatomy_hits: 0, anatomy_misses: 0, repeated_reads_warned: 0,
@@ -19,6 +20,9 @@ interface SessionData {
 }
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");

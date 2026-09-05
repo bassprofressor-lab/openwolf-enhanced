@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getWolfDir, ensureWolfDir, readJSON, writeJSON, appendMarkdown, replaceOrAppendMarkdown, timeShort, getRetention, compactMemoryIfLarge, countSemanticEntries, withLock, tryWithLock, updateSession, sessionFileFor, readStdin, readTranscriptUsage, detectAgent, type RealUsage, bookInjection } from "./shared.js";
 import { estimateTokens, getTokenRatios } from "./token-estimator.js";
+import { standDown } from "./engine.js";
 
 interface FileRead {
   count: number;
@@ -113,6 +114,9 @@ interface SessionEntry {
 }
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
   const hooksDir = path.join(wolfDir, "hooks");

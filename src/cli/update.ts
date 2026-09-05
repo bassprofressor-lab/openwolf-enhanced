@@ -35,7 +35,7 @@ function getVersion(): string {
 
 // Files that are safe to overwrite (protocol docs only — NOT config.json, which is
 // deep-merged below so user edits and tuned retention limits survive updates).
-const ALWAYS_OVERWRITE = ["OPENWOLF.md", "reframe-frameworks.md"];
+const ALWAYS_OVERWRITE = ["OPENWOLF.md", "ENGINE.md", "reframe-frameworks.md"];
 
 // Deep-merge template defaults UNDER existing user config: user values win, and any
 // new keys introduced by a newer OpenWolf version (e.g. openwolf.retention) are added.
@@ -291,6 +291,12 @@ async function updateProject(
       if (!existing.includes("OpenWolf")) {
         writeText(claudeMdPath, snippetContent + "\n\n" + existing);
         console.log(`    ✓ CLAUDE.md updated`);
+      } else if (!existing.includes(".wolf/ENGINE.md") && existing.includes("@.wolf/OPENWOLF.md")) {
+        // A project set up before the engine switch existed already says "OpenWolf", so the
+        // branch above never touches it — and would leave it importing the protocol with no
+        // statement of WHEN that protocol applies. Add the one missing import line in place.
+        writeText(claudeMdPath, existing.replace("@.wolf/OPENWOLF.md", "@.wolf/ENGINE.md\n@.wolf/OPENWOLF.md"));
+        console.log(`    ✓ CLAUDE.md: engine switch imported (@.wolf/ENGINE.md)`);
       }
     }
 

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { findProjectRoot } from "../scanner/project-root.js";
 import { readJSON, readText } from "../utils/fs-safe.js";
 import { getRetention, footprint, humanBytes } from "../utils/maintenance.js";
+import { resolveEngine, ENGINE_ENV, cfetchOnPath } from "../hooks/engine.js";
 
 export async function statusCommand(): Promise<void> {
   const projectRoot = findProjectRoot();
@@ -49,6 +50,19 @@ export async function statusCommand(): Promise<void> {
     console.log(`  ✓ All ${hookFiles.length} hook scripts present`);
   } else {
     console.log(`  ✗ Missing ${hooksMissing} hook scripts`);
+  }
+
+  // Which knowledge system owns a session started right now. Reported because the switch is
+  // invisible otherwise: the variable lives in the environment, not in the project.
+  const choice = resolveEngine();
+  if (choice.unrecognized) {
+    console.log(`  ⚠ ${ENGINE_ENV}="${choice.raw}" not recognised — sessions run on OpenWolf (default)`);
+  } else if (choice.engine === "wolf") {
+    console.log(`  ✓ Active engine: OpenWolf${choice.raw ? ` (${ENGINE_ENV}=${choice.raw})` : " (default)"}`);
+  } else {
+    const present = cfetchOnPath();
+    console.log(`  ${present ? "✓" : "⚠"} Active engine: ${choice.engine} — OpenWolf hooks stand down` +
+      (present ? "" : ` (no \`${choice.engine}\` on PATH: no system would be active)`));
   }
 
   // Claude settings check

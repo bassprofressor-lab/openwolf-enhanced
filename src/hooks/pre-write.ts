@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getWolfDir, ensureWolfDir, readJSON, writeJSON, readMarkdown, readStdin, readBugLog, withLock, tryWithLock, sessionFileFor, extractMarkdownSection} from "./shared.js";
+import { standDown } from "./engine.js";
 
 interface BugEntry {
   id: string;
@@ -17,6 +18,9 @@ interface BugLog {
 }
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
 

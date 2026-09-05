@@ -36,6 +36,7 @@ export const HOOK_FILES = [
   "stop.js",
   "precompact.js",
   "shared.js",
+  "engine.js",
 ];
 
 /** Resolve the compiled-hooks directory, most-preferred first. __dirname is `dist/src/utils`. */

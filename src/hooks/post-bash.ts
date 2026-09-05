@@ -4,6 +4,7 @@ import {
   getWolfDir, ensureWolfDir, getCaptureConfig, redactSecrets, isFileWritingCommand,
   isNotableCommand, tailWithinBytes, timeShort, readStdin, withLock, tryWithLock, readJSON, writeJSON, sessionFileFor,
 } from "./shared.js";
+import { standDown } from "./engine.js";
 
 // PostToolUse:Bash — two jobs.
 //
@@ -59,6 +60,9 @@ function classifyOutcome(resp: unknown): "ok" | "error" | "unknown" {
 }
 
 async function main(): Promise<void> {
+  // Stand down when another engine owns this session (OPENWOLF_ENGINE). Before any
+  // .wolf/ work: a cfetch session must not get a knowledge base created behind its back.
+  if (standDown()) return;
   ensureWolfDir();
   const wolfDir = getWolfDir();
 
